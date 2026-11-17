@@ -266,6 +266,8 @@ function main(args) {
 	else {
 		if (requireDeny || verbose) process.stderr.write("no deny-list found, scan not run\n");
 		if (requireDeny) return 1;
+		// A release scan must not give false assurance: say so in the full-scan modes, stay silent for the hooks.
+		if (!verbose && (argv[0] === "--all" || argv[0] === "--history")) process.stderr.write("note: no deny-list found, so only the built-in patterns were checked\n");
 	}
 	const mode = argv[0] || "--staged";
 	if (mode === "--staged") {
