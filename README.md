@@ -329,7 +329,7 @@ To test one feature, name it: `npm run selftest -- timeline` (or several: `npm r
 
 After changing `node-pty` or Electron, rebuild the native module: `npx electron-rebuild -f -w node-pty` (not on Windows, where `node-pty` uses prebuilt binaries).
 
-To build the Windows installer, run `npm run dist:win`. It writes `dist\Pi-Crust-Setup-<version>.exe` (see [SETUP.md](SETUP.md#install-as-an-app)). On a Mac, `npm run dist:mac` writes `dist/Pi Crust-<version>-<arch>.dmg` (see [SETUP.md](SETUP.md#install-as-an-app-macos)).
+To build the Windows installer, run `npm run dist:win`. It writes `dist\Pi-Crust-Setup-<version>.exe` (see [SETUP.md](SETUP.md#install-as-an-app)). The macOS build is manual and not part of releases: releases (and their CI builds) are Windows only. On a Mac, `npm run dist:mac` writes `dist/Pi Crust-<version>-<arch>.dmg` (see [SETUP.md](SETUP.md#install-as-an-app-macos)).
 
 ### Files
 

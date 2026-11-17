@@ -6,10 +6,13 @@ Only two things are ever pushed to the public repo: `main` and release tags. No 
 
 ## One-time setup (secrets and rules)
 
-Secrets live in the repo settings: Settings, Secrets and variables, Actions, New repository secret. Never put a value in a file, an issue or a chat. Use the names below exactly.
+Never put a secret value in a file, an issue or a chat. Use the names below exactly. Where each one lives:
+
+- `LEAK_DENYLIST` is a repository secret: Settings, Secrets and variables, Actions, New repository secret.
+- The seven `AZURE_*` signing secrets are secrets of the protected environment `release`: Settings, Environments, New environment, name it `release`, tick Required reviewers and add yourself, then add them under Environment secrets. The release job runs in that environment, so every release run waits for your approval (an Approve button in the run) before it builds or can see the Azure secrets.
 
 1. `LEAK_DENYLIST` (required). The list of words that must never appear in the repo. One rule per line, `#` for comments. Copy it from your local `.leak-denylist` file (that file stays on your computer; git ignores it). Without this secret the scan fails on purpose.
-2. Signing secrets (optional until Microsoft approves you). Set all seven or none. If only some are set, the release run fails.
+2. Signing secrets (optional until Microsoft approves you), in the `release` environment. Set all seven or none. If only some are set, the release run fails.
    - `AZURE_TENANT_ID`
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
@@ -35,7 +38,7 @@ Without the signing secrets the build still works, but the installer is NOT sign
    git push origin vX.Y.Z
    ```
    For a trial run use a pre-release version, for example `0.3.0-rc.1` in `package.json` and the tag `v0.3.0-rc.1`.
-5. Open the Actions tab and watch the Release run. It checks that the tag matches `package.json` and that the commit is on `main`, scans for leaks, builds the installer, and creates a draft. If it fails, read the red step. Nothing is published when it fails.
+5. Open the Actions tab and watch the Release run. It checks that the tag matches `package.json` and that the commit is on `main` and scans for leaks. Then it stops and waits for your approval: open the run, press Review deployments, tick `release` and Approve. After that it builds the installer and creates a draft. If it fails, read the red step. Nothing is published when it fails.
 6. Open the draft (Releases page, the draft at the top). Check:
    - These four files are attached: `Pi-Crust-Setup-X.Y.Z.exe`, `Pi-Crust-Setup-X.Y.Z.exe.blockmap`, `latest.yml`, `SHA256SUMS.txt`.
    - The notes do not start with UNSIGNED BUILD, unless you want an unsigned release. If they do and you publish anyway, delete that line first.
@@ -51,7 +54,8 @@ Without the signing secrets the build still works, but the installer is NOT sign
 
 ## Notes
 
-- The trial run: the first time, make a pre-release tag (`-rc.1`) and follow the steps above. Delete the draft and its tag afterwards.
-- Pull requests from forks cannot see secrets. The leak scan is skipped there with a notice, and runs when you merge to `main`. Do not merge a fork PR without reading it.
+- The trial run: the first time, make a pre-release tag (`-rc.1`) and follow the steps above. Delete the draft and its tag afterwards. If a tag rule protects `v*` tags (step 3 above), GitHub refuses to delete the trial tag: remove it from the Releases page or temporarily lift the rule in Settings, Rules, then run `git push origin --delete vX.Y.Z-rc.1` (and `git tag -d vX.Y.Z-rc.1` locally).
+- Pull requests from forks cannot see secrets. The built-in secret patterns still run there, but the word list does not (the summary says so), and the full scan runs when you merge to `main`. Dependabot pull requests get the same treatment. Do not merge a fork PR without reading it.
+- Each Release run waits for your approval in the `release` environment. The macOS build is manual and not part of releases.
 - The Release run needs the `LEAK_DENYLIST` secret every time. If it is missing, the run fails before it builds.
 - Names of secrets are listed above. The values are only in the GitHub secrets page and, for the deny-list, your local file.
