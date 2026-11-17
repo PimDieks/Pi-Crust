@@ -5,13 +5,39 @@
 //   node scripts/check-secrets.js --push            reads git's pre-push lines from stdin
 //   node scripts/check-secrets.js --range A..B      commits in a range
 //   node scripts/check-secrets.js --all             every tracked file as it is now
-//   node scripts/check-secrets.js --history         every commit on every branch
+//   node scripts/check-secrets.js --history         every commit on every branch (added lines, messages, author names and emails)
+// Options (any position):
+//   --denylist FILE      words or regexes that must never appear (one per line, case-insensitive, # for comments).
+//                        Default: .leak-denylist in the repo root (gitignored, never committed). Hits print file, line and
+//                        rule number only, never the word. Binary files are skipped and counted.
+//   --require-denylist   exit 1 when there is no deny-list (use in CI). Without it a missing list only prints a notice.
+//   --root DIR           scan the repo at DIR instead of the current one.
 // It looks at added lines only and at file names. A line that is a known false positive can carry the comment
 // `secret-check: allow`. Exit code 1 when something is found.
 "use strict";
 
 const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
+
+// --- Deny-list (words that must stay out of this repo; the list itself is a local, untracked file) -----------------
+
+let ROOT = null; // set by --root
+let DENY = []; // [{ n, re }]
+const skipped = { binary: 0, scanned: 0 };
+
+function loadDenyList(file) {
+	const rules = [];
+	fs.readFileSync(file, "utf8").split(/\r?\n/).forEach((raw) => {
+		const t = raw.trim();
+		if (!t || t.startsWith("#")) return;
+		rules.push({ n: rules.length + 1, re: new RegExp(t, "i") });
+	});
+	return rules;
+}
+function denyHits(text) {
+	return DENY.filter((r) => r.re.test(text)).map((r) => ({ why: `deny-list rule #${r.n}`, sample: "(hidden)" }));
+}
 
 // --- Rules ------------------------------------------------------------------------------------------------------
 
@@ -67,9 +93,9 @@ function mask(s) {
 
 // One added line (of `file`, when known) -> findings.
 function scanLine(line, file = "") {
-	if (ALLOW_COMMENT.test(line)) return [];
+	const found = denyHits(line); // the deny-list ignores `secret-check: allow`
+	if (ALLOW_COMMENT.test(line)) return found;
 	const inTest = isTestFile(file);
-	const found = [];
 	for (const p of PATTERNS) {
 		if (p.generic && inTest) continue;
 		const m = p.re.exec(line);
@@ -88,6 +114,8 @@ function scanLine(line, file = "") {
 function scanFileName(file) {
 	const f = file.split(path.sep).join("/");
 	for (const r of FORBIDDEN_FILES) if (r.re.test(f) && !(r.allow && r.allow.test(f))) return r.why;
+	const d = denyHits(f);
+	if (d.length) return `${d[0].why} (file name)`;
 	return null;
 }
 
@@ -121,7 +149,7 @@ function scanDiff(diff, where = "") {
 
 // --- git ------------------------------------------------------------------------------------------------------
 
-const git = (args, input) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 512e6, input, stdio: ["pipe", "pipe", "pipe"] });
+const git = (args, input) => execFileSync("git", ROOT ? ["-C", ROOT, ...args] : args, { encoding: "utf8", maxBuffer: 512e6, input, stdio: ["pipe", "pipe", "pipe"] });
 const ZERO = /^0+$/;
 const DIFF = ["--no-color", "--no-ext-diff", "-U0", "--find-renames"];
 
@@ -133,6 +161,12 @@ function scanCommits(shas) {
 	for (const sha of shas) {
 		const out = git(["show", ...DIFF, "--diff-filter=ACMR", "--format=", "-m", "--first-parent", sha]);
 		findings.push(...scanDiff(out, sha.slice(0, 8)));
+		if (DENY.length) {
+			const meta = git(["show", "--no-patch", "--format=%an <%ae>%n%cn <%ce>%n%B", sha]).split("\n");
+			meta.forEach((l, i) => {
+				for (const f of denyHits(l)) findings.push({ file: i < 2 ? "(author/committer)" : "(commit message)", line: i < 2 ? 0 : i - 1, ...f, where: sha.slice(0, 8) });
+			});
+		}
 	}
 	return findings;
 }
@@ -154,6 +188,9 @@ function scanPush(stdin) {
 function scanAll() {
 	const findings = [];
 	const files = git(["ls-files", "-z"]).split("\0").filter(Boolean);
+	const eol = git(["ls-files", "--eol"]).split("\n").filter(Boolean);
+	skipped.binary = eol.filter((l) => /^i\/-text/.test(l)).length;
+	skipped.scanned = files.length - skipped.binary;
 	for (const file of files) {
 		const why = scanFileName(file);
 		if (why) findings.push({ file, line: 0, why, sample: "file name", where: "tracked" });
@@ -165,7 +202,7 @@ function scanAll() {
 			return "";
 		}
 	})();
-	for (const row of grep.split("\n")) {
+	for (const row of grep.split(/\r?\n/)) {
 		const m = /^(.*?):(\d+):(.*)$/.exec(row);
 		if (!m) continue;
 		for (const f of scanLine(m[3], m[1])) findings.push({ file: m[1], line: Number(m[2]), ...f, where: "tracked" });
@@ -188,7 +225,30 @@ function report(findings, context) {
 	return 1;
 }
 
-function main(argv) {
+function main(args) {
+	const argv = [];
+	let denyFile = null;
+	let requireDeny = false;
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--denylist") denyFile = args[++i];
+		else if (args[i] === "--root") ROOT = path.resolve(args[++i]);
+		else if (args[i] === "--require-denylist") requireDeny = true;
+		else argv.push(args[i]);
+	}
+	if (!denyFile) {
+		const top = ROOT || git(["rev-parse", "--show-toplevel"]).trim();
+		const def = path.join(top, ".leak-denylist");
+		if (fs.existsSync(def)) denyFile = def;
+	}
+	if (denyFile && !fs.existsSync(denyFile)) {
+		process.stderr.write(`Deny-list file not found: ${denyFile}\n`);
+		return 1;
+	}
+	if (denyFile) DENY = loadDenyList(denyFile);
+	else {
+		process.stderr.write("no deny-list found, scan not run\n");
+		if (requireDeny) return 1;
+	}
 	const mode = argv[0] || "--staged";
 	if (mode === "--staged") return report(scanStaged(), "the staged changes");
 	if (mode === "--push") {
@@ -196,7 +256,11 @@ function main(argv) {
 		return report(scanPush(stdin), "this push");
 	}
 	if (mode === "--range") return report(scanCommits(commitsInRange([argv[1]])), argv[1]);
-	if (mode === "--all") return report(scanAll(), "the tracked files");
+	if (mode === "--all") {
+		const code = report(scanAll(), "the tracked files");
+		process.stderr.write(`Scanned ${skipped.scanned} text files, skipped ${skipped.binary} binary files${DENY.length ? `, ${DENY.length} deny-list rules` : ""}.\n`);
+		return code;
+	}
 	if (mode === "--history") return report(scanCommits(commitsInRange(["--all"])), "the history");
 	process.stderr.write(`Unknown option ${mode}. Use --staged, --push, --range A..B, --all or --history.\n`);
 	return 2;
@@ -211,4 +275,4 @@ if (require.main === module) {
 	}
 }
 
-module.exports = { scanLine, scanFileName, scanDiff, isTestFile };
+module.exports = { loadDenyList, scanLine, scanFileName, scanDiff, isTestFile };
