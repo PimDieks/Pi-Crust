@@ -10,7 +10,8 @@
 //   --denylist FILE      words or regexes that must never appear (one per line, case-insensitive, # for comments).
 //                        Default: .leak-denylist in the repo root (gitignored, never committed). Hits print file, line and
 //                        rule number only, never the word. Binary files are skipped and counted.
-//   --require-denylist   exit 1 when there is no deny-list (use in CI). Without it a missing list only prints a notice.
+//   --require-denylist   exit 1 when there is no deny-list (use in CI). Without it a missing default list is silent (--verbose mentions it).
+//   --verbose            also say when no deny-list was found.
 //   --root DIR           scan the repo at DIR instead of the current one.
 // It looks at added lines only and at file names. A line that is a known false positive can carry the comment
 // `secret-check: allow`. Exit code 1 when something is found.
@@ -25,6 +26,7 @@ const path = require("node:path");
 let ROOT = null; // set by --root
 let DENY = []; // [{ n, re }]
 const skipped = { binary: 0, scanned: 0 };
+let verbose = false;
 
 function loadDenyList(file) {
 	const rules = [];
@@ -153,13 +155,20 @@ const git = (args, input) => execFileSync("git", ROOT ? ["-C", ROOT, ...args] : 
 const ZERO = /^0+$/;
 const DIFF = ["--no-color", "--no-ext-diff", "-U0", "--find-renames"];
 
+// Binary files show up in a diff as "Binary files ... differ" (no added lines) and are not scanned. Count them.
+function countBinary(diff) {
+	skipped.binary += diff.split(/\r?\n/).filter((l) => /^Binary files .* differ$/.test(l) || l === "GIT binary patch").length;
+}
 function scanStaged() {
-	return scanDiff(git(["diff", "--cached", ...DIFF, "--diff-filter=ACMR"]), "staged");
+	const diff = git(["diff", "--cached", ...DIFF, "--diff-filter=ACMR"]);
+	countBinary(diff);
+	return scanDiff(diff, "staged");
 }
 function scanCommits(shas) {
 	const findings = [];
 	for (const sha of shas) {
 		const out = git(["show", ...DIFF, "--diff-filter=ACMR", "--format=", "-m", "--first-parent", sha]);
+		countBinary(out);
 		findings.push(...scanDiff(out, sha.slice(0, 8)));
 		if (DENY.length) {
 			const meta = git(["show", "--no-patch", "--format=%an <%ae>%n%cn <%ce>%n%B", sha]).split("\n");
@@ -225,6 +234,14 @@ function report(findings, context) {
 	return 1;
 }
 
+const summary = () => {
+	const parts = [];
+	if (skipped.scanned) parts.push(`scanned ${skipped.scanned} text files`);
+	parts.push(`skipped ${skipped.binary} binary file${skipped.binary === 1 ? "" : "s"}`);
+	if (DENY.length) parts.push(`${DENY.length} deny-list rules`);
+	process.stderr.write(parts.join(", ").replace(/^./, (c) => c.toUpperCase()) + ".\n");
+};
+
 function main(args) {
 	const argv = [];
 	let denyFile = null;
@@ -233,6 +250,7 @@ function main(args) {
 		if (args[i] === "--denylist") denyFile = args[++i];
 		else if (args[i] === "--root") ROOT = path.resolve(args[++i]);
 		else if (args[i] === "--require-denylist") requireDeny = true;
+		else if (args[i] === "--verbose") verbose = true;
 		else argv.push(args[i]);
 	}
 	if (!denyFile) {
@@ -246,22 +264,36 @@ function main(args) {
 	}
 	if (denyFile) DENY = loadDenyList(denyFile);
 	else {
-		process.stderr.write("no deny-list found, scan not run\n");
+		if (requireDeny || verbose) process.stderr.write("no deny-list found, scan not run\n");
 		if (requireDeny) return 1;
 	}
 	const mode = argv[0] || "--staged";
-	if (mode === "--staged") return report(scanStaged(), "the staged changes");
+	if (mode === "--staged") {
+		const code = report(scanStaged(), "the staged changes");
+		if (skipped.binary) summary();
+		return code;
+	}
 	if (mode === "--push") {
 		const stdin = require("node:fs").readFileSync(0, "utf8");
-		return report(scanPush(stdin), "this push");
+		const code = report(scanPush(stdin), "this push");
+		if (skipped.binary) summary();
+		return code;
 	}
-	if (mode === "--range") return report(scanCommits(commitsInRange([argv[1]])), argv[1]);
+	if (mode === "--range") {
+		const code = report(scanCommits(commitsInRange([argv[1]])), argv[1]);
+		if (skipped.binary) summary();
+		return code;
+	}
 	if (mode === "--all") {
 		const code = report(scanAll(), "the tracked files");
 		process.stderr.write(`Scanned ${skipped.scanned} text files, skipped ${skipped.binary} binary files${DENY.length ? `, ${DENY.length} deny-list rules` : ""}.\n`);
 		return code;
 	}
-	if (mode === "--history") return report(scanCommits(commitsInRange(["--all"])), "the history");
+	if (mode === "--history") {
+		const code = report(scanCommits(commitsInRange(["--all"])), "the history");
+		if (skipped.binary) summary();
+		return code;
+	}
 	process.stderr.write(`Unknown option ${mode}. Use --staged, --push, --range A..B, --all or --history.\n`);
 	return 2;
 }
