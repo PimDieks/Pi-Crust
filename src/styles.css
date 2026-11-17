@@ -1078,7 +1078,8 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .turn-stats { align-self: flex-start; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; margin-top: calc(-1 * var(--space-sm)); }
 .working { color: var(--muted); font-size: var(--fs-sm); display: flex; align-items: center; gap: 6px; }
 .working .orbit { --R: calc(0.5lh - 2.7px); /* screen radius: fits one line height */ position: relative; display: inline-block; width: 1.4lh; height: 1lh; flex: none; color: var(--accent); } /* exactly one line of the label text */
-.working .orbit-dot { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: currentColor; will-change: transform, opacity; animation: 12s linear infinite; }
+.working .orbit-dot { position: absolute; left: 50%; top: 50%; width: var(--R); height: var(--R); transform-origin: 0 0; will-change: transform, opacity; animation: 12s linear infinite; } /* an R×R box: the keyframes translate it in %; the dot sits at its top-left corner, the scale origin */
+.working .orbit-dot::before { content: ""; position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
 .working .orbit-dot-0 { animation-name: orbit-0; }
 .working .orbit-dot-1 { animation-name: orbit-1; }
 .working .orbit-dot-2 { animation-name: orbit-2; }

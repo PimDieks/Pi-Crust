@@ -1019,6 +1019,8 @@ function setWorking(on) {
 // 4D -> 3D -> 2D with perspective; depth (both z and w) is shown with size and brightness.
 // The path is sampled once into CSS @keyframes (transform + opacity only), so the browser runs it
 // on the compositor with no JS per frame, and nothing runs while the chat is hidden or detached.
+// The keyframes hold only plain numbers (translate in % of the R×R dot box, no var()/calc()): keyframes with
+// CSS variables can't run on the compositor, so the dots stuttered whenever the renderer was busy streaming.
 // Rotation speeds are whole numbers of turns per loop, so the loop is seamless.
 const ORBIT_LOOP = 12; // seconds
 const ORBIT_SAMPLES = 120;
@@ -1046,7 +1048,7 @@ function orbitCss() {
 			const x = v[0] * k4, y = v[1] * k4, z = v[2] * k4;
 			const k3 = 3 / (3 - z);
 			const near = Math.max(0, Math.min(1, ((v[3] + z) / 2 + 1) / 2));
-			css += `${((n / ORBIT_SAMPLES) * 100).toFixed(3)}%{transform:translate(calc(var(--R) * ${(x * k3).toFixed(3)}), calc(var(--R) * ${(y * k3 * 0.85).toFixed(3)})) scale(${(0.45 + 0.4 * k4 * k3).toFixed(3)});opacity:${(0.3 + 0.7 * near).toFixed(3)}}`;
+			css += `${((n / ORBIT_SAMPLES) * 100).toFixed(3)}%{transform:translate(${(x * k3 * 100).toFixed(2)}%,${(y * k3 * 0.85 * 100).toFixed(2)}%) scale(${(0.45 + 0.4 * k4 * k3).toFixed(3)});opacity:${(0.3 + 0.7 * near).toFixed(3)}}`;
 		}
 		css += "}";
 	}
@@ -1063,8 +1065,12 @@ function dotsOrbit() {
 	box.append(...[0, 1, 2].map((i) => el("span", `orbit-dot orbit-dot-${i}`)));
 	return box;
 }
+// Moves the nodes added after the indicator to before it, instead of re-appending the indicator itself:
+// taking it out of the DOM restarts its CSS animation, which made the dots jump back and stutter on every new message.
 function keepWorkingLast() {
-	if (working) messages.append(working);
+	if (!working) return;
+	if (working.parentNode !== messages) return void messages.append(working);
+	while (working.nextSibling) messages.insertBefore(working.nextSibling, working);
 }
 
 // --- status line --------------------------------------------------------------------
