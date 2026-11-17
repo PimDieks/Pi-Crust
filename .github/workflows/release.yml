@@ -1,0 +1,146 @@
+# Release: pushing a tag vX.Y.Z (or vX.Y.Z-rc.N) builds the Windows installer and creates a DRAFT GitHub release.
+# Nothing here publishes a release. Pim reviews the draft and publishes it by hand (see RELEASING.md).
+# Secrets used: LEAK_DENYLIST (required).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege: read only by default. Only the release job may write (to create the draft).
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Checks before building
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Tag must match the version in package.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node scripts/check-version.js "$TAG"
+      - name: Tagged commit must be on main
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error title=Tag is not on main::The tagged commit is not part of main. Release tags must point at a commit on main."
+            exit 1
+          fi
+      - name: Write the deny-list from the secret
+        id: deny
+        env:
+          LEAK_DENYLIST: ${{ secrets.LEAK_DENYLIST }}
+        run: |
+          if [ -z "${LEAK_DENYLIST//[[:space:]]/}" ]; then
+            echo "::error title=Deny-list missing::The LEAK_DENYLIST secret is empty or not set. A release must never be built without the leak scan."
+            exit 1
+          fi
+          file="$(node scripts/ci-denylist.js write)"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Scan the tracked files
+        env:
+          DENYLIST_FILE: ${{ steps.deny.outputs.file }}
+        run: node scripts/check-secrets.js --all --require-denylist --denylist "$DENYLIST_FILE"
+      - name: Scan the history
+        env:
+          DENYLIST_FILE: ${{ steps.deny.outputs.file }}
+        run: node scripts/check-secrets.js --history --require-denylist --denylist "$DENYLIST_FILE"
+      - name: Remove the deny-list file
+        if: always()
+        run: node scripts/ci-denylist.js delete
+
+  release:
+    name: Build the installer and create the draft
+    needs: gate
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # create the draft release and upload its files
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - run: npm test
+      - name: Build the installer (not published by electron-builder)
+        env:
+          CI: "true"
+        run: npm run dist:win -- --publish never
+      - name: Check the installer name
+        run: |
+          VERSION="${TAG#v}"
+          for f in "Pi-Crust-Setup-$VERSION.exe" "Pi-Crust-Setup-$VERSION.exe.blockmap" latest.yml; do
+            test -f "dist/$f" || { echo "::error title=Missing build output::dist/$f was not produced."; exit 1; }
+          done
+          grep -q "Pi-Crust-Setup-$VERSION.exe" dist/latest.yml || { echo "::error title=latest.yml mismatch::latest.yml does not name the installer."; exit 1; }
+      - name: Write the deny-list from the secret
+        id: deny
+        env:
+          LEAK_DENYLIST: ${{ secrets.LEAK_DENYLIST }}
+        run: |
+          if [ -z "${LEAK_DENYLIST//[[:space:]]/}" ]; then
+            echo "::error title=Deny-list missing::The LEAK_DENYLIST secret is empty or not set."
+            exit 1
+          fi
+          file="$(node scripts/ci-denylist.js write)"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Scan the unpacked build
+        env:
+          DENYLIST_FILE: ${{ steps.deny.outputs.file }}
+        run: node scripts/scan-unpacked.js dist/win-unpacked "$DENYLIST_FILE"
+      - name: Checksums (after any signing, so they match the uploaded file)
+        run: node scripts/checksums.js dist
+      - name: Release notes
+        env:
+          DENYLIST_FILE: ${{ steps.deny.outputs.file }}
+        run: |
+          VERSION="${TAG#v}"
+          notes="$RUNNER_TEMP/notes.md"
+          node scripts/release-notes.js "$VERSION" > "$notes"
+          printf '\n' >> "$notes"
+          node scripts/checksums.js --notes dist >> "$notes"
+          node scripts/check-secrets.js --file "$notes" --require-denylist --denylist "$DENYLIST_FILE"
+          echo "notes=$notes" >> "$GITHUB_ENV"
+      - name: Remove the deny-list file
+        if: always()
+        run: node scripts/ci-denylist.js delete
+      - name: Create the DRAFT release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${TAG#v}"
+          flags=(--draft --verify-tag --title "Pi Crust $VERSION" --notes-file "$notes")
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" "${flags[@]}" \
+            "dist/Pi-Crust-Setup-$VERSION.exe" \
+            "dist/Pi-Crust-Setup-$VERSION.exe.blockmap" \
+            dist/latest.yml \
+            dist/SHA256SUMS.txt
+          url="$(gh release view "$TAG" --json url,isDraft --jq 'select(.isDraft) | .url')"
+          test -n "$url" || { echo "::error title=Not a draft::The release is not a draft."; exit 1; }
+          echo "### Draft release created (NOT published)" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+          echo "Draft: $url"
