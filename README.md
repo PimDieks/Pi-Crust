@@ -6,7 +6,7 @@ Pi Crust runs on macOS and Windows 11. Read how and why it was designed in the c
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.png"><img src="docs/screenshots/hero-light.png" alt="Pi Crust with a file tree and commit graph, the Design tab comparing a flight card against its Figma frame with the slider, and the chat with Pi listing two hard-coded values." width="900"></picture>
 
-![Pi Crust: file tree and commit graph, the editor, and the chat with Pi](docs/screenshots/editor.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/editor-dark.png"><img src="docs/screenshots/editor-light.png" alt="Pi Crust with the file tree and commit graph, FlightCard.tsx open in the editor, and the chat with Pi answering a question about it."></picture>
 
 | Left | Middle | Right |
 |---|---|---|
@@ -118,7 +118,7 @@ The data comes from `src/pi-extension/crust-context.ts`, which Pi Crust loads in
 
 | Subscriptions and models | Context, cost and Copilot usage |
 |---|---|
-| ![Model & usage popover: subscriptions and the model list](docs/screenshots/model-usage.png) | ![Model & usage popover scrolled down: context breakdown, models used and Copilot premium requests](docs/screenshots/model-usage-context.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/model-usage-dark.png"><img src="docs/screenshots/model-usage-light.png" alt="Model and usage popover: subscriptions, the model list and the start of the context breakdown."></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/model-usage-context-dark.png"><img src="docs/screenshots/model-usage-context-light.png" alt="Model and usage popover scrolled down: context breakdown, models used and Copilot premium requests."></picture> |
 
 **Extras**
 - **Todos**: a collapsible panel above the input follows Pi's todo tool.
@@ -129,7 +129,7 @@ The data comes from `src/pi-extension/crust-context.ts`, which Pi Crust loads in
 
 | Todos | Mermaid |
 |---|---|
-| ![Todo panel](docs/screenshots/todos.png) | ![Mermaid diagram](docs/screenshots/mermaid.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/todos-dark.png"><img src="docs/screenshots/todos-light.png" alt="Todo panel above the composer, two of four items done, next to the Viewer tab showing the running app."></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mermaid-dark.png"><img src="docs/screenshots/mermaid-light.png" alt="A Mermaid flowchart rendered in the chat, showing how a flight status update reaches the card."></picture> |
 
 ## Views
 
@@ -189,7 +189,7 @@ A login shell in the repo (PowerShell on Windows), using the repo's Node (`.nvmr
 
 **Viewports.** Your app at **Mobile** 390×844, **Tablet** 820×1180 and **Desktop** 1440×900, in **Light**, **Dark** or **Both**. Snapshots refresh shortly after files change. Click a tile to enlarge it or send it to the chat.
 
-![Viewports view](docs/screenshots/viewports.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/viewports-dark.png"><img src="docs/screenshots/viewports-light.png" alt="Viewports view with Mobile, Tablet and Desktop snapshots of the running app in light mode."></picture>
 
 **Stories.** The project's Storybook as a gallery grouped by title, with a filter.
 - Storybook is found automatically (`localhost:6006`, the ports of the repo's `storybook` scripts, or `storybookUrl`). If it isn't running, **Start Storybook** runs it in the Terminal tab.
@@ -216,7 +216,7 @@ The Figma picker and Design compare talk to the Figma desktop MCP server (`http:
 
 | Tweak | Annotate |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tweak-dark.png"><img src="docs/screenshots/tweak-light.png" alt="Tweak panel next to the page, with sliders snapping padding, gap and radius to tokens." width="420"></picture> | ![Annotate overlay](docs/screenshots/annotate.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tweak-dark.png"><img src="docs/screenshots/tweak-light.png" alt="Tweak panel next to the page, with sliders snapping padding, gap and radius to tokens." width="420"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/annotate-dark.png"><img src="docs/screenshots/annotate-light.png" alt="Annotate overlay over a screenshot of the page, with a box and an arrow marking the boarding badge and a note." width="420"></picture> |
 
 ## History: checkpoints, rewind and screenshots
 
@@ -263,7 +263,7 @@ On Windows, ⌘ and ⌃ mean Ctrl and ⌥ means Alt. Ctrl+W does not close the w
 
 **Slash commands** typed in the chat: `/reload`, `/new`, `/compact`, `/model`, `/fork`, `/thinking`, `/rewind`, … (terminal-only ones point you to the Terminal tab).
 
-![Command palette](docs/screenshots/palette.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/palette-dark.png"><img src="docs/screenshots/palette-light.png" alt="Command palette open over the editor, listing files that match the search."></picture>
 
 ## Remote from your phone
 
