@@ -123,7 +123,7 @@ button, input, select, textarea { font: inherit; color: inherit; letter-spacing:
 .pane { display: flex; flex-direction: column; min-width: 0; background: var(--panel); border-radius: var(--radius-md); overflow: hidden; }
 #tree-pane { width: 260px; flex: none; }
 #middle-pane { flex: 1; }
-#chat-pane { width: 460px; min-width: 280px; flex: none; container: chatpane / inline-size; } /* narrow: the composer bar wraps to two rows */
+#chat-pane { width: 460px; min-width: 330px; flex: none; container: chatpane / inline-size; } /* narrow: the composer bar wraps to two rows */
 #chat-pane.panel-animating { min-width: 0; }
 .splitter { width: var(--panel-gap); flex: none; cursor: col-resize; background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat; background-size: 0 100%; transition: background-size 0.12s; }
 .splitter:hover, .splitter.dragging { background-size: 2px 100%; }
@@ -615,7 +615,9 @@ select option { background: var(--panel-2); color: var(--text); }
 #ctx-meter .ctx-bar { width: 32px; height: 4px; border-radius: var(--radius-full); background: var(--levels-2-up); overflow: hidden; }
 #ctx-meter .ctx-bar > span { display: block; height: 100%; border-radius: inherit; transition: width 0.3s; }
 #ctx-meter .ctx-pct { min-width: 22px; color: var(--text-secondary); }
-@container chatpane (max-width: 420px) { #ctx-meter .meter-label { display: none; } }
+/* The header fits with the model name cut to 40px: labels need 453px, bars 393px, percentages only 317px (#chat-pane min-width 330px, with headroom). */
+@container chatpane (max-width: 460px) { #ctx-meter .meter-label { display: none; } }
+@container chatpane (max-width: 400px) { #ctx-meter .ctx-bar { display: none; } }
 #ctx-panel .ctx-filter { width: 100%; box-sizing: border-box; margin: 2px 0 4px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); }
 #ctx-panel .ctx-filter:focus { outline: none; border-color: var(--accent); }
 #ctx-panel .ctx-model-list { display: flex; flex-direction: column; max-height: 240px; overflow: auto; margin: 0 -6px; }
