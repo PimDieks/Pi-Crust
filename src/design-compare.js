@@ -96,11 +96,11 @@
 			const boxes = PixelDiff.regions(r.mask, w, h, { gap: Math.round(4 * unit), minCount: 2 });
 			const [cr, cg, cb] = D.tokenRgb("--err");
 			const pad = 3 * unit;
-			for (const b of boxes) {
-				const x = Math.max(0, b.x0 - pad) + 0.5 * unit;
-				const y = Math.max(0, b.y0 - pad) + 0.5 * unit;
-				const bw = Math.min(w, b.x1 + pad) - x - 0.5 * unit;
-				const bh = Math.min(h, b.y1 + pad) - y - 0.5 * unit;
+			for (const box of boxes) {
+				const x = Math.max(0, box.x0 - pad) + 0.5 * unit;
+				const y = Math.max(0, box.y0 - pad) + 0.5 * unit;
+				const bw = Math.min(w, box.x1 + pad) - x - 0.5 * unit;
+				const bh = Math.min(h, box.y1 + pad) - y - 0.5 * unit;
 				g.beginPath();
 				g.roundRect(x, y, bw, bh, 2 * unit);
 				g.fillStyle = `rgba(${cr}, ${cg}, ${cb}, 0.18)`;
@@ -110,7 +110,7 @@
 				g.stroke();
 			}
 			state.diff = { matchPct: r.matchPct, diffCount: r.diffCount, total: r.total, threshold, canvas, regions: boxes.length };
-			result.textContent = `${r.matchPct.toFixed(1)} % match, ${r.diffCount.toLocaleString()} of ${r.total.toLocaleString()} px differ in ${boxes.length} ${boxes.length === 1 ? "area" : "areas"}`;
+			result.textContent = `${r.matchPct.toFixed(1)} % match, ${r.diffCount.toLocaleString()} of ${r.total.toLocaleString()} px differ${boxes.length ? ` in ${boxes.length} ${boxes.length === 1 ? "area" : "areas"}` : ""}`;
 			canvas.setAttribute("aria-label", result.textContent);
 		};
 		range.oninput = () => {

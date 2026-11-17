@@ -1,8 +1,9 @@
 // Pixel comparison of two same-size RGBA images with a YIQ colour distance (as in pixelmatch).
 // UMD: `PixelDiff.diff(a, b, { threshold, color })` in the UI, `require("./pixel-diff")` in tests.
 // a, b: { data: Uint8ClampedArray (RGBA), width, height }.
-// -> { width, height, total, diffCount, matchPct, heatmap, mask }: mask is 1 byte per pixel (1 = differs); regions(mask, w, h) groups it into boxes; heatmap is RGBA; changed pixels get `color` (default red),
-//    equal pixels a faint grey copy of `a`.
+// -> { width, height, total, diffCount, matchPct, heatmap, mask }
+//    mask: 1 byte per pixel (1 = differs). regions(mask, w, h, { gap, minCount }) groups it into bounding boxes.
+//    heatmap: RGBA, changed pixels get `color` (default red), equal pixels a faint grey copy of `a`.
 (function (root, factory) {
 	if (typeof module === "object" && module.exports) module.exports = factory();
 	else root.PixelDiff = factory();
