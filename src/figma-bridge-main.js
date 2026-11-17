@@ -253,7 +253,7 @@ function createBridge({ readSettings, makeClient = (cfg) => new Client(cfg), con
 		for (;;) {
 			const f = fileOfStatus(await c.tool("figma_get_status"));
 			if (f) return f;
-			if (Date.now() - t0 >= connectWaitMs) throw new Error("The Figma Desktop Bridge plugin isn't connected to Pi Crust. In Figma, open the file and run the \"Desktop Bridge\" plugin (Plugins › Development); if it was already open, close and reopen it once (it only looks for servers when it starts), then press refresh.");
+			if (Date.now() - t0 >= connectWaitMs) throw new Error("The Figma Desktop Bridge plugin isn't connected to Pi Crust. In Figma, open the file and run the \"Desktop Bridge\" plugin (Plugins › Development); then press refresh. If it was already open and still doesn't connect, your figma-console-mcp is older than 1.46: that plugin only looks for servers when it starts, so update figma-console-mcp (server and plugin) or close and reopen the plugin.");
 			await sleep(1500);
 		}
 	}
