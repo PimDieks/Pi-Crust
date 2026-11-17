@@ -137,6 +137,13 @@ contextBridge.exposeInMainWorld("crust", {
 		selftestDeleteBranch: (branch) => ipcRenderer.invoke("worktree:selftestDeleteBranch", branch),
 		selftestExists: (cwd) => ipcRenderer.invoke("worktree:selftestExists", cwd),
 	},
+	// Machine-local plugins (src/local/): only `local:*` channels.
+	local: {
+		invoke: (channel, ...args) =>
+			typeof channel === "string" && channel.startsWith("local:")
+				? ipcRenderer.invoke(channel, ...args)
+				: Promise.reject(new Error("Only local: channels are allowed")),
+	},
 	storybook: {
 		detect: () => ipcRenderer.invoke("storybook:detect"),
 		setUrl: (url) => ipcRenderer.invoke("storybook:setUrl", url),

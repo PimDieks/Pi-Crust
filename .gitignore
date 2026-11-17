@@ -11,3 +11,6 @@ dist/
 *.test.js
 *.test.mjs
 *.spec.js
+
+# Machine-local plugins, never committed
+src/local/

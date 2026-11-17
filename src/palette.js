@@ -85,6 +85,7 @@ function actions() {
 		...visibleTabs().map((t) => a(`Go to ${t[0].toUpperCase()}${t.slice(1)}`, tabShortcut(t), () => switchTab(t))),
 		...VIEW_ORDER.map((v, i) => a(`View: ${VIEWS[v].label}`, `⌃⌘${i + 1}`, () => setView(v))),
 		a("Terminal: start the dev server", "npm run dev", () => runInTerminal("npm run dev")),
+		...window.crustLocalCommands.filter((c) => c.paletteLabel).map((c) => a(c.paletteLabel, `/${c.name}`, () => c.run())),
 		a("Terminal: run tests", "npm test", () => runInTerminal("npm test")),
 		a("Terminal: new terminal", "", () => newTerminal()),
 		a("Terminal: restart this shell", "", () => {
@@ -149,7 +150,7 @@ function search(query) {
 		if (m) out.push({ ...item, score: m.score + bonus, hits: m.hits, text });
 	};
 	for (const a of actions()) add(a, a.label, 6);
-	for (const c of BUILTIN_COMMANDS) {
+	for (const c of allBuiltinCommands()) {
 		if (isShadowed(c.name)) continue;
 		const desc = c.args ? `${c.args} · ${c.description}` : c.description;
 		add({ kind: "command", label: `/${c.name}`, desc, run: () => (c.args ? insertCommand(c.name) : handleBuiltinCommand(`/${c.name}`)) }, `/${c.name}`, 4);

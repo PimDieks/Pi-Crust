@@ -27,7 +27,7 @@
 			source: c.source || "command",
 			builtin: false,
 		}));
-		for (const c of BUILTIN_COMMANDS) {
+		for (const c of allBuiltinCommands()) {
 			if (isShadowed(c.name)) continue;
 			out.push({ name: c.name, args: c.args || "", description: c.description, source: "crust", builtin: true });
 		}

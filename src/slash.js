@@ -220,11 +220,15 @@ function isShadowed(name) {
 	return commandList.some((c) => c.name === name);
 }
 
+// Built-ins plus machine-local ones: src/local/*.js push { name, description, paletteLabel?, run } onto this registry.
+window.crustLocalCommands ||= [];
+const allBuiltinCommands = () => [...BUILTIN_COMMANDS, ...window.crustLocalCommands];
+
 // Returns true when `text` was a built-in command and has been handled here.
 async function handleBuiltinCommand(text) {
 	const m = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
 	if (!m) return false;
-	const cmd = BUILTIN_COMMANDS.find((c) => c.name === m[1]);
+	const cmd = allBuiltinCommands().find((c) => c.name === m[1]);
 	if (!cmd) return false;
 	if (!state.ready) {
 		toast("Pi is still starting…", "warning");

@@ -1703,6 +1703,7 @@ require("./remote-main").register(ctx);
 require("./update-main").register(ctx);
 require("./mendix-main").register(ctx);
 require("./advisor-main").register(ctx);
+require("./local-main").register(ctx);
 
 app.whenReady().then(() => {
 	if (!isPrimary) return;
