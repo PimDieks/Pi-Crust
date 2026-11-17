@@ -7,18 +7,14 @@ dist/
 !build/icon.png
 !src/remote/icon.png
 
-# Tests stay local, not in the repo
+# App tests (under src/ and anywhere else) stay local. Only the tests of the release scripts in scripts/ are tracked.
 *.test.js
 *.test.mjs
 *.spec.js
+!scripts/*.test.js
 
 # Machine-local plugins, never committed
 src/local/
 
 # Local deny-list for scripts/check-secrets.js, never committed
 .leak-denylist
-!scripts/move-to-public.test.js
-!scripts/check-version.test.js
-!scripts/release-notes.test.js
-!scripts/check-secrets-ci.test.js
-!scripts/checksums.test.js

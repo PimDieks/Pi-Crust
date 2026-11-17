@@ -9,6 +9,7 @@
 // Options (any position):
 //   --file FILE | --stdin | --dir DIR   scan a file, stdin (release notes) or a whole folder of build output, names and contents,
 //                        outside git. Fails when nothing was scanned.
+//   --own PATH          (with --dir, repeatable) our own code: `--skip *.ext` rules do not apply to this file or folder.
 //   --denylist FILE     words or regexes that must never appear (one per line, case-insensitive, # for comments).
 //                        Default: .leak-denylist in the repo root (gitignored, never committed). Hits print file, line and
 //                        rule number only, never the word. Binary files are skipped and counted.
@@ -31,14 +32,37 @@ const skipped = { binary: 0, scanned: 0 };
 let verbose = false;
 let filesMode = false; // --file/--stdin/--dir: not a commit or push, so no "nothing was committed" line
 
-function loadDenyList(file) {
+// Raw rule texts, kept only so an unexpected error message can be scrubbed before it is printed.
+let RAW_RULES = [];
+class DenyListError extends Error {}
+// Text of a deny-list -> { rules, invalid }. An invalid rule is reported by number only, never by its text.
+function parseRules(text) {
 	const rules = [];
-	fs.readFileSync(file, "utf8").split(/\r?\n/).forEach((raw) => {
+	const invalid = [];
+	String(text).split(/\r?\n/).forEach((raw) => {
 		const t = raw.trim();
 		if (!t || t.startsWith("#")) return;
-		rules.push({ n: rules.length + 1, re: new RegExp(t, "i") });
+		const n = rules.length + 1;
+		RAW_RULES.push(t);
+		try {
+			rules.push({ n, re: new RegExp(t, "i") });
+		} catch {
+			invalid.push(n);
+			rules.push({ n, re: null });
+		}
 	});
+	return { rules, invalid };
+}
+function loadDenyList(file) {
+	const { rules, invalid } = parseRules(fs.readFileSync(file, "utf8"));
+	if (invalid.length) throw new DenyListError(invalid.map((n) => `deny-list rule #${n} is invalid`).join("; ") + " (the rule text is not shown)");
 	return rules;
+}
+// An error message with every deny-list rule text removed.
+function scrub(message) {
+	let m = String(message);
+	for (const t of RAW_RULES) if (t) m = m.split(t).join("(rule hidden)").split(t.toLowerCase()).join("(rule hidden)");
+	return m;
 }
 function denyHits(text) {
 	return DENY.filter((r) => r.re.test(text)).map((r) => ({ why: `deny-list rule #${r.n}`, sample: "(hidden)" }));
@@ -207,17 +231,21 @@ function scanAll() {
 		const why = scanFileName(file);
 		if (why) findings.push({ file, line: 0, why, sample: "file name", where: "tracked" });
 	}
-	const grep = (() => {
-		try {
-			return git(["grep", "-n", "-I", "--no-color", "-E", "-e", "."]);
-		} catch {
-			return "";
-		}
-	})();
+	// -z: path, line number and text are NUL-separated, so a colon in a path or in the text cannot confuse the parse.
+	// Exit status 1 means "no match", which is fine; any other failure must fail the scan.
+	let grep = "";
+	try {
+		grep = git(["grep", "-z", "-n", "-I", "--no-color", "-E", "-e", "."]);
+	} catch (e) {
+		if (e.status !== 1) throw new Error(`git grep failed (exit status ${e.status === null || e.status === undefined ? "unknown" : e.status}), so the tracked files were not fully scanned`);
+	}
 	for (const row of grep.split(/\r?\n/)) {
-		const m = /^(.*?):(\d+):(.*)$/.exec(row);
-		if (!m) continue;
-		for (const f of scanLine(m[3], m[1])) findings.push({ file: m[1], line: Number(m[2]), ...f, where: "tracked" });
+		const a = row.indexOf("\0");
+		const b = a < 0 ? -1 : row.indexOf("\0", a + 1);
+		if (b < 0) continue;
+		const file = row.slice(0, a);
+		const lineNo = Number(row.slice(a + 1, b));
+		for (const f of scanLine(row.slice(b + 1), file)) findings.push({ file, line: lineNo, ...f, where: "tracked" });
 	}
 	return findings;
 }
@@ -242,7 +270,7 @@ function scanBuffer(buf, file) {
 	for (const list of runs) for (const run of list) for (const r of DENY) if (!seen.has(r.n) && r.re.test(run)) (seen.add(r.n), findings.push({ file, line: 0, why: "deny-list rule #" + r.n, sample: "(hidden)", where: "files" }));
 	return findings;
 }
-function scanTree(dir, skip = []) {
+function scanTree(dir, skip = [], own = []) {
 	const findings = [];
 	const walk = (d) => {
 		for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
@@ -253,7 +281,9 @@ function scanTree(dir, skip = []) {
 			for (const f of denyHits(rel)) findings.push({ file: rel, line: 0, ...f, why: f.why + " (file name)", where: "files" });
 			if (ent.isDirectory()) walk(full);
 			else if (ent.isFile()) {
-				if (skip.some((p) => (p.startsWith("*.") ? rel.toLowerCase().endsWith(p.slice(1).toLowerCase()) : rel === p || rel.startsWith(p + "/")))) skipped.binary++; // counted as "skipped"
+				// `*.ext` skips do not apply to our own code (--own: a file, or a folder and everything under it); folder skips still do.
+				const isOwn = own.some((o) => rel === o || rel.startsWith(o + "/"));
+				if (skip.some((p) => (p.startsWith("*.") ? !isOwn && rel.toLowerCase().endsWith(p.slice(1).toLowerCase()) : rel === p || rel.startsWith(p + "/")))) skipped.binary++; // counted as "skipped"
 				else findings.push(...scanBuffer(fs.readFileSync(full), rel));
 			}
 		}
@@ -291,10 +321,12 @@ function main(args) {
 	let denyFile = null;
 	let requireDeny = false;
 	const skip = [];
+	const own = [];
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--denylist") denyFile = args[++i];
 		else if (args[i] === "--root") ROOT = path.resolve(args[++i]);
 		else if (args[i] === "--skip") skip.push(String(args[++i]).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, ""));
+		else if (args[i] === "--own") own.push(String(args[++i]).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, ""));
 		else if (args[i] === "--require-denylist") requireDeny = true;
 		else if (args[i] === "--verbose") verbose = true;
 		else argv.push(args[i]);
@@ -308,7 +340,14 @@ function main(args) {
 		process.stderr.write(`Deny-list file not found: ${denyFile}\n`);
 		return 1;
 	}
-	if (denyFile) DENY = loadDenyList(denyFile);
+	if (denyFile) {
+		try {
+			DENY = loadDenyList(denyFile);
+		} catch (e) {
+			process.stderr.write(`${e instanceof DenyListError ? e.message : "the deny-list could not be read"}. Scan not run.\n`);
+			return 1;
+		}
+	}
 	else {
 		if (requireDeny || verbose) process.stderr.write("no deny-list found, scan not run\n");
 		if (requireDeny) return 1;
@@ -336,7 +375,7 @@ function main(args) {
 				process.stderr.write(`Not a folder: ${argv[1]}\n`);
 				return 2;
 			}
-			findings = scanTree(argv[1], skip);
+			findings = scanTree(argv[1], skip, own);
 			what = "the folder";
 		}
 		const code = report(findings, what);
@@ -396,4 +435,4 @@ if (require.main === module) {
 	}
 }
 
-module.exports = { loadDenyList, scanLine, scanFileName, scanDiff, isTestFile };
+module.exports = { loadDenyList, parseRules, scanLine, scanFileName, scanDiff, isTestFile };
