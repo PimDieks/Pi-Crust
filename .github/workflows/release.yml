@@ -3,6 +3,7 @@
 # Secrets used: LEAK_DENYLIST (required), and for signing through Microsoft's Azure signing service (Artifact Signing,
 # formerly Trusted Signing), all seven of: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SIGN_ENDPOINT,
 # AZURE_SIGN_ACCOUNT, AZURE_SIGN_PROFILE, AZURE_SIGN_PUBLISHER.
+# The release job runs in the protected environment `release` (Pim approves every run); the Azure secrets are environment secrets.
 # With none of the seven set the build continues UNSIGNED, loudly. With only some set, the run fails.
 name: Release
 
@@ -72,6 +73,9 @@ jobs:
     needs: gate
     runs-on: windows-latest
     timeout-minutes: 45
+    # Protected environment "release": required reviewer is Pim, so every run waits for his approval after the gate passes.
+    # The Azure signing secrets are environment secrets here. LEAK_DENYLIST stays a repository secret (also visible here).
+    environment: release
     permissions:
       contents: write # create the draft release and upload its files
     defaults:
@@ -79,6 +83,9 @@ jobs:
         shell: bash
     env:
       TAG: ${{ github.ref_name }}
+      # Pinned version of the PowerShell module that electron-builder uses to sign (checked against the PowerShell Gallery:
+      # 0.5.8 is the newest stable one). Change it here on purpose, never to "latest".
+      TRUSTED_SIGNING_VERSION: "0.5.8"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,12 +94,14 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm ci
-      - run: npm test
+      - name: Run the tracked tests (scripts/*.test.js)
+        run: node --test scripts/*.test.js
       - name: Decide whether to sign
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # Only whether the client secret exists is passed here, never its value. The value goes to the build step alone.
+          AZURE_CLIENT_SECRET_SET: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
           AZURE_SIGN_ENDPOINT: ${{ secrets.AZURE_SIGN_ENDPOINT }}
           AZURE_SIGN_ACCOUNT: ${{ secrets.AZURE_SIGN_ACCOUNT }}
           AZURE_SIGN_PROFILE: ${{ secrets.AZURE_SIGN_PROFILE }}
@@ -102,6 +111,10 @@ jobs:
           names=(AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_SIGN_ENDPOINT AZURE_SIGN_ACCOUNT AZURE_SIGN_PROFILE AZURE_SIGN_PUBLISHER)
           missing=()
           for n in "${names[@]}"; do
+            if [ "$n" = AZURE_CLIENT_SECRET ]; then
+              [ "$AZURE_CLIENT_SECRET_SET" = "true" ] || missing+=("$n")
+              continue
+            fi
             v="${!n}"
             [ -n "${v//[[:space:]]/}" ] || missing+=("$n")
           done
@@ -119,6 +132,16 @@ jobs:
             echo "::error title=Signing is half configured::These signing secrets are missing: ${missing[*]}. Set all seven or none."
             exit 1
           fi
+      - name: Install the signing module (pinned version)
+        if: env.HAS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          # electron-builder signs through the PowerShell module TrustedSigning. Install an exact version before it runs, so the
+          # build never fetches whatever is newest. No secret is needed (or passed) in this step.
+          Install-Module -Name TrustedSigning -RequiredVersion $env:TRUSTED_SIGNING_VERSION -Scope CurrentUser -Repository PSGallery -Force -AcceptLicense
+          $m = Get-Module -ListAvailable -Name TrustedSigning | Where-Object { $_.Version -eq [version]$env:TRUSTED_SIGNING_VERSION }
+          if (-not $m) { Write-Host "::error title=Signing module::TrustedSigning $env:TRUSTED_SIGNING_VERSION is not installed."; exit 1 }
+          Write-Host "TrustedSigning $($m.Version) installed."
       - name: Build the installer (not published by electron-builder)
         env:
           CI: "true"
@@ -151,8 +174,15 @@ jobs:
         run: |
           $mode = if ($env:HAS_SIGNING -eq 'true') { 'signed' } else { 'unsigned' }
           $version = $env:TAG.TrimStart('v')
-          foreach ($f in @("dist/Pi-Crust-Setup-$version.exe", 'dist/win-unpacked/Pi Crust.exe')) {
-            & ./scripts/verify-signature.ps1 -File $f -Mode $mode -Publisher $env:AZURE_SIGN_PUBLISHER
+          # Every .exe the installer build produces: the installer(s) in dist/ and the executables directly in dist/win-unpacked
+          # (not the third-party ones deep inside node_modules, which are not ours to sign). The two we know must be among them.
+          $files = @(Get-ChildItem -LiteralPath dist -Filter *.exe -File) + @(Get-ChildItem -LiteralPath dist/win-unpacked -Filter *.exe -File)
+          foreach ($need in @("Pi-Crust-Setup-$version.exe", 'Pi Crust.exe')) {
+            if (-not ($files | Where-Object { $_.Name -eq $need })) { Write-Host "::error title=Missing build output::$need was not produced."; exit 1 }
+          }
+          Write-Host "Checking $($files.Count) executables."
+          foreach ($f in $files) {
+            & ./scripts/verify-signature.ps1 -File $f.FullName -Mode $mode -Publisher $env:AZURE_SIGN_PUBLISHER
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
       - name: Check the installer name
@@ -205,13 +235,18 @@ jobs:
           VERSION="${TAG#v}"
           flags=(--draft --verify-tag --title "Pi Crust $VERSION" --notes-file "$notes")
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
-          gh release create "$TAG" "${flags[@]}" \
+          # gh prints the URL of the new release as the last line. `gh release view <tag>` can miss a draft, so the draft is
+          # confirmed through the API by listing releases (drafts included) and matching the tag.
+          created="$(gh release create "$TAG" "${flags[@]}" \
             "dist/Pi-Crust-Setup-$VERSION.exe" \
             "dist/Pi-Crust-Setup-$VERSION.exe.blockmap" \
             dist/latest.yml \
-            dist/SHA256SUMS.txt
-          url="$(gh release view "$TAG" --json url,isDraft --jq 'select(.isDraft) | .url')"
-          test -n "$url" || { echo "::error title=Not a draft::The release is not a draft."; exit 1; }
+            dist/SHA256SUMS.txt | tail -n 1)"
+          echo "gh release create said: $created"
+          url="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\" and .draft == true) | .html_url" | head -n 1)"
+          test -n "$url" || { echo "::error title=Not a draft::No draft release for $TAG was found after creating it."; exit 1; }
+          published="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\" and .draft == false) | .html_url" | head -n 1)"
+          test -z "$published" || { echo "::error title=Published release exists::A published release for $TAG exists. It must be a draft only."; exit 1; }
           echo "### Draft release created (NOT published)" >> "$GITHUB_STEP_SUMMARY"
           echo "$url" >> "$GITHUB_STEP_SUMMARY"
           echo "Draft: $url"
