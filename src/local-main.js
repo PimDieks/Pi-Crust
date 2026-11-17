@@ -15,8 +15,16 @@ const listLocal = () => {
 	}
 };
 
-const isMain = (f) => f.endsWith("-main.js");
-const isRendererScript = (f) => f.endsWith(".js") && !isMain(f) && !f.endsWith(".test.js");
+// Only real files count: a directory that happens to be called "x.js" is ignored.
+const isFile = (f) => {
+	try {
+		return fs.statSync(path.join(LOCAL_DIR, f)).isFile();
+	} catch {
+		return false;
+	}
+};
+const isMain = (f) => f.endsWith("-main.js") && isFile(f);
+const isRendererScript = (f) => f.endsWith(".js") && !f.endsWith("-main.js") && !f.endsWith(".test.js") && isFile(f);
 
 function register(ctx) {
 	ctx.ipcMain.handle("local:scripts", () => listLocal().filter(isRendererScript));

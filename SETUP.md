@@ -53,6 +53,7 @@ It pulls the latest commits (fast-forward only), runs `npm install` and rebuilds
 
 ## Optional
 
+- **Local plugins** (`src/local/`): every `.js` file in that folder is loaded when Pi Crust starts, and `*-main.js` files run in the main process. They run with the app's full rights and are not sandboxed. The folder is gitignored, so nothing in it is committed or shared. Only put your own files there.
 - **Voice input**: `brew install whisper-cpp`, then put a whisper model in the app's data folder:
 
 ```bash
