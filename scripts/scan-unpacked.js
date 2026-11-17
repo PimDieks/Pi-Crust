@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Leak scan of an unpacked installer folder (dist/win-unpacked), used by CI and the release workflow so the skip list
-// lives in one place. `node scripts/scan-unpacked.js <folder> <deny-list file>`.
+// lives in one place. `node scripts/scan-unpacked.js <folder> <deny-list file>`, or `<folder> --no-denylist` for the built-in
+// secret patterns only (pull requests from forks and Dependabot, where the deny-list secret is not available).
 // Our own files are scanned in full (names and text). Third-party content is skipped because it is not ours and the
 // deny-list matches common words in it: bundled node_modules, Chromium locale and resource files, the Electron binary,
 // and binary formats (random bytes). The binary-format skips (*.png, *.dat, ...) do NOT apply inside our own code:
@@ -42,7 +43,8 @@ function main(dir, list) {
 		process.stderr.write(`ERROR: only ${js} .js files under ${APP}/src (at least ${MIN_JS} expected). Failing the scan.\n`);
 		return 1;
 	}
-	const args = [path.join(__dirname, "check-secrets.js"), "--dir", dir, "--require-denylist", "--denylist", list, ...SKIP.flatMap((s) => ["--skip", s]), ...own.flatMap((o) => ["--own", o])];
+	const deny = list === "--no-denylist" ? [] : ["--require-denylist", "--denylist", list];
+	const args = [path.join(__dirname, "check-secrets.js"), "--dir", dir, ...deny, ...SKIP.flatMap((s) => ["--skip", s]), ...own.flatMap((o) => ["--own", o])];
 	const r = spawnSync(process.execPath, args, { stdio: "inherit" });
 	return r.status === null ? 1 : r.status;
 }

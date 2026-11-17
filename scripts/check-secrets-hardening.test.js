@@ -113,3 +113,9 @@ test("--all: finds a word in a file whose name has a space and whose text has co
 	assert.strictEqual(r.status, 1);
 	assert.match(all(r), /a b\.txt:1 {2}deny-list rule #1/);
 });
+test("scan-unpacked --no-denylist: built-in secret patterns still run without a word list", () => {
+	const d = unpacked("u6");
+	assert.strictEqual(run(UNPACKED, [d, "--no-denylist"]).status, 0);
+	write(path.join(d, "resources/app/src/k.js"), `const k = "${["gh", "p_"].join("")}${"a1B2".repeat(9)}";\n`);
+	assert.strictEqual(run(UNPACKED, [d, "--no-denylist"]).status, 1);
+});
