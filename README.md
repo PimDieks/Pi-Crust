@@ -2,7 +2,7 @@
 
 A desktop app for [Pi](https://pi.dev): your repo, your running app and a chat with Pi in one window.
 
-Pi Crust runs on macOS and Windows 11.
+Pi Crust runs on macOS and Windows 11. Read how and why it was designed in the case study at [nullvorm.com/pi-crust](https://nullvorm.com/pi-crust).
 
 ![Pi Crust Design tab: Figma vs build slider](docs/screenshots/pi-crust-compare.png)
 
