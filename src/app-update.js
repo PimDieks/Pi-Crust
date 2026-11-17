@@ -133,4 +133,29 @@
 		await snap("app-update");
 		render(s);
 	});
+
+	// The blocked card, drawn from a fake status: "Check again" is there, Update is disabled, and pressing it calls check().
+	// crust.appUpdate may be frozen by the preload bridge; then the press is proven by the button going disabled instead.
+	selftestSteps.push(async ({ wait }) => {
+		const before = last;
+		dismissed = null;
+		render({ state: "available", count: 2, commits: ["abc1234 one", "def5678 two"], blocked: "You have local changes", blockedDetail: "Commit or stash them first." });
+		await wait(200);
+		const again = [...card.querySelectorAll(".btn")].find((b) => b.textContent === "Check again");
+		const up = [...card.querySelectorAll(".btn")].find((b) => b.textContent === "Update");
+		let calls = 0;
+		let stubbed = false;
+		const real = crust.appUpdate.check;
+		try {
+			crust.appUpdate.check = () => (calls++, Promise.resolve({ state: "none" }));
+			stubbed = crust.appUpdate.check !== real;
+		} catch {}
+		again?.click();
+		const pressed = stubbed ? calls === 1 : !!again?.disabled;
+		await wait(200);
+		const ok = !!again && !!up?.disabled && pressed;
+		console.error(`SELFTEST app update blocked card: checkAgain=${!!again} updateDisabled=${!!up?.disabled} ${stubbed ? `checkCalls=${calls}` : "check not stubbable, button disabled on press=" + pressed} -> ${ok ? "OK" : "MISMATCH"}`);
+		if (stubbed) crust.appUpdate.check = real;
+		render(before);
+	});
 })();
