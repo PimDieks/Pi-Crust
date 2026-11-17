@@ -104,7 +104,7 @@ function updateWindowsApp() {
 	say("Building the Windows installer…");
 	run("node", [path.join("scripts", "dist-win.js")], { node: true });
 	const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
-	const setup = path.join(root, "dist", `Pi Crust Setup ${version}.exe`);
+	const setup = path.join(root, "dist", `Pi-Crust-Setup-${version}.exe`);
 	if (!fs.existsSync(setup)) throw new Error(`Installer not found at ${setup}`);
 	if (args.has("--no-run")) return console.log(`INSTALLER=${setup}`);
 	say("Installing the update (Pi Crust is closed if it is running, and started again afterwards)…");

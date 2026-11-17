@@ -43,7 +43,7 @@
   "build": {
     "appId": "dev.pidieks.picrust",
     "productName": "Pi Crust",
-    "copyright": "Pi Crust",
+    "copyright": "Copyright (c) 2026 Nullvorm",
     "asar": false,
     "npmRebuild": false,
     "nodeGypRebuild": false,
@@ -75,7 +75,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "${productName} Setup ${version}.${ext}",
+      "artifactName": "Pi-Crust-Setup-${version}.${ext}",
       "signAndEditExecutable": true,
       "forceCodeSigning": false,
       "files": [
@@ -115,6 +115,14 @@
     },
     "dmg": {
       "title": "Pi Crust"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "PimDieks",
+        "repo": "Pi-Crust",
+        "releaseType": "draft"
+      }
+    ]
   }
 }

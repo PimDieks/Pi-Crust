@@ -147,7 +147,7 @@ Add `-WhatIf` to see what it would do first. If you move the folder, run it agai
 npm run dist:win
 ```
 
-Then run `dist\Pi Crust Setup x.y.z.exe`. It installs for your user only (no admin) to `%LOCALAPPDATA%\Programs\Pi Crust`, and adds a Start Menu and desktop shortcut called **Pi Crust**. Remove it from Windows Settings, Apps.
+Then run `dist\Pi-Crust-Setup-x.y.z.exe`. It installs for your user only (no admin) to `%LOCALAPPDATA%\Programs\Pi Crust`, and adds a Start Menu and desktop shortcut called **Pi Crust**. Remove it from Windows Settings, Apps.
 
 - The installer is not signed. Windows SmartScreen will warn: choose More info, then Run anyway.
 - The build needs the same `npm install` as above. Do not run `electron-rebuild`; `node-pty` uses its prebuilt Windows binaries.
