@@ -1,0 +1,142 @@
+# CI: leak scan (tree and history), tracked unit tests, Windows installer build and a scan of the unpacked build.
+# No selftest and nothing that needs the Pi agent or a login. Secrets used: LEAK_DENYLIST only.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: read the repo, nothing else. No job in this file writes anything.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Leak scan (tree and history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Write the deny-list from the secret
+        id: deny
+        shell: bash
+        env:
+          LEAK_DENYLIST: ${{ secrets.LEAK_DENYLIST }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ -z "${LEAK_DENYLIST//[[:space:]]/}" ] && [ "$IS_FORK" = "true" ]; then
+            echo "::notice title=Leak scan skipped::Pull request from a fork: GitHub does not pass secrets to it, so the deny-list is not available. The scan runs when a maintainer merges to main."
+            echo "### Leak scan SKIPPED (fork pull request, no deny-list available)" >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${LEAK_DENYLIST//[[:space:]]/}" ]; then
+            echo "::error title=Deny-list missing::The LEAK_DENYLIST secret is empty or not set. The leak scan cannot run, so this job fails on purpose. Set the secret (see RELEASING.md)."
+            echo "### Leak scan FAILED: the LEAK_DENYLIST secret is missing" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          file="$(node scripts/ci-denylist.js write)"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Scan the tracked files
+        if: steps.deny.outputs.skip != 'true'
+        env:
+          DENYLIST_FILE: ${{ steps.deny.outputs.file }}
+        run: node scripts/check-secrets.js --all --require-denylist --denylist "$DENYLIST_FILE"
+      - name: Scan the history (messages, authors, added lines)
+        if: steps.deny.outputs.skip != 'true'
+        env:
+          DENYLIST_FILE: ${{ steps.deny.outputs.file }}
+        run: node scripts/check-secrets.js --history --require-denylist --denylist "$DENYLIST_FILE"
+      - name: Remove the deny-list file
+        if: always()
+        run: node scripts/ci-denylist.js delete
+
+  test:
+    name: Tracked tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build-win:
+    name: Windows installer build
+    needs: [scan, test]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Build the installer (unsigned, not published)
+        shell: bash
+        env:
+          CI: "true"
+        run: npm run dist:win -- --publish never
+      - name: Note that CI builds are unsigned
+        shell: bash
+        run: |
+          echo "::notice title=UNSIGNED BUILD::CI builds are never signed. Only the release workflow signs, and only when the Azure signing secrets exist."
+          echo "### UNSIGNED BUILD (CI artifact, for testing only)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Write the deny-list from the secret
+        id: deny
+        shell: bash
+        env:
+          LEAK_DENYLIST: ${{ secrets.LEAK_DENYLIST }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ -z "${LEAK_DENYLIST//[[:space:]]/}" ] && [ "$IS_FORK" = "true" ]; then
+            echo "::notice title=Build scan skipped::Pull request from a fork: no deny-list available, so the unpacked build is not scanned."
+            echo "### Build scan SKIPPED (fork pull request, no deny-list available)" >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${LEAK_DENYLIST//[[:space:]]/}" ]; then
+            echo "::error title=Deny-list missing::The LEAK_DENYLIST secret is empty or not set."
+            exit 1
+          fi
+          file="$(node scripts/ci-denylist.js write)"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Scan the unpacked build
+        if: steps.deny.outputs.skip != 'true'
+        shell: bash
+        env:
+          DENYLIST_FILE: ${{ steps.deny.outputs.file }}
+        run: node scripts/scan-unpacked.js dist/win-unpacked "$DENYLIST_FILE"
+      - name: Remove the deny-list file
+        if: always()
+        shell: bash
+        run: node scripts/ci-denylist.js delete
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pi-crust-windows-installer-unsigned
+          path: |
+            dist/Pi-Crust-Setup-*.exe
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
