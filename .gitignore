@@ -21,3 +21,4 @@ src/local/
 !scripts/check-version.test.js
 !scripts/release-notes.test.js
 !scripts/check-secrets-ci.test.js
+!scripts/checksums.test.js
