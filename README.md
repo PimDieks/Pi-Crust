@@ -4,7 +4,7 @@ A desktop app for [Pi](https://pi.dev): your repo, your running app and a chat w
 
 Pi Crust runs on macOS and Windows 11.
 
-![Pi Crust Design tab: Figma vs build compare, token check, viewports and tweak](docs/screenshots/pi-crust-design.gif)
+![Pi Crust Design tab: Figma vs build slider](docs/screenshots/pi-crust-compare.png)
 
 ![Pi Crust: file tree and commit graph, the editor, and the chat with Pi](docs/screenshots/editor.png)
 
