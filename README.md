@@ -4,7 +4,7 @@ A desktop app for [Pi](https://pi.dev): your repo, your running app and a chat w
 
 Pi Crust runs on macOS and Windows 11. Read how and why it was designed in the case study at [nullvorm.com/pi-crust](https://nullvorm.com/pi-crust).
 
-![Pi Crust Design tab: Figma vs build slider](docs/screenshots/pi-crust-compare.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.png"><img src="docs/screenshots/hero-light.png" alt="Pi Crust with a file tree and commit graph, the Design tab comparing a flight card against its Figma frame with the slider, and the chat with Pi listing two hard-coded values." width="900"></picture>
 
 ![Pi Crust: file tree and commit graph, the editor, and the chat with Pi](docs/screenshots/editor.png)
 
@@ -181,11 +181,11 @@ A login shell in the repo (PowerShell on Windows), using the repo's Node (`.nvmr
 
 **Compare.** *Get Figma selection* loads the frame selected in Figma desktop; *Capture build* captures the Viewer tab at the frame's size, the current viewport or a picked element. View them as **Slider**, **Onion skin**, **Side by side** or **Diff** (pixel heatmap, "92.4 % match", threshold slider). *Send to chat* adds the images with a note.
 
-![Compare view: a Figma frame against the build as a diff heatmap](docs/screenshots/design-compare.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/diff-dark.png"><img src="docs/screenshots/diff-light.png" alt="Compare view in Slider mode: a Figma frame against the build, beside the chat with Pi's list of fixes." width="900"></picture>
 
 **Tokens.** The page's tokens as colour swatches (with contrast), spacing bars, radii and type specimens. **Compare with Figma variables** shows ✓ same, ≠ different, only in code, only in Figma. The search field finds a token by name or value (`#1a73e8`, `rgb(26,115,232)`, `12px`, `0.75rem`): exact matches first, then the nearest few with their delta. Click a token to copy its name, ⌥-click for `var(--name)` or the theme path; ⌘K › Find token… jumps to the field. Pages without tokens can use a JSON file via `designTokensFile` (see [Configuration](#configuration)).
 
-![Tokens view](docs/screenshots/tokens.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tokens-dark.png"><img src="docs/screenshots/tokens-light.png" alt="Tokens view: Figma variables matched against the page's CSS variables, with colour swatches and contrast ratios." width="500"></picture>
 
 **Viewports.** Your app at **Mobile** 390×844, **Tablet** 820×1180 and **Desktop** 1440×900, in **Light**, **Dark** or **Both**. Snapshots refresh shortly after files change. Click a tile to enlarge it or send it to the chat.
 
@@ -216,7 +216,7 @@ The Figma picker and Design compare talk to the Figma desktop MCP server (`http:
 
 | Tweak | Annotate |
 |---|---|
-| ![Tweak panel](docs/screenshots/tweak.png) | ![Annotate overlay](docs/screenshots/annotate.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tweak-dark.png"><img src="docs/screenshots/tweak-light.png" alt="Tweak panel next to the page, with sliders snapping padding, gap and radius to tokens." width="420"></picture> | ![Annotate overlay](docs/screenshots/annotate.png) |
 
 ## History: checkpoints, rewind and screenshots
 
@@ -229,7 +229,7 @@ The Figma picker and Design compare talk to the Figma desktop MCP server (`http:
 
 | Rewind | Screenshot timeline |
 |---|---|
-| ![Rewind dialog](docs/screenshots/rewind.png) | ![Before/after timeline](docs/screenshots/timeline.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/rewind-dialog-dark.png"><img src="docs/screenshots/rewind-dialog-light.png" alt="Rewind dialog listing the changed files and the conversation to restore." width="420"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/before-after-dark.png"><img src="docs/screenshots/before-after-light.png" alt="Before/after card in the chat with the Screenshots strip, and Rewind on the message that caused the edit." width="300"></picture> |
 
 ## Worktree per chat
 
