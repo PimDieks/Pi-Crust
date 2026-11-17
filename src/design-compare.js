@@ -88,10 +88,29 @@
 			const threshold = Number(range.value) / 100;
 			localStorage.setItem("designDiffThreshold", String(threshold));
 			tv.textContent = threshold.toFixed(2);
-			const r = PixelDiff.diff(A, B, { threshold, color: D.tokenRgb("--err") });
-			canvas.getContext("2d").putImageData(new ImageData(r.heatmap, w, h), 0, 0);
-			state.diff = { matchPct: r.matchPct, diffCount: r.diffCount, total: r.total, threshold, canvas };
-			result.textContent = `${r.matchPct.toFixed(1)} % match, ${r.diffCount.toLocaleString()} of ${r.total.toLocaleString()} px differ`;
+			const r = PixelDiff.diff(A, B, { threshold });
+			// The build stays as it is; each region of differing pixels gets a translucent tint and a thin outline.
+			const g = canvas.getContext("2d");
+			g.putImageData(B, 0, 0);
+			const unit = Math.max(1, Math.min(w, h) / 400); // line widths and padding scale with the downscaled image
+			const boxes = PixelDiff.regions(r.mask, w, h, { gap: Math.round(4 * unit), minCount: 2 });
+			const [cr, cg, cb] = D.tokenRgb("--err");
+			const pad = 3 * unit;
+			for (const b of boxes) {
+				const x = Math.max(0, b.x0 - pad) + 0.5 * unit;
+				const y = Math.max(0, b.y0 - pad) + 0.5 * unit;
+				const bw = Math.min(w, b.x1 + pad) - x - 0.5 * unit;
+				const bh = Math.min(h, b.y1 + pad) - y - 0.5 * unit;
+				g.beginPath();
+				g.roundRect(x, y, bw, bh, 2 * unit);
+				g.fillStyle = `rgba(${cr}, ${cg}, ${cb}, 0.18)`;
+				g.fill();
+				g.lineWidth = 1.5 * unit;
+				g.strokeStyle = `rgb(${cr}, ${cg}, ${cb})`;
+				g.stroke();
+			}
+			state.diff = { matchPct: r.matchPct, diffCount: r.diffCount, total: r.total, threshold, canvas, regions: boxes.length };
+			result.textContent = `${r.matchPct.toFixed(1)} % match, ${r.diffCount.toLocaleString()} of ${r.total.toLocaleString()} px differ in ${boxes.length} ${boxes.length === 1 ? "area" : "areas"}`;
 			canvas.setAttribute("aria-label", result.textContent);
 		};
 		range.oninput = () => {
@@ -249,7 +268,7 @@
 		let note = `The first image is the Figma frame "${state.fig.name}", the second image is the build (${state.build.label}), both at ${state.norm.w}×${state.norm.h}.`;
 		if (state.diff) {
 			files.push(D.dataUrlToFile(state.diff.canvas.toDataURL("image/png"), "diff.png"));
-			note += ` The third image marks the differing pixels (${state.diff.matchPct.toFixed(1)} % match). Compare them and list what to fix.`;
+			note += ` The third image marks the differing areas in red on the build (${state.diff.matchPct.toFixed(1)} % match). Compare them and list what to fix.`;
 		} else note += " Compare them and list what to fix.";
 		await D.sendToChat(files, note);
 	}
@@ -273,7 +292,7 @@
 		D.compare.setMode("diff");
 		await wait(600);
 		const d = state.diff;
-		console.error(`SELFTEST pixel diff: ${d ? `${d.matchPct.toFixed(1)} % match, ${d.diffCount} px` : "none"} -> ${d && d.matchPct > 60 && d.matchPct < 99 ? "OK" : "MISMATCH"}`);
+		console.error(`SELFTEST pixel diff: ${d ? `${d.matchPct.toFixed(1)} % match, ${d.diffCount} px, ${d.regions} regions` : "none"} -> ${d && d.matchPct > 60 && d.matchPct < 99 && d.regions >= 1 && d.regions <= 4 ? "OK" : "MISMATCH"}`);
 		console.error(`SELFTEST design tab: order=${tabOrder.join(",")} shortcut=${tabShortcut("design")} browserVisible=${(await crust.selftest.bounds()).visible} -> ${tabOrder.includes("design") && !(await crust.selftest.bounds()).visible ? "OK" : "MISMATCH"}`);
 		await snap("design-diff");
 		const was = themeSetting();
