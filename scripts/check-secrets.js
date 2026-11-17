@@ -7,7 +7,9 @@
 //   node scripts/check-secrets.js --all             every tracked file as it is now
 //   node scripts/check-secrets.js --history         every commit on every branch (added lines, messages, author names and emails)
 // Options (any position):
-//   --denylist FILE      words or regexes that must never appear (one per line, case-insensitive, # for comments).
+//   --file FILE | --stdin | --dir DIR   scan a file, stdin (release notes) or a whole folder of build output, names and contents,
+//                        outside git. Fails when nothing was scanned.
+//   --denylist FILE     words or regexes that must never appear (one per line, case-insensitive, # for comments).
 //                        Default: .leak-denylist in the repo root (gitignored, never committed). Hits print file, line and
 //                        rule number only, never the word. Binary files are skipped and counted.
 //   --require-denylist   exit 1 when there is no deny-list (use in CI). Without it a missing default list is silent (--verbose mentions it).
@@ -27,6 +29,7 @@ let ROOT = null; // set by --root
 let DENY = []; // [{ n, re }]
 const skipped = { binary: 0, scanned: 0 };
 let verbose = false;
+let filesMode = false; // --file/--stdin/--dir: not a commit or push, so no "nothing was committed" line
 
 function loadDenyList(file) {
 	const rules = [];
@@ -219,10 +222,51 @@ function scanAll() {
 	return findings;
 }
 
+// --- Files outside git (release notes, unpacked installer) ----------------------------------------------------------
+
+// A buffer is searched as Latin-1 (catches plain strings in binaries too) and, when it is not plain text, also as
+// UTF-16 (how Windows executables and installers store many strings). Lines of text files get the secret patterns too.
+function scanBuffer(buf, file) {
+	skipped.scanned++;
+	const findings = [];
+	const isText = !buf.includes(0);
+	if (isText) {
+		const lines = buf.toString("latin1").split(/\r?\n/);
+		for (let i = 0; i < lines.length; i++) for (const f of scanLine(lines[i], file)) findings.push({ file, line: i + 1, ...f, where: "files" });
+		return findings;
+	}
+	// Binary: only runs of 6 or more printable characters count (ASCII, and UTF-16 as Windows files store strings), so random
+	// bytes in images and resource files do not match short words by accident. One finding per rule and file.
+	const runs = [buf.toString("latin1").match(/[ -~]{6,}/g) || [], Buffer.from(buf).toString("utf16le").match(/[ -~]{6,}/g) || [], Buffer.from(buf.subarray(1)).toString("utf16le").match(/[ -~]{6,}/g) || []];
+	const seen = new Set();
+	for (const list of runs) for (const run of list) for (const r of DENY) if (!seen.has(r.n) && r.re.test(run)) (seen.add(r.n), findings.push({ file, line: 0, why: "deny-list rule #" + r.n, sample: "(hidden)", where: "files" }));
+	return findings;
+}
+function scanTree(dir, skip = []) {
+	const findings = [];
+	const walk = (d) => {
+		for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+			const full = path.join(d, ent.name);
+			const rel = path.relative(dir, full).split(path.sep).join("/");
+			if (ent.isSymbolicLink()) continue;
+			// File and folder names are always checked, even under a skipped folder.
+			for (const f of denyHits(rel)) findings.push({ file: rel, line: 0, ...f, why: f.why + " (file name)", where: "files" });
+			if (ent.isDirectory()) walk(full);
+			else if (ent.isFile()) {
+				if (skip.some((p) => (p.startsWith("*.") ? rel.toLowerCase().endsWith(p.slice(1).toLowerCase()) : rel === p || rel.startsWith(p + "/")))) skipped.binary++; // counted as "skipped"
+				else findings.push(...scanBuffer(fs.readFileSync(full), rel));
+			}
+		}
+	};
+	walk(dir);
+	return findings;
+}
+
 function report(findings, context) {
 	if (!findings.length) return 0;
-	const out = [`\n✋ Secret check: ${findings.length} possible secret(s) in ${context}. Nothing was ${context === "this push" ? "pushed" : "committed"}.\n`];
-	for (const f of findings) out.push(`  ${f.file}${f.line ? `:${f.line}` : ""}  ${f.why}  [${f.sample}]${f.where && f.where !== "staged" && f.where !== "tracked" ? `  (commit ${f.where})` : ""}`);
+	const out = [`\n✋ Secret check: ${findings.length} possible secret(s) in ${context}. ${context === "this push" ? "Nothing was pushed." : filesMode ? "" : "Nothing was committed."}\n`];
+	// A path that itself matches the deny-list is never printed (a log would leak the word).
+	for (const f of findings) out.push(`  ${denyHits(String(f.file)).length ? "(path hidden: it matches the deny-list)" : f.file}${f.line ? `:${f.line}` : ""}  ${f.why}  [${f.sample}]${f.where && f.where !== "staged" && f.where !== "tracked" && f.where !== "files" ? `  (commit ${f.where})` : ""}`);
 	out.push(
 		"",
 		"Remove the secret (use an environment variable or a file outside the repo instead).",
@@ -246,9 +290,11 @@ function main(args) {
 	const argv = [];
 	let denyFile = null;
 	let requireDeny = false;
+	const skip = [];
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--denylist") denyFile = args[++i];
 		else if (args[i] === "--root") ROOT = path.resolve(args[++i]);
+		else if (args[i] === "--skip") skip.push(String(args[++i]).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, ""));
 		else if (args[i] === "--require-denylist") requireDeny = true;
 		else if (args[i] === "--verbose") verbose = true;
 		else argv.push(args[i]);
@@ -269,7 +315,38 @@ function main(args) {
 		// A release scan must not give false assurance: say so in the full-scan modes, stay silent for the hooks.
 		if (!verbose && (argv[0] === "--all" || argv[0] === "--history")) process.stderr.write("note: no deny-list found, so only the built-in patterns were checked\n");
 	}
+	if (requireDeny && !DENY.length) {
+		process.stderr.write("deny-list is empty, scan not run\n");
+		return 1;
+	}
 	const mode = argv[0] || "--staged";
+	if (mode === "--file" || mode === "--stdin" || mode === "--dir") {
+		// Not git: the release notes (--file / --stdin) or build output (--dir, file names and contents of every file).
+		if (mode !== "--stdin" && !argv[1]) {
+			process.stderr.write(`${mode} needs a path.\n`);
+			return 2;
+		}
+		filesMode = true;
+		let findings;
+		let what;
+		if (mode === "--stdin") (findings = scanBuffer(fs.readFileSync(0), "(stdin)")), (what = "stdin");
+		else if (mode === "--file") (findings = scanBuffer(fs.readFileSync(argv[1]), path.basename(argv[1]))), (what = path.basename(argv[1]));
+		else {
+			if (!fs.existsSync(argv[1]) || !fs.statSync(argv[1]).isDirectory()) {
+				process.stderr.write(`Not a folder: ${argv[1]}\n`);
+				return 2;
+			}
+			findings = scanTree(argv[1], skip);
+			what = "the folder";
+		}
+		const code = report(findings, what);
+		process.stderr.write(`Scanned ${skipped.scanned} file${skipped.scanned === 1 ? "" : "s"}${skip.length ? `, skipped ${skipped.binary} under --skip` : ""}${DENY.length ? `, ${DENY.length} deny-list rules` : ""}.\n`);
+		if (!skipped.scanned) {
+			process.stderr.write("Nothing was scanned: treating that as a failure.\n");
+			return 1;
+		}
+		return code;
+	}
 	if (mode === "--staged") {
 		const code = report(scanStaged(), "the staged changes");
 		if (skipped.binary) summary();
@@ -288,15 +365,25 @@ function main(args) {
 	}
 	if (mode === "--all") {
 		const code = report(scanAll(), "the tracked files");
+		if (!skipped.scanned) {
+			process.stderr.write("Nothing was scanned: treating that as a failure.\n");
+			return 1;
+		}
 		process.stderr.write(`Scanned ${skipped.scanned} text files, skipped ${skipped.binary} binary files${DENY.length ? `, ${DENY.length} deny-list rules` : ""}.\n`);
 		return code;
 	}
 	if (mode === "--history") {
-		const code = report(scanCommits(commitsInRange(["--all"])), "the history");
+		const all = commitsInRange(["--all"]);
+		if (!all.length) {
+			process.stderr.write("No commits found to scan: treating that as a failure.\n");
+			return 1;
+		}
+		const code = report(scanCommits(all), "the history");
+		process.stderr.write(`Scanned ${all.length} commits.\n`);
 		if (skipped.binary) summary();
 		return code;
 	}
-	process.stderr.write(`Unknown option ${mode}. Use --staged, --push, --range A..B, --all or --history.\n`);
+	process.stderr.write(`Unknown option ${mode}. Use --staged, --push, --range A..B, --all, --history, --file F, --stdin or --dir D.\n`);
 	return 2;
 }
 

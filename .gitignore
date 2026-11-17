@@ -20,3 +20,4 @@ src/local/
 !scripts/move-to-public.test.js
 !scripts/check-version.test.js
 !scripts/release-notes.test.js
+!scripts/check-secrets-ci.test.js
