@@ -18,3 +18,5 @@ src/local/
 # Local deny-list for scripts/check-secrets.js, never committed
 .leak-denylist
 !scripts/move-to-public.test.js
+!scripts/check-version.test.js
+!scripts/release-notes.test.js
