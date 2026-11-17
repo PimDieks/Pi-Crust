@@ -1,0 +1,7 @@
+#!/bin/sh
+# Secret check on what this commit adds (scripts/check-secrets.js). Installed by `npm install` (core.hooksPath).
+if ! command -v node >/dev/null 2>&1; then
+	echo "Secret check: node not found, so the staged changes were NOT checked for secrets." >&2
+	exit 1
+fi
+exec node "$(git rev-parse --show-toplevel)/scripts/check-secrets.js" --staged

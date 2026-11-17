@@ -1,0 +1,9 @@
+#!/bin/bash
+# The container has no browser. Links the app or Pi opens (provider logins, "open in browser") are handed to the
+# Pi Crust page in your browser, which opens them in a new tab (or shows a banner with the link). They also go to the
+# clipboard, which the page passes on to your computer's clipboard.
+url="$1"
+[ -z "$url" ] && exit 1
+printf '%s' "$url" | xclip -selection clipboard 2>/dev/null || true
+node -e 'require("fs").writeFileSync(process.argv[1] + ".tmp", JSON.stringify({ id: Date.now() + "-" + process.pid, url: process.argv[2] })); require("fs").renameSync(process.argv[1] + ".tmp", process.argv[1])' /usr/share/novnc/opened.json "$url"
+echo "$(date '+%H:%M:%S') $url" >> /tmp/opened-links.log

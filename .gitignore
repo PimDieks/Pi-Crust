@@ -1,0 +1,13 @@
+node_modules/
+out/
+*.png
+.DS_Store
+!docs/screenshots/*.png
+dist/
+!build/icon.png
+!src/remote/icon.png
+
+# Tests stay local, not in the repo
+*.test.js
+*.test.mjs
+*.spec.js

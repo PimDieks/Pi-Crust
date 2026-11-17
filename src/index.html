@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; worker-src 'self' blob:;" />
+		<title>Pi Crust</title>
+		<link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+		<link rel="stylesheet" href="styles.css" />
+		<script src="platform.js"></script>
+		<script src="theme.js"></script>
+	</head>
+	<body>
+		<div id="app">
+			<!-- Left: file tree -->
+			<aside id="tree-pane" class="pane">
+				<header class="pane-header">
+					<button class="pane-title repo-switch" id="repo-name" title="Switch repo (⌘O)">Open a repo…</button>
+					<span class="branch" id="branch"></span>
+					<button class="icon" id="tree-refresh" title="Refresh" aria-label="Refresh"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button>
+				</header>
+				<div id="tree" class="scroll" role="tree" aria-label="Repository files"></div>
+				<div class="hsplitter" id="graph-splitter" title="Drag to resize"></div>
+				<section id="graph-pane">
+					<header class="pane-header graph-header">
+						<span class="pane-title">Commits</span>
+						<select id="graph-scope" title="Which commits">
+							<option value="all">All branches</option>
+							<option value="head">Current branch</option>
+						</select>
+						<span class="spacer"></span>
+						<button class="icon" id="graph-refresh" title="Refresh" aria-label="Refresh"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button>
+					</header>
+					<div id="graph" class="scroll" role="list" aria-label="Commit history"></div>
+				</section>
+			</aside>
+			<div class="splitter" data-left="tree-pane"></div>
+
+			<!-- Middle: tabs for the browser, changes and terminal -->
+			<section id="middle-pane" class="pane">
+				<div id="middle-main">
+				<nav class="tabs" role="tablist">
+					<button role="tab" data-tab="editor" aria-selected="true">Editor <span id="editor-dirty-count" class="badge"></span> <kbd>⌘1</kbd></button>
+					<button role="tab" data-tab="changes">Changes <span id="changes-count" class="badge"></span> <kbd>⌘2</kbd></button>
+					<button role="tab" data-tab="browser">Viewer <kbd>⌘3</kbd></button>
+					<button role="tab" data-tab="terminal">Terminal <span id="term-run" class="badge run-badge"></span> <kbd>⌘4</kbd></button>
+					<button role="tab" data-tab="design">Design <kbd>⌘5</kbd></button>
+					<span class="spacer"></span>
+					<div class="layout-toggles" role="toolbar" aria-label="Panels">
+						<button class="icon" id="theme-toggle" title="Theme">
+							<svg class="t-icon t-system" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/></svg>
+							<svg class="t-icon t-light" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>
+							<svg class="t-icon t-dark" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/></svg>
+						</button>
+						<button class="icon layout-btn" id="toggle-left" title="Files and commits (⌘B)" aria-pressed="true">
+							<svg viewBox="0 0 16 16" width="16" height="16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect class="fill" x="2" y="3" width="4" height="10" fill="currentColor"/></svg>
+						</button>
+						<button class="icon layout-btn" id="toggle-bottom" title="Terminal at the bottom (⌃`)" aria-pressed="false">
+							<svg viewBox="0 0 16 16" width="16" height="16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect class="fill" x="2" y="9" width="12" height="4" fill="currentColor"/></svg>
+						</button>
+						<button class="icon layout-btn" id="toggle-right" title="Chat (⌥⌘B)" aria-pressed="true">
+							<svg viewBox="0 0 16 16" width="16" height="16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect class="fill" x="10" y="3" width="4" height="10" fill="currentColor"/></svg>
+						</button>
+					</div>
+				</nav>
+				<div class="tab-panel" data-panel="browser">
+					<header class="pane-header browser-bar">
+						<button class="icon" data-action="back" title="Back" aria-label="Back"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8H3M7 4L3 8l4 4"/></svg></button>
+						<button class="icon" data-action="forward" title="Forward" aria-label="Forward"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h10M9 4l4 4-4 4"/></svg></button>
+						<button class="icon" data-action="reload" title="Reload" aria-label="Reload"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button>
+						<form id="url-form"><input id="url" spellcheck="false" aria-label="Address" /></form>
+						<button class="icon" id="pick-element" title="Pick element (⌘⇧C)" aria-label="Pick element"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 13.5H3A1.5 1.5 0 0 1 1.5 12V3A1.5 1.5 0 0 1 3 1.5h9A1.5 1.5 0 0 1 13.5 3v3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 8l6.5 2.4-2.9 1.2-1.2 2.9z" fill="currentColor" stroke="currentColor" stroke-linejoin="round"/></svg></button>
+						<button class="icon" id="tweak-btn" title="Tweak an element's spacing, radius, type and colours" aria-label="Tweak an element"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5h5M12.5 5h1M2.5 11h1M8.5 11h5"/><circle cx="10" cy="5" r="1.75"/><circle cx="6" cy="11" r="1.75"/></svg></button>
+						<button class="icon" id="annotate-btn" title="Annotate a screenshot of the page" aria-label="Annotate a screenshot of the page"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.5l3 3-7.5 7.5H3v-3z"/><path d="M9 4l3 3"/></svg></button>
+						<button class="icon" id="pick-figma" title="Add Figma desktop selection (⌘⇧F)" aria-label="Add Figma desktop selection"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5.5 1.5h2.5v4H5.5a2 2 0 0 1 0-4zM8 1.5h2.5a2 2 0 0 1 0 4H8zM5.5 5.5H8v4H5.5a2 2 0 0 1 0-4zM5.5 9.5H8v2.5a2.5 2.5 0 1 1-2.5-2.5zM8 5.5h2.5a2 2 0 0 1 0 4H8z"/></g></svg></button>
+						<button class="icon" id="scheme-btn" title="Colour scheme: Auto" aria-label="Colour scheme: Auto"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11" /></svg></button>
+						<button class="icon" id="state-btn" title="Force element state (hover, focus, active, disabled)" aria-label="Force element state" aria-expanded="false"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M6 8.5l1.5 1.5L10.5 6.5"/></svg></button>
+						<button class="icon" data-action="devtools" title="DevTools" aria-label="DevTools"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M5 7l2 1.5L5 10M8.5 10.5H11"/></svg></button>
+						<button class="icon" data-action="external" title="Open in system browser" aria-label="Open in system browser"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/></svg></button>
+					</header>
+					<div id="state-bar" hidden></div>
+					<div id="story-bar" hidden></div>
+					<div id="mendix-bar" hidden></div>
+					<div id="mendix-log" hidden></div>
+					<div id="browser-body">
+						<div id="browser-slot">
+							<div id="browser-error" hidden></div>
+						</div>
+						<aside id="tweak-panel" role="complementary" aria-label="Tweak element" hidden></aside>
+					</div>
+				</div>
+				<div class="tab-panel" data-panel="design" hidden>
+					<header class="pane-header design-bar">
+						<div class="seg" id="design-views" role="tablist" aria-label="Design views"></div>
+					</header>
+					<div id="design-host"></div>
+				</div>
+				<div class="tab-panel" data-panel="changes" hidden>
+					<div id="changes">
+						<div id="changes-list" class="scroll" role="listbox" aria-label="Changed files"></div>
+						<div class="splitter" data-left="changes-list" title="Drag to resize"></div>
+						<div id="diff-pane">
+							<div id="diff-toolbar" hidden>
+								<span id="diff-path" class="muted"></span>
+								<span id="diff-dirty" class="muted" hidden>Unsaved</span>
+								<span class="spacer"></span>
+								<button type="button" id="diff-layout" class="secondary-btn" title="Switch between side by side and inline">Side by side</button>
+								<button type="button" id="diff-copy" class="secondary-btn" title="Copy the selection, or the whole file (⇧⌘C)">Copy</button>
+								<button type="button" id="diff-open" class="secondary-btn" title="Open the file in the Editor tab">Open in Editor</button>
+								<button type="button" id="diff-save" class="secondary-btn" title="Save your edits (⌘S)" disabled>Save</button>
+							</div>
+							<div id="diff-view" class="scroll"><div class="empty">Select a file to see its diff.</div></div>
+							<div id="diff-editor-host" hidden></div>
+						</div>
+						<button type="button" id="diff-add" title="Add the selected lines to the chat (⌘L)" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>Add to chat <kbd>⌘L</kbd></button>
+					</div>
+					<form id="git-bar">
+						<span id="git-branch" class="git-branch"></span>
+						<input id="commit-msg" placeholder="Commit message" spellcheck="true" />
+						<button type="submit" id="btn-commit">Commit</button>
+						<button type="button" id="btn-commit-push">Commit + Push</button>
+						<button type="button" id="btn-push" class="secondary">Push</button>
+						<button type="button" id="btn-pr" class="secondary">Create PR with Pi</button>
+					</form>
+				</div>
+				<div class="tab-panel" data-panel="terminal" hidden>
+					<div id="terminal-host">
+						<div class="term-bar">
+							<span class="muted" id="term-cwd"></span>
+							<div id="term-tabs" class="term-tabs" role="tablist" aria-label="Terminals"></div>
+							<button class="icon" id="term-new" title="New terminal" aria-label="New terminal"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
+							<span id="term-proc" class="term-proc" hidden><span class="dot"></span><span class="tp-what"></span><span class="tp-time"></span></span>
+							<span class="spacer"></span>
+							<button class="icon" id="term-to-bottom" title="Move to the bottom panel" aria-label="Move to the bottom panel"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 9.5h13"/></svg></button>
+							<button class="icon" id="term-restart" title="Restart this shell" aria-label="Restart this shell"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button>
+							<button class="icon" id="term-close" title="Close the bottom panel" aria-label="Close the bottom panel" hidden><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+						</div>
+						<div id="terminal"></div>
+					</div>
+				</div>
+				<div class="tab-panel" data-panel="editor" hidden>
+					<div id="editor-tabs" role="tablist" aria-label="Open files"></div>
+					<div id="editor-conflict" role="alert" hidden></div>
+					<div id="editor-host"></div>
+					<div id="editor-empty" class="empty">Click a file in the tree to open it.</div>
+					<div id="editor-status"><span id="editor-path" class="muted"></span><span class="spacer"></span><span id="editor-pos" class="muted"></span><span id="editor-lang" class="muted"></span></div>
+				</div>
+				</div>
+				<div class="hsplitter" id="bottom-splitter" hidden></div>
+				<div id="bottom-panel" hidden></div>
+			</section>
+			<div class="splitter" data-right="chat-pane"></div>
+
+			<!-- Right: chat -->
+			<section id="chat-pane" class="pane">
+				<header class="pane-header">
+					<span class="pane-title">Pi</span>
+					<button type="button" id="ctx-meter" title="Model, context and usage" aria-haspopup="dialog" aria-expanded="false"><span class="pill-model">Model</span><svg class="pill-chev" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg><span class="meter-seg" data-seg="ctx" hidden><span class="meter-label">Ctx</span><span class="ctx-bar"><span></span></span><span class="ctx-pct"></span></span><span class="meter-seg" data-seg="copilot" hidden><span class="meter-label">Copilot</span><span class="ctx-bar"><span></span></span><span class="ctx-pct"></span></span></button>
+					<span class="spacer"></span>
+					<button type="button" class="icon remote-indicator off" id="remote-indicator" title="Remote access: off" aria-label="Remote access" aria-haspopup="menu" aria-expanded="false" hidden><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/></svg><span class="ri-count"></span></button>
+					<button class="icon" id="open-palette" title="Command palette (⌘K)" aria-label="Command palette"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg></button>
+					<button class="icon" id="history" title="Earlier chats (⌘J)" aria-label="Earlier chats"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg></button>
+					<button class="icon" id="new-chat" title="New chat (⌘N)" aria-label="New chat"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg></button>
+					<button class="icon" id="new-chat-menu" title="More ways to start a chat" aria-label="More ways to start a chat" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg></button>
+				</header>
+				<div id="chat-tabs" role="tablist" aria-label="Chats"></div>
+				<div id="timeline" hidden role="region" aria-label="Screenshots timeline"></div>
+				<div id="messages-host" aria-live="polite"></div>
+				<div id="widgets"></div>
+				<div id="todo-panel" role="region" aria-label="Todos" hidden></div>
+				<div id="ask" role="region" aria-label="Pi asks" aria-live="assertive" hidden></div>
+				<div id="queue" role="region" aria-label="Queued messages" hidden></div>
+				<form id="composer">
+					<div id="picks" class="pick-pills" aria-label="Picked elements" hidden></div>
+					<textarea id="input" rows="3" placeholder="Ask Pi…  (Enter to send, Shift+Enter for a new line)"></textarea>
+					<div class="composer-bar">
+						<select id="perm-mode" title="Permission mode">
+							<option value="plan">Plan (read-only)</option>
+							<option value="ask-edits">Ask before edits</option>
+							<option value="ask-commands">Ask before commands</option>
+							<option value="trusted">Trusted</option>
+						</select>
+						<select id="thinking-level" title="Thinking level" aria-label="Thinking level" hidden></select>
+						<button type="button" class="icon" id="attach-image" title="Attach images (or paste / drop them)" aria-label="Attach images"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M13.5 7.5l-5.6 5.6a3.2 3.2 0 0 1-4.5-4.5l5.8-5.8a2.1 2.1 0 0 1 3 3l-5.8 5.8a1 1 0 0 1-1.5-1.5l5.3-5.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+						<button type="button" class="icon" id="mic" title="Voice input (⌘⇧Space)" aria-label="Voice input (⌘⇧Space)" aria-pressed="false"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+						<input type="file" id="image-file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,.svg" multiple hidden />
+						<span id="status-line"></span>
+						<span class="composer-actions">
+							<button type="button" id="stop" hidden>Stop</button>
+							<button type="submit" id="send">Send</button>
+						</span>
+					</div>
+				</form>
+			</section>
+		</div>
+
+		<div id="toasts"></div>
+		<div id="repo-picker" hidden>
+			<div class="picker-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+				<h1 id="picker-title">Which repo do you want to work in?</h1>
+				<input id="picker-filter" placeholder="Filter…" spellcheck="false" autocomplete="off" />
+				<div id="picker-list" role="listbox"></div>
+				<div class="picker-actions">
+					<button type="button" id="picker-browse" class="secondary-btn">Browse…</button>
+					<span class="spacer"></span>
+					<button type="button" id="picker-cancel" class="secondary-btn" hidden>Cancel</button>
+				</div>
+			</div>
+		</div>
+		<div id="palette-backdrop" hidden>
+			<div id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+				<input id="palette-input" placeholder="Files, commands, skills, actions…" spellcheck="false" autocomplete="off" />
+				<div id="palette-results" role="listbox"></div>
+			</div>
+		</div>
+		<div id="modal-backdrop" hidden>
+			<div id="modal" role="dialog" aria-modal="true"></div>
+		</div>
+
+		<script src="../node_modules/marked/lib/marked.umd.js"></script>
+		<script src="../node_modules/dompurify/dist/purify.min.js"></script>
+		<script src="../node_modules/@highlightjs/cdn-assets/highlight.min.js"></script>
+		<script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+		<script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+		<script src="voice.js"></script>
+		<script src="duration.js"></script>
+		<script src="renderer.js"></script>
+		<script src="changes.js"></script>
+		<script src="terminal.js"></script>
+		<script src="sessions.js"></script>
+		<script src="subagents.js"></script>
+		<script src="context-panel.js"></script>
+		<script src="subscriptions.js"></script>
+		<script src="slash.js"></script>
+		<script src="palette.js"></script>
+		<script src="notify.js"></script>
+		<script src="remote-panel.js"></script>
+		<script src="chat-find.js"></script>
+		<script src="thinking.js"></script>
+		<script src="slash-menu.js"></script>
+		<script src="mention-menu.js"></script>
+		<script src="todo-panel.js"></script>
+		<script src="mermaid-render.js"></script>
+		<script src="rewind.js"></script>
+		<script src="compare-view.js"></script>
+		<script src="pixel-diff.js"></script>
+		<script src="token-match.js"></script>
+		<script src="token-search.js"></script>
+		<script src="design.js"></script>
+		<script src="design-compare.js"></script>
+		<script src="design-tokens.js"></script>
+		<script src="design-viewports.js"></script>
+		<script src="figma-match.js"></script>
+		<script src="design-stories.js"></script>
+		<script src="worktree.js"></script>
+		<script src="tweak.js"></script>
+		<script src="annotate.js"></script>
+		<script src="browser-tools.js"></script>
+		<script src="mendix.js"></script>
+		<script src="turn-shots.js"></script>
+		<script src="timeline.js"></script>
+		<script src="repos.js"></script>
+		<script src="voice-ui.js"></script>
+		<script src="graph.js"></script>
+		<script src="app-update.js"></script>
+		<script src="layout.js"></script>
+		<script src="views.js"></script>
+		<!-- Monaco's AMD loader defines a global `define`: keep it after every UMD script above. -->
+		<script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
+		<script src="editor.js"></script>
+		<script src="changes-editor.js"></script>
+	</body>
+</html>

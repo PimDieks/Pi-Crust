@@ -1,0 +1,11 @@
+node_modules
+dist
+out
+.git
+*.png
+!build/icon.png
+!src/remote/icon.png
+!docs/screenshots/*.png
+.env*
+*.log
+.DS_Store

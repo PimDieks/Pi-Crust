@@ -1,0 +1,194 @@
+<!doctype html>
+<!-- Pi Crust in Docker: a full-window noVNC client that
+     - maps ⌘ to Ctrl on macOS (the app runs on Linux, where the shortcut key is Ctrl; noVNC itself sends ⌘ as Alt),
+     - syncs the clipboard: copying in the app puts the text on your computer's clipboard, and ⌘V / Ctrl+V pastes
+       your computer's clipboard into the app.
+     Served by websockify from /usr/share/novnc (next to noVNC's core/). Uses noVNC 1.3 (Debian bookworm). -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pi Crust</title>
+<style>
+	html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f4f2; font: 13px system-ui, sans-serif; }
+	#screen { position: absolute; inset: 0; }
+	#status { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 6px;
+		background: rgba(0, 0, 0, 0.75); color: #fff; z-index: 10; pointer-events: none; transition: opacity 0.3s; }
+	#status.hidden { opacity: 0; }
+	/* Full screen button: shows when the pointer is near the top-right corner */
+	#fs { position: absolute; top: 0; right: 0; width: 160px; height: 40px; z-index: 11; }
+	#fs button { position: absolute; top: 6px; right: 6px; padding: 4px 10px; border: 0; border-radius: 6px; cursor: pointer;
+		background: rgba(0, 0, 0, 0.75); color: #fff; font: inherit; opacity: 0; transition: opacity 0.2s; }
+	#fs:hover button { opacity: 1; }
+	/* A link the app wants to open (provider login etc.) when the browser blocked the new tab */
+	#link { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 12; display: none; max-width: 70vw;
+		padding: 8px 10px; border-radius: 8px; background: #1f2937; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+		align-items: center; gap: 8px; }
+	#link.show { display: flex; }
+	#link b { flex: none; white-space: nowrap; }
+	#link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; }
+	#link a, #link button { flex: none; padding: 4px 10px; border: 0; border-radius: 6px; background: #2563eb; color: #fff;
+		font: inherit; text-decoration: none; cursor: pointer; }
+	#link button.x { background: transparent; padding: 4px 6px; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<div id="status">Connecting…</div>
+<div id="link"><b>Open in your browser:</b> <span id="link-url"></span><a id="link-open" target="_blank" rel="noopener">Open</a><button class="x" id="link-close" title="Dismiss">✕</button></div>
+<div id="fs"><button id="fs-btn" title="Full screen (Esc and ⌘W go to the app; hold Esc to leave)">⛶ Full screen</button></div>
+<script type="module">
+import RFB from "./core/rfb.js";
+
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+const XK_Control_L = 0xffe3, XK_v = 0x0076;
+const statusEl = document.getElementById("status");
+let rfb = null;
+let statusTimer = null;
+
+function status(text, sticky) {
+	statusEl.textContent = text;
+	statusEl.classList.remove("hidden");
+	clearTimeout(statusTimer);
+	if (!sticky) statusTimer = setTimeout(() => statusEl.classList.add("hidden"), 1500);
+}
+
+// ---- App → computer: x11vnc sends the X clipboard when the app copies. Writing to the browser clipboard can need
+// focus or a user gesture; if it fails, try again on the next key or click.
+let pendingCopy = null;
+async function writeClipboard(text) {
+	try {
+		await navigator.clipboard.writeText(text);
+		pendingCopy = null;
+	} catch {
+		pendingCopy = text;
+	}
+}
+const flushCopy = () => pendingCopy !== null && writeClipboard(pendingCopy);
+window.addEventListener("keyup", flushCopy, true);
+window.addEventListener("pointerdown", flushCopy, true);
+
+// ---- Computer → app: on ⌘V (macOS) / Ctrl+V, keep noVNC from swallowing the key so the browser fires a paste
+// event (no permission prompt needed), send that text as the VNC clipboard, then send V. The modifier itself was
+// already sent as Ctrl, so the app sees Ctrl+V and pastes the text we just set.
+let pasteWaiting = null;
+function sendPaste(text) {
+	clearTimeout(pasteWaiting);
+	pasteWaiting = null;
+	if (!rfb) return;
+	if (text) rfb.clipboardPasteFrom(text);
+	// The modifier may be released by now (the clipboard read is async): then send our own Ctrl around the V.
+	const down = rfb._keyboard._keyDownList;
+	const ctrlHeld = ["MetaLeft", "MetaRight", "ControlLeft", "ControlRight"].some((c) => c in down);
+	if (!ctrlHeld) rfb.sendKey(XK_Control_L, "ControlLeft", true);
+	rfb.sendKey(XK_v, "KeyV", true);
+	rfb.sendKey(XK_v, "KeyV", false);
+	if (!ctrlHeld) rfb.sendKey(XK_Control_L, "ControlLeft", false);
+}
+window.addEventListener("keydown", (e) => {
+	const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+	if (!rfb || !mod || e.altKey || e.code !== "KeyV") return;
+	e.stopImmediatePropagation(); // not to noVNC; no preventDefault, so the paste event follows
+	clearTimeout(pasteWaiting);
+	// Fallback for browsers that don't fire paste here: read the clipboard directly (may ask for permission once).
+	pasteWaiting = setTimeout(async () => {
+		let text = "";
+		try {
+			text = await navigator.clipboard.readText();
+		} catch {}
+		sendPaste(text);
+	}, 150);
+}, true);
+window.addEventListener("keyup", (e) => {
+	if (e.code === "KeyV" && (isMac ? e.metaKey : e.ctrlKey)) e.stopImmediatePropagation();
+}, true);
+document.addEventListener("paste", (e) => {
+	if (pasteWaiting === null) return;
+	e.preventDefault();
+	sendPaste(e.clipboardData?.getData("text/plain") || "");
+}, true);
+
+// ---- Links opened in the container (xdg-open, e.g. a provider login) open here in a new tab. Right after a click
+// in the app the browser allows that; otherwise a banner with the link shows. They are on the clipboard too.
+const linkBox = document.getElementById("link");
+const linkOpen = document.getElementById("link-open");
+let lastLink = null;
+document.getElementById("link-close").addEventListener("click", () => linkBox.classList.remove("show"));
+linkOpen.addEventListener("click", () => linkBox.classList.remove("show"));
+async function pollLinks() {
+	try {
+		const res = await fetch(`opened.json?t=${Date.now()}`, { cache: "no-store" });
+		if (res.ok) {
+			const { id, url } = await res.json();
+			if (lastLink === null) lastLink = id; // already there when the page loaded: not new
+			else if (id !== lastLink && /^https?:\/\//i.test(url)) {
+				lastLink = id;
+				const tab = window.open(url, "_blank"); // with "noopener" it always returns null, so cut the opener here
+				if (tab) tab.opener = null;
+				if (!tab) {
+					document.getElementById("link-url").textContent = url;
+					linkOpen.href = url;
+					linkBox.classList.add("show");
+				} else status("Opened in a new tab");
+			}
+		} else if (lastLink === null) lastLink = "";
+	} catch {
+		if (lastLink === null) lastLink = ""; // not up yet: the first link that shows up later is new
+	}
+	setTimeout(pollLinks, 700);
+}
+pollLinks();
+
+// ---- Full screen. The screen resizes with the window. Keyboard Lock (Chromium) sends Esc, ⌘W, ⌘T etc. to the app
+// instead of the browser while full screen; hold Esc to leave. ?fullscreen=1 offers it on the first click.
+const fsBtn = document.getElementById("fs-btn");
+async function enterFullscreen() {
+	await document.documentElement.requestFullscreen().catch(() => {});
+	await navigator.keyboard?.lock?.().catch(() => {});
+	rfb?.focus();
+}
+fsBtn.addEventListener("click", () => (document.fullscreenElement ? document.exitFullscreen() : enterFullscreen()));
+document.addEventListener("fullscreenchange", () => {
+	fsBtn.textContent = document.fullscreenElement ? "Exit full screen" : "⛶ Full screen";
+	if (!document.fullscreenElement) navigator.keyboard?.unlock?.();
+	else status("Full screen: hold Esc to leave");
+});
+if (new URLSearchParams(location.search).get("fullscreen") === "1") {
+	window.addEventListener("pointerdown", () => !document.fullscreenElement && enterFullscreen(), { once: true, capture: true });
+}
+
+// ---- Connection (reconnects when the container or the app restarts)
+function connect() {
+	const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/websockify`;
+	const params = new URLSearchParams(location.search);
+	rfb = new RFB(document.getElementById("screen"), url, params.get("password") ? { credentials: { password: params.get("password") } } : {});
+	rfb.resizeSession = true; // the virtual screen follows the browser window
+	rfb.scaleViewport = false;
+	rfb.focusOnClick = true;
+
+	// ⌘ → Ctrl on macOS. noVNC turns ⌘ into Alt_L / Super_L before this hook; replace it with Ctrl.
+	const keyboard = rfb._keyboard;
+	const sendKeyEvent = keyboard.onkeyevent;
+	keyboard.onkeyevent = (keysym, code, down) => {
+		if (isMac && (code === "MetaLeft" || code === "MetaRight")) keysym = XK_Control_L;
+		sendKeyEvent(keysym, code, down);
+	};
+
+	rfb.addEventListener("connect", () => {
+		status("Connected");
+		rfb.focus();
+	});
+	rfb.addEventListener("disconnect", () => {
+		rfb = null;
+		status("Disconnected, reconnecting…", true);
+		setTimeout(connect, 1500);
+	});
+	rfb.addEventListener("credentialsrequired", () => {
+		const password = prompt("VNC password");
+		if (password !== null) rfb.sendCredentials({ password });
+	});
+	rfb.addEventListener("clipboard", (e) => writeClipboard(e.detail.text));
+}
+connect();
+</script>
+</body>
+</html>

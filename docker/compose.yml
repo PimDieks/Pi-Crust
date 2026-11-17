@@ -1,0 +1,56 @@
+# Pi Crust in Docker. See docker/README.md.
+#   PROJECTS=~/Documents WORKSPACE=~/Documents/my-monorepo docker compose -f docker/compose.yml up --build -d
+name: pi-crust
+services:
+  pi-crust:
+    image: pi-crust
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    shm_size: 1g
+    ports:
+      - "127.0.0.1:${PORT:-6080}:6080" # Pi Crust in the browser (noVNC, behind a localhost-only gate)
+      # Login callbacks: your browser redirects to localhost:<port> after signing in (Claude, ChatGPT Plus/Pro)
+      - "127.0.0.1:53692:53692"
+      - "127.0.0.1:1455:1455"
+    environment:
+      - PORT=${PORT:-6080}
+      # Extra host names the browser page may be opened from (e.g. a Tailscale name), comma-separated
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-}
+      # The repo Pi Crust opens first (a path inside PROJECTS, same as on your computer)
+      - PI_CRUST_CWD=${WORKSPACE:-${PROJECTS:-${HOME}/Documents}}
+      # localhost:<port> in the container reaches <port> on your computer: other compose stacks, dev servers, Figma
+      - HOST_PORTS=${HOST_PORTS:-}
+      # 1: copy your computer's Pi logins (auth.json) into the container on its first start
+      - PI_IMPORT_AUTH=${PI_IMPORT_AUTH:-0}
+      # API keys instead of (or next to) a subscription login; empty ones are ignored
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      # git push over SSH with your computer's keys (Docker Desktop's SSH agent forwarding)
+      - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock
+    extra_hosts:
+      - host.docker.internal:host-gateway # Docker on Linux; Docker Desktop has it already
+    volumes:
+      # Your projects at the same path as on your computer, so paths in your Pi settings, skills and sessions match
+      - ${PROJECTS:-${HOME}/Documents}:${PROJECTS:-${HOME}/Documents}
+      # Your Pi setup (extensions, agents, prompts, settings), read-only; copied in on start. Must exist.
+      - type: bind
+        source: ${PI_CONFIG:-${HOME}/.pi/agent}
+        target: /host-pi
+        read_only: true
+        bind: { create_host_path: false }
+      # Your git name, email and aliases (signing and the keychain helper are turned off in the container). Must exist.
+      - type: bind
+        source: ${HOME}/.gitconfig
+        target: /host-gitconfig
+        read_only: true
+        bind: { create_host_path: false }
+      # Docker Desktop's SSH agent socket (in its VM, not on your Mac)
+      - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock
+      - pi-home:/root/.pi # Pi logins and sessions in the container
+      - pi-crust-config:/root/.config/pi-crust # Pi Crust settings and layout
+volumes:
+  pi-home:
+  pi-crust-config:

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pi Crust">
+<title>Pi Crust Remote</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<section id="pair" hidden>
+	<h1>Pi Crust Remote</h1>
+	<p class="muted">Open Remote access on your computer, choose “Pair a phone”, and type the code here.</p>
+	<input id="pair-code" type="text" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="XXXX-XXXX" maxlength="12" aria-label="Pairing code">
+	<input id="pair-name" type="text" autocomplete="off" maxlength="40" placeholder="Device name" aria-label="Device name">
+	<button id="pair-go" type="button" class="btn block">Pair</button>
+	<p id="pair-error" class="error" role="alert"></p>
+</section>
+
+<section id="main" hidden>
+	<header class="head">
+		<span class="brand">Pi</span>
+		<button id="model-btn" type="button" class="pill-meter" aria-haspopup="dialog" aria-label="Model and context"><span id="model-name">Model</span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg><span id="ctx-seg" class="ctx-seg" hidden><span class="ctx-bar"><span></span></span><span class="ctx-pct"></span></span></button>
+		<span class="spacer"></span>
+		<span id="conn" class="conn" hidden>Reconnecting…</span>
+		<button id="history-btn" type="button" class="icon" aria-label="All chats"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg></button>
+		<button id="new-chat" type="button" class="icon" aria-label="New chat"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg></button>
+		<button id="menu-btn" type="button" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg></button>
+	</header>
+	<div id="menu" role="menu" hidden>
+		<button id="notify-btn" type="button" role="menuitem" hidden>Enable notifications</button>
+		<button id="unpair" type="button" role="menuitem">Unpair this phone</button>
+	</div>
+	<nav id="tabs" role="tablist" aria-label="Chats"></nav>
+	<main id="transcript" aria-live="polite"></main>
+	<div id="stopped" hidden><span>Pi stopped in this chat.</span><button id="restart" type="button" class="btn">Restart</button></div>
+	<div id="ask" hidden></div>
+	<div id="queue" hidden aria-label="Queued messages"></div>
+	<form id="composer" autocomplete="off">
+		<textarea id="input" rows="2" placeholder="Ask Pi…" enterkeyhint="enter" aria-label="Message"></textarea>
+		<div class="composer-bar">
+			<label id="perm-wrap" class="pill-select mode-trusted"><span class="ps-label">Trusted</span><select id="perm-mode" aria-label="Permission mode">
+				<option value="plan">Plan (read-only)</option>
+				<option value="ask-edits">Ask before edits</option>
+				<option value="ask-commands">Ask before commands</option>
+				<option value="trusted">Trusted</option>
+			</select></label>
+			<label id="thinking-wrap" class="pill-select" hidden><span class="ps-label"></span><select id="thinking-level" aria-label="Thinking level"></select></label>
+			<span class="spacer"></span>
+			<button id="stop" type="button" class="btn secondary" hidden>Stop</button>
+			<button id="send" type="submit" class="btn">Send</button>
+		</div>
+	</form>
+</section>
+
+<div id="sheet-backdrop" hidden>
+	<div id="sheet" role="dialog" aria-modal="true">
+		<div class="sheet-head"><strong id="sheet-title"></strong><button id="sheet-close" type="button" class="icon" aria-label="Close"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+		<div id="sheet-body"></div>
+	</div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<script src="/vendor/marked.js"></script>
+<script src="/vendor/purify.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

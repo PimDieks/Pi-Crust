@@ -1,0 +1,110 @@
+{
+  "name": "pi-crust",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop GUI for Pi: file tree, embedded dev browser and chat",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "selftest": "node -e \"process.env.PI_CRUST_SELFTEST='1';if(process.argv[1])process.env.PI_CRUST_SELFTEST_ONLY=process.argv.slice(1).join(',');const r=require('child_process').spawnSync(require('electron'),['.'],{stdio:'inherit'});process.exit(r.status===null?1:r.status)\"",
+    "test": "node --test src/*.test.js scripts/*.test.js",
+    "check-secrets": "node scripts/check-secrets.js --all",
+    "prepare": "node -e \"try{require('./scripts/install-hooks.js')}catch{}\"",
+    "dist:win": "node scripts/dist-win.js",
+    "update": "node scripts/update.js",
+    "dist:mac": "node scripts/dist-mac.js"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "@highlightjs/cdn-assets": "^11.12.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.2",
+    "mermaid": "^12.2.0",
+    "monaco-editor": "^0.52.2",
+    "node-pty": "^1.1.0",
+    "qrcode-generator": "2.0.4"
+  },
+  "build": {
+    "appId": "dev.pidieks.picrust",
+    "productName": "Pi Crust",
+    "copyright": "Pi Crust",
+    "asar": false,
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "package.json",
+      "src/**/*",
+      "!src/**/*.test.js",
+      "!**/*.pdb",
+      "!**/*.map",
+      "!node_modules/node-pty/{build,deps,src,third_party,scripts,typings}/**",
+      "!node_modules/monaco-editor/{esm,dev,min-maps}/**",
+      "!**/.github/**",
+      "!**/*.md",
+      "!**/test/**",
+      "!**/tests/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "signAndEditExecutable": true,
+      "forceCodeSigning": false,
+      "files": [
+        "!node_modules/node-pty/prebuilds/{darwin-*,win32-arm64}/**"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pi Crust",
+      "uninstallDisplayName": "Pi Crust",
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Pi Crust records your voice for voice input. It is transcribed on this Mac.",
+        "NSLocalNetworkUsageDescription": "Pi Crust serves Remote access to your phone on your local network when you turn it on."
+      },
+      "files": [
+        "!node_modules/node-pty/prebuilds/win32-*/**"
+      ]
+    },
+    "dmg": {
+      "title": "Pi Crust"
+    }
+  }
+}
