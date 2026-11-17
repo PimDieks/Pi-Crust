@@ -17,3 +17,4 @@ src/local/
 
 # Local deny-list for scripts/check-secrets.js, never committed
 .leak-denylist
+!scripts/*.test.js
