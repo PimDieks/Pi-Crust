@@ -153,5 +153,31 @@
 		},
 	];
 
+	// Selftest: in a chat long enough to overflow, the before/after card must keep its natural height (flex children
+	// of the message list must not shrink).
+	selftestSteps.push(async ({ snap, wait }) => {
+		if (!view?.el) return console.error("SELFTEST turn-shots: no chat view -> MISMATCH");
+		const host = view.el;
+		const filler = [];
+		for (let i = 0; i < 40; i++) {
+			const m = el("div", "msg assistant", `Filler message ${i}: enough text to make the chat taller than the window. `.repeat(6));
+			host.append(m);
+			filler.push(m);
+		}
+		const id = "selftest-shot";
+		const card = addShotCard(view, { before: { id, w: 480, h: 252 }, after: { id, w: 480, h: 252, url: "http://localhost:3000/" }, prompt: "selftest", cpId: null });
+		await wait(600);
+		const overflows = host.scrollHeight > host.clientHeight;
+		const h = Math.round(card.getBoundingClientRect().height);
+		const sumH = Math.round(card.querySelector("summary").getBoundingClientRect().height);
+		const ok = overflows && h > sumH;
+		console.error(`SELFTEST turn-shots: card height ${h}px (summary ${sumH}px), chat overflows: ${overflows} -> ${ok ? "OK" : "MISMATCH"}`);
+		card.scrollIntoView({ block: "center" });
+		await wait(200);
+		await snap("turn-shots-card");
+		card.remove();
+		filler.forEach((m) => m.remove());
+	});
+
 	window.crustShots = { shotSrc, addShotCard, openShotCompare, sessionFileOf };
 })();

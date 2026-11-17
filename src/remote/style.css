@@ -279,6 +279,7 @@ input:focus, textarea:focus { outline: none; border-color: color-mix(in srgb, va
 	padding: var(--panel-pad) calc(var(--sar) + var(--panel-pad)) var(--panel-pad) calc(var(--sal) + var(--panel-pad));
 	-webkit-overflow-scrolling: touch; overscroll-behavior: contain;
 }
+#transcript > * { flex-shrink: 0; } /* .tool has overflow:hidden: don't let it shrink to nothing in a long chat */
 #transcript > .user, #transcript > .md, #transcript > .tool, #transcript > .think { animation: crust-fade-up var(--dur-slow) var(--ease); }
 .empty { margin: auto 0; padding: var(--space-xl) var(--space-md); text-align: center; color: var(--muted); }
 .empty .btn { margin-top: var(--space-lg); }
