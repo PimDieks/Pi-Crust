@@ -21,6 +21,7 @@
     "prepare": "node -e \"try{require('./scripts/install-hooks.js')}catch{}\"",
     "dist:win": "node scripts/dist-win.js",
     "update": "node scripts/update.js",
+    "move-to-public": "node scripts/move-to-public.js",
     "dist:mac": "node scripts/dist-mac.js"
   },
   "devDependencies": {
