@@ -1,6 +1,9 @@
 # Release: pushing a tag vX.Y.Z (or vX.Y.Z-rc.N) builds the Windows installer and creates a DRAFT GitHub release.
 # Nothing here publishes a release. Pim reviews the draft and publishes it by hand (see RELEASING.md).
-# Secrets used: LEAK_DENYLIST (required).
+# Secrets used: LEAK_DENYLIST (required), and for signing through Microsoft's Azure signing service (Artifact Signing,
+# formerly Trusted Signing), all seven of: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SIGN_ENDPOINT,
+# AZURE_SIGN_ACCOUNT, AZURE_SIGN_PROFILE, AZURE_SIGN_PUBLISHER.
+# With none of the seven set the build continues UNSIGNED, loudly. With only some set, the run fails.
 name: Release
 
 on:
@@ -85,10 +88,73 @@ jobs:
           node-version-file: .nvmrc
       - run: npm ci
       - run: npm test
+      - name: Decide whether to sign
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGN_ENDPOINT: ${{ secrets.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ secrets.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ secrets.AZURE_SIGN_PROFILE }}
+          AZURE_SIGN_PUBLISHER: ${{ secrets.AZURE_SIGN_PUBLISHER }}
+        run: |
+          # A workflow cannot test a secret in `if:`, so test the values here. Only names are ever printed, never values.
+          names=(AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_SIGN_ENDPOINT AZURE_SIGN_ACCOUNT AZURE_SIGN_PROFILE AZURE_SIGN_PUBLISHER)
+          missing=()
+          for n in "${names[@]}"; do
+            v="${!n}"
+            [ -n "${v//[[:space:]]/}" ] || missing+=("$n")
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "HAS_SIGNING=true" >> "$GITHUB_ENV"
+            echo "### Signing ON (Azure signing service)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${#missing[@]}" -eq "${#names[@]}" ]; then
+            echo "HAS_SIGNING=false" >> "$GITHUB_ENV"
+            echo "::warning title=UNSIGNED BUILD::No Azure signing secrets are set, so this installer is NOT signed. Windows will show Unknown publisher and Smart App Control may block it. Do not publish this draft unless an unsigned release is intended."
+            {
+              echo "## :warning: UNSIGNED BUILD"
+              echo "No Azure signing secrets are set, so this installer is **not signed**. Do not publish the draft unless that is intended."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=Signing is half configured::These signing secrets are missing: ${missing[*]}. Set all seven or none."
+            exit 1
+          fi
       - name: Build the installer (not published by electron-builder)
         env:
           CI: "true"
-        run: npm run dist:win -- --publish never
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGN_ENDPOINT: ${{ secrets.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ secrets.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ secrets.AZURE_SIGN_PROFILE }}
+          AZURE_SIGN_PUBLISHER: ${{ secrets.AZURE_SIGN_PUBLISHER }}
+        run: |
+          args=()
+          if [ "$HAS_SIGNING" = "true" ]; then
+            # forceCodeSigning makes electron-builder fail if signing does not work, so a wrong secret cannot give a green run
+            # with an unsigned file. The credentials (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET) are read from the
+            # environment by the signing module. The names below come from secrets, so none are in the repo.
+            args+=(
+              "-c.forceCodeSigning=true"
+              "-c.win.azureSignOptions.publisherName=$AZURE_SIGN_PUBLISHER"
+              "-c.win.azureSignOptions.endpoint=$AZURE_SIGN_ENDPOINT"
+              "-c.win.azureSignOptions.codeSigningAccountName=$AZURE_SIGN_ACCOUNT"
+              "-c.win.azureSignOptions.certificateProfileName=$AZURE_SIGN_PROFILE"
+            )
+          fi
+          npm run dist:win -- --publish never "${args[@]}"
+      - name: Check the signature
+        shell: pwsh
+        env:
+          AZURE_SIGN_PUBLISHER: ${{ secrets.AZURE_SIGN_PUBLISHER }}
+        run: |
+          $mode = if ($env:HAS_SIGNING -eq 'true') { 'signed' } else { 'unsigned' }
+          $version = $env:TAG.TrimStart('v')
+          foreach ($f in @("dist/Pi-Crust-Setup-$version.exe", 'dist/win-unpacked/Pi Crust.exe')) {
+            & ./scripts/verify-signature.ps1 -File $f -Mode $mode -Publisher $env:AZURE_SIGN_PUBLISHER
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
       - name: Check the installer name
         run: |
           VERSION="${TAG#v}"
@@ -119,7 +185,12 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           notes="$RUNNER_TEMP/notes.md"
-          node scripts/release-notes.js "$VERSION" > "$notes"
+          : > "$notes"
+          if [ "$HAS_SIGNING" != "true" ]; then
+            echo '> **UNSIGNED BUILD.** This installer is not signed. Windows will show "Unknown publisher" and Smart App Control may block it. Do not publish this draft unless an unsigned release is intended, and delete this line first.' >> "$notes"
+            printf '\n' >> "$notes"
+          fi
+          node scripts/release-notes.js "$VERSION" >> "$notes"
           printf '\n' >> "$notes"
           node scripts/checksums.js --notes dist >> "$notes"
           node scripts/check-secrets.js --file "$notes" --require-denylist --denylist "$DENYLIST_FILE"
