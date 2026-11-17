@@ -144,3 +144,30 @@ test("a failed checkout says the clone is as it was only after checking, and nam
 	assert.strictEqual(git(dir, "rev-parse", "HEAD"), head);
 	assert.strictEqual(git(dir, "remote"), "origin");
 });
+
+test("after a move it warns about other local branches and the unchanged identity (domain only), changing nothing", () => {
+	const { dir } = newClone();
+	git(dir, "branch", "old-feature");
+	git(dir, "config", "user.email", "someone@corp.example.invalid");
+	const r = move(dir, ["--yes"]);
+	assert.strictEqual(r.code, 0, r.out + r.err);
+	assert.match(r.out, /WARNING: 1 local branch\(es\) other than main/);
+	assert.match(r.out, /\n {2}old-feature\n/);
+	assert.match(r.out, /Never push them/);
+	assert.match(r.out, /domain corp\.example\.invalid\)/);
+	assert.ok(!r.out.includes("someone@"), "must print the domain only");
+	assert.strictEqual(git(dir, "branch", "--list", "old-feature"), "old-feature", "branch must not be deleted");
+	assert.strictEqual(git(dir, "config", "user.email"), "someone@corp.example.invalid", "identity must not change");
+});
+
+test("with no other branches only the identity warning is printed; a dry run prints neither", () => {
+	const dry = newClone();
+	git(dry.dir, "branch", "x");
+	const d = move(dry.dir);
+	assert.ok(!/WARNING/.test(d.out), d.out);
+	const { dir } = newClone();
+	const r = move(dir, ["--yes"]);
+	assert.strictEqual(r.code, 0, r.out + r.err);
+	assert.ok(!/local branch/.test(r.out), r.out);
+	assert.match(r.out, /git identity/);
+});

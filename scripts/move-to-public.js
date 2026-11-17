@@ -13,6 +13,8 @@
 // temporary ref first and refuse (exit 2) if an ignored or untracked local file would be overwritten by a public file, check
 // out main, and only then swap the remotes. A failed fetch or checkout leaves the clone as it was (said only after checking);
 // a failure after the checkout prints the exact state and the commands to finish or go back. Old branches stay (reachable from the bundle too); the old private remote is kept as "private-old".
+// After a successful move it prints two warnings (other local branches hold old history and must not be pushed; the git
+// identity of the clone is unchanged and will show on public commits). It changes nothing for them.
 // It never runs reset --hard, clean, checkout -f, push, nor touches stashes or deletes branches.
 "use strict";
 
@@ -253,8 +255,26 @@ function main(argv) {
 			if (r.status !== 0) out("npm install did not finish. Run `npm install` in the folder before starting Pi Crust.");
 		}
 	}
+	warnAfterMove(root);
 	out("Done. Restart Pi Crust.");
 	return 0;
+}
+
+// Two warnings after a successful move. Nothing is changed here; the user decides.
+function warnAfterMove(root) {
+	const others = git(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], { allowFail: true }).out.split("\n").filter((b) => b && b !== "main");
+	if (others.length) {
+		out("");
+		out(`WARNING: ${others.length} local branch(es) other than main still hold the old repo's history. Never push them to the new origin:`);
+		for (const b of others.slice(0, 20)) out(`  ${b}`);
+		if (others.length > 20) out(`  ... and ${others.length - 20} more`);
+		out("  Only push main (and release tags). Nothing was deleted; delete them yourself when you no longer need them.");
+	}
+	const email = git(root, ["config", "user.email"], { allowFail: true }).out;
+	const domain = email.includes("@") ? email.slice(email.lastIndexOf("@") + 1) : "";
+	out("");
+	out(`WARNING: this clone's git identity (user.email, domain ${domain || "not set"}) is unchanged. Commits you push to a public repo show it.`);
+	out("  Set the public identity for this clone before you commit: git config user.name <name>; git config user.email <public no-reply address>. Nothing was changed.");
 }
 
 if (require.main === module) {
@@ -271,4 +291,4 @@ if (require.main === module) {
 	}
 }
 
-module.exports = { normUrl };
+module.exports = { normUrl, warnAfterMove };
