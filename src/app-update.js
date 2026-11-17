@@ -73,7 +73,15 @@
 			});
 			up.disabled = !!last.blocked;
 			if (last.blockedDetail) up.title = last.blockedDetail;
-			actions.append(up, later());
+			actions.append(up);
+			if (last.blocked) {
+				const again = button("Check again", "secondary", () => {
+					again.disabled = true;
+					crust.appUpdate.check().then(render, () => (again.disabled = false));
+				});
+				actions.append(again);
+			}
+			actions.append(later());
 		} else if (last.state === "updating") {
 			icon = SPIN;
 			body.append(el("span", "au-title", "Preparing the update…"), el("span", "au-sub", `${last.step || ""}\nYou can keep working.`));
