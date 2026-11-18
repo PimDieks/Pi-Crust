@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Agent boundary check (phase 6, step S9). Everything that is specific to Pi lives behind the agent adapter: src/agents/pi/ and the
 // extension files in src/pi-extension/. This script fails when Pi specifics show up anywhere else in src/, unless the place is in the
-// allow-list file (scripts/agent-boundary-allow.json), where every entry names the rule, the file and a reason.
+// allow-list file (scripts/agent-boundary-allow.json), where every entry names the rule, the file, the text of the reviewed line and a reason.
 //
 //   node scripts/check-agent-boundary.js [--root <repo>] [--allow <file>] [--list]
 //
@@ -16,7 +16,7 @@ const path = require("node:path");
 // What counts as a Pi specific (id, pattern, what it is):
 const RULES = [
 	{ id: "rpc-mode", re: /["'`]--mode["'`]\s*,\s*["'`]rpc["'`]|--mode rpc/, what: "Pi's RPC launch arguments" },
-	{ id: "pi-folder", re: /["'`]\.pi["'`]|[\\/]\.pi[\\/]|PI_CODING_AGENT_DIR/, what: "Pi's config folder (~/.pi/agent) or its override variable" },
+	{ id: "pi-folder", re: /["'`]~?[\\/]?\.pi["'`]|["'`]~?[\\/]?\.pi[\\/]|~[\\/]\.pi\b|[\\/]\.pi[\\/]|PI_CODING_AGENT_DIR/, what: "Pi's config folder (~/.pi/agent) or its override variable" },
 	{ id: "pi-auth", re: /\bpi auth\b|["'`]auth["'`]\s*,\s*["'`]check["'`]/, what: "Pi's sign-in commands" },
 	{ id: "pi-package", re: /@earendil-works|@mariozechner/, what: "Pi's npm package names" },
 	{ id: "pi-binary", re: /\bPI_CRUST_PI\b/, what: "the override variable for Pi's program path" },
@@ -62,14 +62,16 @@ function scan(root) {
 			if (HOME.some((re) => re.test(file))) continue;
 			const lines = stripComments(fs.readFileSync(path.join(root, file), "utf8"), file).split(/\r?\n/);
 			lines.forEach((line, i) => {
-				for (const r of RULES) if (r.re.test(line)) hits.push({ file, rule: r.id, line: i + 1, text: line.trim().slice(0, 140) });
+				for (const r of RULES) if (r.re.test(line)) hits.push({ file, rule: r.id, line: i + 1, text: line.trim().slice(0, 140), full: line });
 			});
 		}
 	}
 	return hits;
 }
 
-// allow: { entries: [{ file, rule, reason }] } -> { failures: [string], allowed: n, hits }
+// allow: { entries: [{ file, rule, contains, reason }] } -> { failures: [string], allowed: n, hits }
+// An entry allows only the hits of its file and rule whose line contains its `contains` text, so a new Pi specific in the same file
+// (same rule, other text) is reported. `contains` is required.
 function check(root, allow) {
 	const hits = scan(root);
 	const failures = [];
@@ -77,18 +79,19 @@ function check(root, allow) {
 	const known = new Set(RULES.map((r) => r.id));
 	for (const e of entries) {
 		if (!e || typeof e.file !== "string" || typeof e.rule !== "string") failures.push(`allow-list entry without file and rule: ${JSON.stringify(e)}`);
+		else if (typeof e.contains !== "string" || e.contains.trim().length < 6) failures.push(`allow-list entry ${e.file} (${e.rule}) has no "contains" text (at least 6 characters of the reviewed line)`);
 		else if (!known.has(e.rule)) failures.push(`allow-list entry ${e.file}: unknown rule "${e.rule}"`);
 		else if (typeof e.reason !== "string" || e.reason.trim().length < 12) failures.push(`allow-list entry ${e.file} (${e.rule}) has no reason`);
 	}
-	const key = (f, r) => `${f}\u0000${r}`;
-	const allowed = new Set(entries.map((e) => key(e.file, e.rule)));
+	const valid = entries.filter((e) => e && typeof e.file === "string" && known.has(e.rule) && typeof e.contains === "string" && e.contains.trim().length >= 6);
 	const used = new Set();
 	let allowedHits = 0;
 	for (const h of hits) {
-		if (allowed.has(key(h.file, h.rule))) (used.add(key(h.file, h.rule)), allowedHits++);
+		const e = valid.find((x) => x.file === h.file && x.rule === h.rule && h.full.includes(x.contains));
+		if (e) (used.add(e), allowedHits++);
 		else failures.push(`${h.file}:${h.line} [${h.rule}] ${RULES.find((r) => r.id === h.rule).what}: ${h.text}`);
 	}
-	for (const e of entries) if (e && allowed.has(key(e.file, e.rule)) && !used.has(key(e.file, e.rule))) failures.push(`stale allow-list entry: ${e.file} [${e.rule}] matches nothing any more, remove it`);
+	for (const e of valid) if (!used.has(e)) failures.push(`stale allow-list entry: ${e.file} [${e.rule}] "${e.contains}" matches nothing any more, remove it`);
 	return { failures, allowed: allowedHits, hits };
 }
 
