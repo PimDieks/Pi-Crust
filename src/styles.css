@@ -546,7 +546,12 @@ select option { background: var(--panel-2); color: var(--text); }
 .app-update .au-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .app-update .au-title { font-weight: 600; }
 .app-update .au-sub { color: var(--muted); font-size: var(--fs-xs); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-.app-update .au-actions { display: flex; gap: var(--space-xs); margin-top: var(--space-xs); }
+.app-update .au-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-top: var(--space-xs); }
+.app-update.au-offline > svg { color: var(--muted); }
+.app-update .au-progress { height: 4px; border-radius: var(--radius-full); background: var(--hover); overflow: hidden; margin-top: var(--space-xs); }
+.app-update .au-progress-fill { height: 100%; background: var(--accent-2); border-radius: var(--radius-full); }
+.app-update .au-link { align-self: flex-start; height: auto; padding: 0; margin-top: 2px; font-size: var(--fs-xs); color: var(--accent-2); text-decoration: underline; }
+.app-update .au-link:hover { background: transparent; }
 .app-update .au-actions .btn { height: 26px; font-size: var(--fs-sm); }
 .commit-head { font-family: var(--font); padding: var(--space-sm) var(--space-sm); border-bottom: 1px solid var(--border); background: var(--panel); }
 .commit-head h3 { margin: 0 0 4px; font-size: var(--fs-md); font-weight: 700; white-space: pre-wrap; }
