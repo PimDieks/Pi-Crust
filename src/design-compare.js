@@ -127,7 +127,7 @@
 		const bar = el("div", "dv-toolbar");
 		const getFigma = el("button", "btn secondary", "Get Figma selection");
 		getFigma.type = "button";
-		getFigma.title = "Load the frame selected in Figma desktop";
+		getFigma.title = "Load the frame selected in Figma desktop (connection: Figma status at the top)";
 		const source = el("select");
 		source.setAttribute("aria-label", "What to capture of the build");
 		for (const [v, t] of [["url", "Page at the frame size"], ["live", "Current viewport"], ["pick", "Picked element"]]) source.append(new Option(t, v));
@@ -150,10 +150,14 @@
 			getFigma.setAttribute("aria-busy", "true");
 			try {
 				const r = await crust.figma.screenshot();
-				if (r.error) return toast(r.error, "error");
+				if (r.error) {
+					window.crustFigma?.recheck();
+					return toast(r.error, "error");
+				}
 				await setFigma(r.dataUrl, { w: r.frameW, h: r.frameH, name: r.name });
 			} catch (e) {
-				toast(`Figma failed: ${e.message || e}`, "error");
+				toast(`Figma failed: ${e.message || e}. See Figma status above.`, "error");
+				window.crustFigma?.recheck();
 			} finally {
 				getFigma.disabled = false;
 				getFigma.removeAttribute("aria-busy");
@@ -237,7 +241,7 @@
 				i.src = one.dataUrl;
 				i.alt = state.fig ? "Figma frame" : "Build";
 				stage.append(i, D.empty(state.fig ? "Capture the build to compare it with this frame." : "Get the Figma selection to compare it with this capture."));
-			} else stage.append(D.empty("Select a frame in Figma desktop and choose Get Figma selection, then capture the build to compare them."));
+			} else stage.append(D.empty("Select a frame in Figma desktop and choose Get Figma selection, then capture the build to compare them. Not connected? See Figma status at the top."));
 			return;
 		}
 		let norm;

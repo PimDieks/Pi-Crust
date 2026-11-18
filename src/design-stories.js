@@ -324,7 +324,7 @@
 		if (inFigma && figma.state !== "ok") {
 			if (figma.state === "error") {
 				const box = el("div", "st-empty");
-				box.append(el("p", "st-lead", "Couldn't read the Figma components."), el("p", "muted", figma.error));
+				box.append(el("p", "st-lead", "Couldn't read the Figma components."), el("p", "muted", figma.error), el("p", "muted", "Advanced: this filter needs the Desktop Bridge plugin, see the README."));
 				const retry = el("button", "btn", "Try again");
 				retry.type = "button";
 				retry.onclick = () => loadFigma(true);
@@ -603,7 +603,7 @@
 		const segFigma = el("button", "seg-btn", "In Figma");
 		for (const b of [segAll, segFigma]) b.type = "button";
 		segAll.title = "All stories";
-		segFigma.title = "Only the stories of the master components of the Figma file the Desktop Bridge plugin runs in";
+		segFigma.title = "Only the stories of the master components of the Figma file the Desktop Bridge plugin runs in (advanced: needs that plugin, see the README)";
 		segAll.onclick = () => figmaOn && setFigmaOn(false);
 		segFigma.onclick = () => !figmaOn && setFigmaOn(true);
 		seg.append(segAll, segFigma);

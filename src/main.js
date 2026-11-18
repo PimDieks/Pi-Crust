@@ -910,7 +910,7 @@ const figmaFile = () => require("./figma-main").legacyFile(figmaMain.file());
 const figmaError = (e) => require("./figma-status").figmaError(e);
 ipcMain.handle("figma:pickSelection", async () => {
 	try {
-		if (!figmaFile().key) return { error: "No Figma file set. Paste a Figma link into the prompt once to set the file." };
+		if (!figmaFile().key) return { error: "The Figma picker needs the file link. Paste it in Design › Figma status.", needsFileLink: true };
 		const { callTool } = require("./figma-mcp");
 		const { buildBlock } = require("./figma-selection");
 		const defsText = await callTool("get_variable_defs", {});

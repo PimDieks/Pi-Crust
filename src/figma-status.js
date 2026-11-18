@@ -50,7 +50,7 @@ function figmaError(e, { noun = "layer" } = {}) {
 	const msg = String((e && e.message) || e);
 	const code = e && ((e.cause && e.cause.code) || e.code);
 	if (code === "ECONNREFUSED" || code === "ECONNRESET" || /fetch failed|timed out|ECONNREFUSED/i.test(msg))
-		return "Figma desktop isn't reachable. Open Figma desktop and enable the desktop MCP server: Dev Mode → Inspect.";
+		return "Figma desktop isn't reachable. Open Figma desktop, switch to Dev Mode and enable the MCP server (see Design › Figma status).";
 	if (/only available if your active tab/i.test(msg)) return "The active Figma tab is not a design file. Switch to a design (or FigJam) file in Figma desktop.";
 	if (/nothing is selected/i.test(msg)) return `Nothing is selected in Figma. Select a ${noun} in Figma desktop first.`;
 	return msg;

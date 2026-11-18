@@ -334,13 +334,17 @@
 		ui.compare.setAttribute("aria-busy", "true");
 		try {
 			const r = await crust.design.figmaVariables();
-			if (r.error) return toast(r.error, "error");
+			if (r.error) {
+				window.crustFigma?.recheck();
+				return toast(r.error, "error");
+			}
 			if (!Object.keys(r.defs).length) return toast("The selection in Figma uses no variables. Select a frame that does.", "warning");
 			const code = [...model.colors, ...model.spacing, ...model.radii];
 			compareRows = compareTokens(code, r.defs);
 			render();
 		} catch (e) {
-			toast(`Figma failed: ${e.message || e}`, "error");
+			toast(`Figma failed: ${e.message || e}. See Figma status above.`, "error");
+			window.crustFigma?.recheck();
 		} finally {
 			ui.compare.disabled = !model;
 			ui.compare.removeAttribute("aria-busy");
