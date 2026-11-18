@@ -130,7 +130,32 @@ async function copyCheckpoints(c, oldFile) {
 	if (oldFile && newFile && oldFile !== newFile) await crust.checkpoints.copy(oldFile, newFile, undefined, c.id).catch(() => {});
 }
 
+// A Claude Agent chat: the fork opens in a NEW tab (the chat here is not touched). From the end of the chat, or from before an earlier message,
+// whose text comes back in the new tab's message box. The new tab is "Fork of <title>" (main: pi:forkChat).
+const FORK_END = "End of the chat: keep everything so far";
+async function forkInNewTab() {
+	const c = view;
+	const r = await rpc("get_fork_messages");
+	if (!r.success) return toast(r.error || "Couldn't read the messages", "error");
+	const list = r.data?.messages || [];
+	if (!list.length) return toast("Nothing to fork from yet", "warning");
+	const label = (m, i) => `${i + 1}. ${(m.text || "").replace(/s+/g, " ").slice(0, 100)}`;
+	const res = await showDialog({ method: "select", title: "Fork from where? The fork opens in a new tab", options: [FORK_END, ...list.map(label)] });
+	if (!res.value) return;
+	const picked = res.value === FORK_END ? null : list.find((m, i) => label(m, i) === res.value);
+	if (res.value !== FORK_END && !picked) return;
+	if (!(await confirmStopIfWorking("fork"))) return;
+	const f = await crust.pi.forkChat(c.id, { entryId: picked ? picked.entryId : null, title: c.name || c.label || "New chat" }); // the whole name: the adapter keeps "Fork of <name>" as the fork's title
+	if (!f.ok) return toast(f.error || "Fork failed", "error");
+	for (let i = 0; i < 40 && !chats.has(f.chatId); i++) await new Promise((r) => setTimeout(r, 50)); // pi:started comes just before the answer
+	const nc = chats.get(f.chatId);
+	if (!nc) return toast("The fork could not be opened", "error");
+	activate(nc);
+	renderTabs();
+}
+
 async function forkChat() {
+	if (window.agentUi && !window.agentUi.isDefault(view)) return forkInNewTab();
 	const r = await rpc("get_fork_messages");
 	if (!r.success) return toast(r.error || "Couldn't read the messages", "error");
 	const list = r.data?.messages || [];

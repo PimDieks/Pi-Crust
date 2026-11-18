@@ -150,10 +150,24 @@ function createStore({ repo, dataDir, env: baseEnv = process.env, keep = KEEP })
 	return {
 		create: (opts) => serial(async () => (await createInner(opts)).entry),
 		// No session file (null) means no checkpoints; undefined means all of them (tests, tools).
-		list: ({ sessionFile, includeHidden = false } = {}) =>
-			(sessionFile === null ? [] : readMeta())
-				.filter((e) => (includeHidden || !e.hidden) && (sessionFile === undefined || e.sessionFile === sessionFile))
+		// uuid: the checkpoints of one message of a Claude Agent chat (tagged by tag() once the adapter gave the message its uuid), whatever
+		// session file they were taken under: a fork or a rewound chat shares the uuids of the messages it kept, and the first message of a
+		// chat is sent before the chat has a session id at all.
+		list: ({ sessionFile, includeHidden = false, uuid } = {}) =>
+			(uuid ? readMeta().filter((e) => e.uuid === uuid) : sessionFile === null ? [] : readMeta().filter((e) => sessionFile === undefined || e.sessionFile === sessionFile))
+				.filter((e) => includeHidden || !e.hidden)
 				.sort((a, b) => a.at - b.at),
+		// A Claude Agent chat's checkpoint is made before its message exists (the adapter supplies the uuid when it sends): link them afterwards.
+		tag: (id, { uuid, sessionFile } = {}) =>
+			serial(async () => {
+				const list = readMeta();
+				const e = list.find((x) => x.id === id);
+				if (!e || typeof uuid !== "string" || !uuid) return { ok: false, error: "Checkpoint not found" };
+				e.uuid = uuid;
+				if (typeof sessionFile === "string" && sessionFile && !e.sessionFile) e.sessionFile = sessionFile;
+				writeMeta(list);
+				return { ok: true };
+			}),
 		// What restoring `id` would change in the working tree right now.
 		preview: (id) =>
 			serial(async () => {
@@ -245,7 +259,8 @@ function register(ctx) {
 		}
 	};
 	ipcMain.handle("checkpoints:create", safe((o) => o?.chatId, async (s, o) => ({ ok: true, entry: await s.create({ sessionFile: file(o?.sessionFile), text: typeof o?.text === "string" ? o.text : "" }) })));
-	ipcMain.handle("checkpoints:list", safe((o) => o?.chatId, async (s, o) => ({ ok: true, list: s.list({ sessionFile: file(o?.sessionFile) }) })));
+	ipcMain.handle("checkpoints:list", safe((o) => o?.chatId, async (s, o) => ({ ok: true, list: s.list({ sessionFile: file(o?.sessionFile), ...(typeof o?.uuid === "string" && o.uuid ? { uuid: o.uuid } : {}) }) })));
+	ipcMain.handle("checkpoints:tag", safe((_id, _o, chatId) => chatId, (s, id, o) => s.tag(idOf(id), { uuid: typeof o?.uuid === "string" ? o.uuid : "", sessionFile: file(o?.sessionFile) })));
 	ipcMain.handle("checkpoints:preview", safe((_id, chatId) => chatId, (s, id) => s.preview(idOf(id))));
 	ipcMain.handle("checkpoints:restore", safe((_id, chatId) => chatId, (s, id) => s.restore(idOf(id))));
 	ipcMain.handle("checkpoints:copy", safe((_f, _t, _b, chatId) => chatId, (s, from, to, before) => (file(from) && file(to) ? s.copy(file(from), file(to), Number.isFinite(before) ? before : Infinity) : { ok: false, error: "No session file" })));

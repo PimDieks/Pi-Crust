@@ -7,8 +7,11 @@
 // onFailure "block", else the call goes on); with no hook decision the SDK approves the Agent tool and a Read inside cwd by itself and sends
 // the rest to canUseTool. Every call is logged in the entry's `gates` as { call, hooks, viaCanUseTool, outcome }.
 // A script entry { "__await_user": true } makes the replay wait for the next user message (a second prompt after an interrupt).
+// Streaming input: every user message the adapter pushed is kept whole in the entry's `sent` (its uuid included). With extraArgs "replay-user-messages"
+// (as the real one) each is echoed back as { type:"user", isReplay:true, uuid } straight after it arrives (capture-rewind L10).
 // Log: the exported `calls` (one entry per query: options, calls (strings), log (every SDK call as { fn, args }), interrupted, modes),
 // `fnCalls` (listSessions / getSessionMessages / getSessionInfo, which are module functions), and PI_CRUST_CLAUDE_SDK_LOG=<file>.
+// PI_CRUST_CLAUDE_HISTORY=<json file { "<session id>": [rows] }> gives getSessionMessages rows without code (the offscreen self-test has none).
 // Answers: supportedModels, getContextUsage, supportedCommands, listSessions, getSessionMessages come from setModels(), setContextUsage(),
 // setSessions(), setSessionMessages({ id: [...] }) (defaults are small, real-shaped, normalised).
 import fs from "node:fs";
@@ -114,7 +117,14 @@ export async function getSessionInfo(id, options = {}) {
 }
 export async function getSessionMessages(id, options = {}) {
 	fnCall("getSessionMessages", [id, options]);
-	return sessionMessages[id] || [];
+	if (sessionMessages[id]) return sessionMessages[id];
+	const f = process.env.PI_CRUST_CLAUDE_HISTORY;
+	if (f) {
+		try {
+			return JSON.parse(fs.readFileSync(f, "utf8"))[id] || [];
+		} catch {}
+	}
+	return [];
 }
 
 function loadScript() {
@@ -165,7 +175,7 @@ export async function runGate(options, call) {
 
 export const REJECTED_KEY = "sk-ant-test-rejected-0000";
 export function query({ prompt, options }) {
-	const entry = { gates: [], options: describeOptions(options), rawEnvHasKey: !!(options && options.env && options.env.ANTHROPIC_API_KEY), calls: [], log: [], closed: false, interrupted: 0, modes: [] };
+	const entry = { gates: [], options: describeOptions(options), rawEnvHasKey: !!(options && options.env && options.env.ANTHROPIC_API_KEY), calls: [], sent: [], log: [], closed: false, interrupted: 0, modes: [] };
 	calls.push(entry);
 	logFile({ options: entry.options });
 	let stopWait = null;
@@ -180,18 +190,24 @@ export function query({ prompt, options }) {
 			return;
 		}
 		const it = typeof prompt === "string" ? null : prompt[Symbol.asyncIterator]();
+		let lastUser = null;
 		const nextUser = async () => {
 			const r = await Promise.race([it.next(), new Promise((res) => (stopWait = () => res({ done: true })))]);
 			if (r.done || entry.closed) return false;
 			entry.calls.push("user_message");
+			entry.sent.push(r.value);
+			lastUser = r.value;
 			return true;
 		};
+		const echo = () => (options && options.extraArgs && "replay-user-messages" in options.extraArgs && lastUser && lastUser.uuid ? { type: "user", message: lastUser.message, session_id: "stand-in-session", parent_tool_use_id: null, uuid: lastUser.uuid, timestamp: "2026-01-01T00:00:00.000Z", isReplay: true } : null);
 		if (it && !(await nextUser())) return;
+		if (echo()) yield echo();
 		const messages = loadScript(); // read when the first prompt arrives, so a test can set the script after start
 		for (const m of messages) {
 			if (entry.closed) return;
 			if (m && m.__await_user) {
 				if (!it || !(await nextUser())) return;
+				if (echo()) yield echo();
 				continue;
 			}
 			if (m && m.__tool_call) {

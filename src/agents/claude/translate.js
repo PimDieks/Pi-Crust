@@ -417,13 +417,14 @@ function createTranslator(opts = {}) {
 		},
 		// The adapter sent a prompt (or a queued message). The stream never echoes it, so this returns its row;
 		// it opens the turn when none is open. Images: [{ data (base64), mimeType }].
-		userMessage({ text = "", images = [] } = {}) {
+		userMessage({ text = "", images = [], uuid } = {}) {
 			const out = [];
 			startTurn(out);
 			const content = [];
 			if (text) content.push({ type: "text", text });
 			for (const im of images) if (isObj(im)) content.push({ type: "image", data: im.data, mimeType: im.mimeType });
 			const message = { role: "user", content };
+			if (typeof uuid === "string" && uuid) message.uuid = uuid; // the id the adapter gave this message: rewind and fork cut at it
 			out.push({ type: "message_start", message }, { type: "message_end", message });
 			return out;
 		},

@@ -131,8 +131,15 @@ selftestSteps.push(async ({ snap, wait }) => {
 		send.click();
 		await wait(200);
 		check(made.el.querySelectorAll(".msg.user").length === msgsBefore, "a message was sent during setup");
+		// the reason shows only while the disabled control is hovered or focused: no box floats above the message box at rest, not even after a click on Send
+		check(!document.querySelector("#toasts .toast") && !vis($("#reason-line")), `something floats above the message box at rest: toast "${document.querySelector("#toasts .toast")?.textContent}", reason line "${$("#reason-line").textContent}"`);
+		send.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+		check(vis($("#reason-line")) && $("#reason-line").textContent === "Finish setup to send a message", `hovering Send shows no reason: "${$("#reason-line").textContent}"`);
+		send.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+		check(!vis($("#reason-line")), "the reason stays after the pointer left Send");
 		input.value = "";
 		check(!/Starting/.test($("#status-line").textContent), `status line: "${$("#status-line").textContent}"`);
+		await wait(600); // let the card finish its entry animation before the contrast check
 		await shots("todo", "add-key");
 
 		// 2. the Setup panel now lists the Claude Agent rows (not counted)

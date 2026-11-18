@@ -1,0 +1,47 @@
+{
+ "end": {
+  "spec": {
+   "text": null,
+   "from": "uuid-03",
+   "at": null,
+   "view": "all",
+   "keep": [
+    "uuid-01",
+    "uuid-11"
+   ],
+   "title": "Fork of Sky chat"
+  },
+  "options": {
+   "resume": "uuid-03",
+   "forkSession": true
+  }
+ },
+ "turn-one": {
+  "spec": {
+   "text": "Reply with exactly: Grass is green. Do not use tools.",
+   "from": "uuid-03",
+   "at": "uuid-08",
+   "view": "uuid-08",
+   "keep": [
+    "uuid-01"
+   ],
+   "title": "Fork of Sky chat"
+  },
+  "options": {
+   "resume": "uuid-03",
+   "forkSession": true,
+   "resumeSessionAt": "uuid-08"
+  }
+ },
+ "first-message": {
+  "spec": {
+   "text": "Reply with exactly: The sky is blue. Do not use tools.",
+   "from": null,
+   "at": null,
+   "view": "none",
+   "keep": [],
+   "title": "Fork of Sky chat"
+  },
+  "options": {}
+ }
+}

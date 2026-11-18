@@ -260,6 +260,23 @@ selftestSteps.push(async ({ snap, wait }) => {
 			controls: () => [...$("#app-update-host").querySelectorAll(".layers-test button")],
 			close: () => $("#app-update-host")?.querySelector(".layers-test")?.remove(),
 		},
+		// The rewind dialog (Claude Agent chats show a note about the saved conversation) and the fork dialog (/fork asks where from): dialogs on the confirm layer.
+		{
+			name: "rewind-dialog",
+			layer: "confirm",
+			root: () => $("#modal-backdrop"),
+			open: () => void window.rewindTestDialog(),
+			controls: () => [...$("#modal").querySelectorAll("input, .modal-actions button")],
+			close: () => clicked($("#modal .modal-actions .secondary")),
+		},
+		{
+			name: "fork-dialog",
+			layer: "confirm",
+			root: () => $("#modal-backdrop"),
+			open: () => void showDialog({ method: "select", title: "Fork from where? The fork opens in a new tab", options: ["End of the chat: keep everything so far", "1. First message", "2. Second message"] }),
+			controls: () => [...$("#modal").querySelectorAll(".options button, .modal-actions button")],
+			close: () => clicked($("#modal .modal-actions .secondary")),
+		},
 		{
 			name: "confirm",
 			layer: "confirm",

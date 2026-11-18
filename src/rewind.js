@@ -1,6 +1,9 @@
 // Checkpoints in the chat: every message you send gets a snapshot of the files (checkpoints-main.js). Hover a message
 // of yours to Edit it (fork the conversation before it, text back in the composer) or Rewind (restore the files and/or
 // the conversation). Uses the hook bus from renderer.js.
+// Claude Agent chats use the same snapshots (they cover shell and subagent changes too). Their messages carry a uuid from the adapter: a
+// checkpoint is tagged with it once the message exists (checkpoints:tag) and found by it later, and the conversation goes back through the
+// adapter's own "fork" request, which resumes a cut copy of the session in the same tab (agents/claude/index.js forkInPlace).
 "use strict";
 
 (() => {
@@ -41,6 +44,7 @@
 	onCrust("user:rendered", (c, node, message, history) => {
 		node._raw = textOf(message.content);
 		node._ts = message.timestamp;
+		node._uuid = typeof message.uuid === "string" && message.uuid ? message.uuid : null; // a Claude Agent message: the id the adapter gave it
 		addBar(c, node);
 		if (history) return;
 		const q = c._cpq || [];
@@ -49,6 +53,7 @@
 		const [item] = q.splice(i, 1);
 		node._cpPromise = item.promise.then((e) => {
 			if (e) node.dataset.cp = e.id;
+			if (e && node._uuid) crust.checkpoints.tag(e.id, { uuid: node._uuid, sessionFile: c.sessionFile }, c.id).catch(() => {});
 			return e;
 		});
 	});
@@ -60,6 +65,13 @@
 			if (e) return (node._cp = e);
 		}
 		if (node._cp) return node._cp;
+		if (node._uuid) {
+			// Claude Agent: by the message's uuid, whatever session the checkpoint was taken under (a fork, a rewound chat, a chat restored later).
+			const u = await crust.checkpoints.list({ sessionFile: c.sessionFile || null, uuid: node._uuid, chatId: c.id });
+			const e = u.ok ? u.list[u.list.length - 1] || null : null;
+			if (e) node._cp = e;
+			return e;
+		}
 		const file = await sessionFileOf(c);
 		if (!file) return null;
 		const r = await crust.checkpoints.list({ sessionFile: file, chatId: c.id });
@@ -76,6 +88,7 @@
 
 	// Pi's entry id for this message: get_fork_messages lists the user messages in order; align from the end.
 	async function forkEntryFor(c, node) {
+		if (node._uuid) return { entryId: node._uuid }; // Claude Agent: the message's own id
 		const r = await rpcTo(c, "get_fork_messages");
 		if (!r.success) return { error: r.error || "Couldn't read the messages" };
 		const list = r.data?.messages || [];
@@ -123,8 +136,13 @@
 		return { lab, cb, text };
 	}
 
-	function askRewind({ mode, node, files, hasCp }) {
+	// Said at the moment of a conversation rewind in a chat of another agent: what is different from Pi's, in plain words.
+	const SAVE_NOTE = (c) => `${agentLabel(c)} keeps the rewound conversation only in this tab until you send your next message. If you close Pi Crust before that, the chat reopens as it was before the rewind. Your files are restored from the app's own snapshots.`;
+	const otherAgent = (c) => !!c && !!window.agentUi && !window.agentUi.isDefault(c);
+
+	function askRewind({ mode, node, files, hasCp, c }) {
 		const edit = mode === "edit";
+		const noConv = !!c && window.agentUi?.can("conversationRewind", c) === false;
 		return showDialog({
 			method: "custom",
 			title: edit ? "Edit and resend" : "Rewind to before this message",
@@ -151,8 +169,9 @@
 					if (files.length > MAX_FILES) list.append(el("div", "muted", `and ${files.length - MAX_FILES} more`));
 					box.append(list);
 				}
-				const conv = option("Conversation: continue from here, the message goes back to the composer", true, edit);
+				const conv = option(noConv ? `Conversation: ${window.agentUi.reason("fork", c)}` : "Conversation: continue from here, the message goes back to the composer", true, edit || noConv);
 				if (!edit) box.append(conv.lab);
+				if (!noConv && otherAgent(c)) box.append(el("p", "muted rw-note", SAVE_NOTE(c)));
 				const go = el("button", "", edit ? "Edit" : "Rewind");
 				go.type = "button";
 				const sync = () => (go.disabled = !(code.cb.checked || conv.cb.checked || edit));
@@ -167,6 +186,7 @@
 	// --- doing it -----------------------------------------------------------------------------
 	async function start(c, node, mode) {
 		if (!chats.has(c.id)) return;
+		if (mode === "edit" && window.agentUi?.can("conversationRewind", c) === false) return toast(window.agentUi.reason("fork", c), "warning");
 		const entry = await checkpointOf(c, node);
 		let files = [];
 		if (entry) {
@@ -176,7 +196,7 @@
 		let choice;
 		if (mode === "edit" && !files.length) choice = { code: false, conv: true };
 		else {
-			const res = await askRewind({ mode, node, files, hasCp: !!entry });
+			const res = await askRewind({ mode, node, files, hasCp: !!entry, c });
 			if (!res.value) return;
 			choice = res.value;
 		}
@@ -235,7 +255,7 @@
 		await showCurrentSession(c);
 		const newFile = await sessionFileOf(c);
 		if (oldFile && newFile && oldFile !== newFile) await crust.checkpoints.copy(oldFile, newFile, cutoff, c.id);
-		withChat(c, () => addNotice(mode === "edit" ? "Editing an earlier message" : "Rewound to an earlier message"));
+		withChat(c, () => addNotice(`${mode === "edit" ? "Editing an earlier message" : "Rewound to an earlier message"}${otherAgent(c) ? `. ${SAVE_NOTE(c)}` : ""}`));
 		if (undo) toast(`Restored ${n} file${n === 1 ? "" : "s"}`, "info", undo);
 		c._prefill = f.data?.text || node._raw;
 		if (c === active) await applyPrefill(c);
@@ -277,6 +297,9 @@
 		if (i >= 0) await start(active, nodes[i], "rewind");
 	}
 	window.rewindPick = pick;
+	// For the layers step: the rewind dialog with made-up files, as a chat of another agent sees it (with the note about the saved conversation).
+	window.rewindTestDialog = () =>
+		askRewind({ mode: "rewind", node: { _raw: "Rewind test message" }, files: [{ status: "M", path: "src/a.js" }, { status: "D", path: "made-by-shell.txt" }], hasCp: true, c: { agent: { id: "claude", label: "Claude Agent", capabilities: { conversationRewind: true } } } });
 
 	// For the screenshot timeline: the user message a checkpoint belongs to (if still in this chat), and rewinding to before it.
 	async function nodeForCheckpoint(c, cpId) {

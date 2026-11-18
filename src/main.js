@@ -129,7 +129,8 @@ function permissionOldCopy() {
 		return null;
 	}
 }
-function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefined) {
+// startOpts: more start options for an agent that is not Pi (the Claude Agent's fork of another chat: see forkChat below).
+function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefined, startOpts = null) {
 	const agent = agents.get(agentId); // undefined = the default agent (Pi)
 	if (!agent) throw new Error(`unknown agent "${agentId}"`);
 	if (wt && wt.missing) {
@@ -183,6 +184,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 		},
 		record: (p, record) => {
 			if (record.type === "agent_end") prLookup.invalidatePrefix(); // the agent may have pushed or opened a PR
+			if (record.type === "claude_session" && typeof record.sessionId === "string") setChatFile(chatId, record.sessionId); // the session of a Claude Agent chat is only known once it runs (a fork, a rewound chat: its new one)
 			if (record.type === "response" && settleMainRequest(record)) return; // answers to requests main itself sent
 			send("pi:record", { chatId, record });
 		},
@@ -205,7 +207,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 	// The driver injects crust-context.ts (context breakdown and models used, see context-panel.js), crust-guard.ts (asks to continue after
 	// every N tool calls: settings.json toolCallCheckIn, default 40, 0 = off) and advisor.ts (Anthropic's advisor tool, /advisor command).
 	// Pi's start arguments are unchanged; another agent gets no `pi` (it brings its own engine).
-	const handle = agent.start(isDefaultAgent ? { pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile } : { cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile }, sink);
+	const handle = agent.start(isDefaultAgent ? { pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile } : { cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile, ...(startOpts || {}) }, sink);
 	const chat = { id: chatId, agent, handle, cwd };
 	chats.set(chatId, chat);
 	if (!openList.some((e) => e.id === chatId)) {
@@ -345,6 +347,23 @@ async function newChat(sessionFile, opts, agentId) {
 	return id;
 }
 ipcMain.handle("pi:newChat", (_e, f, o, agentId) => newChat(f, o, agentId));
+// A fork of a Claude Agent chat in a NEW tab (the chat's own tab keeps its conversation): from the end (entryId null) or from before the user
+// message entryId. The adapter says what to continue (agents/claude forkSpec); the new chat starts like any other and is named "Fork of <title>".
+// Returns { ok, chatId, text, title } or { ok:false, error }.
+ipcMain.handle("pi:forkChat", async (_e, chatId, o) => {
+	const c = chats.get(chatId);
+	if (!c || typeof c.agent.forkSpec !== "function" || !c.agent.canSend(c.handle)) return { ok: false, error: "This chat cannot be forked." };
+	const entryId = typeof o?.entryId === "string" && o.entryId ? o.entryId : null;
+	const title = typeof o?.title === "string" ? o.title.slice(0, 200) : "";
+	const spec = await c.agent.forkSpec(c.handle, { entryId, title });
+	if (!spec.ok) return { ok: false, error: spec.error || "Fork failed" };
+	const entry = openList.find((e) => e.id === chatId);
+	const wt = await resolveWt(entry?.cwd || null);
+	if (wt && wt.missing) return { ok: false, error: `Worktree ${wt.cwd} no longer exists` };
+	const id = newChatId();
+	startAgent(id, undefined, { fork: { title: spec.start.title, text: spec.text } }, wt, c.agent.id, { fork: spec.start });
+	return { ok: true, chatId: id, text: spec.text, title: spec.start.title };
+});
 // "Open in main checkout" for a chat whose worktree is gone: the user's explicit choice.
 ipcMain.handle("pi:openInMain", (_e, chatId) => {
 	const entry = openList.find((e) => e.id === chatId);

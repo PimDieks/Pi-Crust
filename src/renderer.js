@@ -1172,6 +1172,9 @@ function handleRecord(r) {
 		case "agent_end":
 			finishTurn(chat);
 			return;
+		case "claude_session":
+			if (typeof r.sessionId === "string" && r.sessionId) chat.sessionFile = r.sessionId; // a Claude Agent chat's session id is known once it runs (checkpoints, history)
+			return;
 		case "claude_paused":
 			window.claudeSetupUi?.pauseCard(chat, r); // the pause card at the end of the conversation
 			return;
@@ -2053,8 +2056,9 @@ async function submit({ steer = false } = {}) {
 	const typed = input.value.trim();
 	const picks = active ? active.picks : [];
 	if (!typed && !picks.length) return;
-	const gated = window.claudeSetupUi?.gateReason(active); // setup not finished, or the chat is paused at its spend limit
-	if (gated) return toast(gated, "warning");
+	// Setup not finished, or the chat is paused at its spend limit: the message box and Send say why while they are hovered or focused, never a
+	// toast of their own (nothing floats above the message box at rest).
+	if (window.claudeSetupUi?.gateReason(active)) return;
 	if (!state.ready) return notReadyToast();
 	const blocks = picks.filter((p) => typeof p === "string");
 	const images = picks.filter((p) => typeof p !== "string").map(({ type, data, mimeType }) => ({ type, data, mimeType }));
@@ -2318,12 +2322,18 @@ function settlePiWaiters(c, msg) {
 	for (const w of list) msg ? w.fail(msg) : w.ok();
 }
 
-crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, agent, oldPermissionCopy }) => {
+crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, agent, oldPermissionCopy, fork }) => {
 	if (oldPermissionCopy) toast(`Pi Crust brings its own permission modes. Your older "${oldPermissionCopy}" in ~/.pi/agent/extensions loads too and asks as well. Remove or rename it to avoid double prompts.`, "info");
 	let c = chats.get(chatId);
 	const fresh = !c;
 	if (!c) c = makeChat(chatId, { sessionFile, cwd: worktree?.cwd, branch: worktree?.branch, agent });
 	c.agent = agent || c.agent;
+	if (fork && fresh) {
+		// A Claude Agent fork in a new tab (slash.js): named "Fork of <title>", shows the part of the old chat it continues, and gets the message back in the box.
+		c.label = fork.title || c.label;
+		c.resume = true;
+		if (fork.text) c._prefill = fork.text;
+	}
 	if (c === active) window.agentUi?.sync(c);
 	renderTabs();
 	if (worktree) {

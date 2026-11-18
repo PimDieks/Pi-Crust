@@ -82,6 +82,7 @@ function convertMessages(rows) {
 		if (content.length) {
 			const msg = { role: "user", content };
 			if (ts !== undefined) msg.timestamp = ts;
+			if (typeof row.uuid === "string" && row.uuid) msg.uuid = row.uuid; // the id rewind and fork cut at (turns.js)
 			out.push(msg);
 		}
 	}
@@ -94,6 +95,18 @@ function convertMessages(rows) {
 		}
 	}
 	return out;
+}
+
+// The rows up to and including the one with this uuid (all of them when it is not found: never silently show less than was asked).
+function cutRows(rows, uuid) {
+	const i = rows.findIndex((r) => isObj(r) && r.uuid === uuid);
+	return i < 0 ? rows : rows.slice(0, i + 1);
+}
+
+// The rows up to and including the one with this uuid (all of them when it is not found: never silently show less than was asked).
+function cutRows(rows, uuid) {
+	const i = rows.findIndex((r) => isObj(r) && r.uuid === uuid);
+	return i < 0 ? rows : rows.slice(0, i + 1);
 }
 
 // SDKSessionInfo -> the history picker's item (same fields as Pi's, plus the agent tag). `path` is the session id: opaque to the app.
@@ -147,10 +160,17 @@ function createHistory(deps) {
 			return (Array.isArray(list) ? list : []).map(sessionItem).filter((s) => s.firstPrompt).sort((a, b) => b.mtime - a.mtime);
 		},
 		// A session's messages in the stored shape. Throws when the SDK does.
-		async loadMessages(sessionId, { cwd } = {}) {
-			if (!sessionId) return [];
+		// upTo: keep the rows up to and including the one with this uuid (a chat that was rewound or forked and has not sent its next message
+		// yet: its new session does not exist, only the cut of the old one); null = none.
+		async loadMessages(sessionId, { cwd, upTo } = {}) {
+			if (!sessionId || upTo === null) return [];
 			const rows = await inConfigDir((sdk) => sdk.getSessionMessages(String(sessionId), { dir: cwd }));
-			return convertMessages(rows || []);
+			return convertMessages(upTo === undefined ? rows || [] : cutRows(rows || [], upTo));
+		},
+		// The raw rows, for turns.js when a session has no stored turn list. Throws when the SDK does.
+		async loadRows(sessionId, { cwd } = {}) {
+			if (!sessionId) return [];
+			return (await inConfigDir((sdk) => sdk.getSessionMessages(String(sessionId), { dir: cwd }))) || [];
 		},
 	};
 }

@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("crust", {
 		restart: (chatId, sessionFile) => ipcRenderer.invoke("pi:restart", chatId, sessionFile),
 		openInMain: (chatId) => ipcRenderer.invoke("pi:openInMain", chatId),
 		newChat: (sessionFile, opts, agentId) => ipcRenderer.invoke("pi:newChat", sessionFile, opts, agentId),
+		forkChat: (chatId, o) => ipcRenderer.invoke("pi:forkChat", chatId, o), // a Claude Agent chat's fork in a new tab: { entryId?, title } -> { ok, chatId, text, title }
 		sessionFile: (chatId, file) => ipcRenderer.invoke("pi:sessionFile", chatId, file),
 		activeChat: (chatId) => ipcRenderer.invoke("pi:activeChat", chatId),
 		stop: (chatId) => ipcRenderer.invoke("pi:stop", chatId),
@@ -177,6 +178,7 @@ contextBridge.exposeInMainWorld("crust", {
 	checkpoints: {
 		create: (o) => ipcRenderer.invoke("checkpoints:create", o),
 		list: (o) => ipcRenderer.invoke("checkpoints:list", o),
+		tag: (id, o, chatId) => ipcRenderer.invoke("checkpoints:tag", id, o, chatId),
 		preview: (id, chatId) => ipcRenderer.invoke("checkpoints:preview", id, chatId),
 		restore: (id, chatId) => ipcRenderer.invoke("checkpoints:restore", id, chatId),
 		copy: (from, to, beforeAt, chatId) => ipcRenderer.invoke("checkpoints:copy", from, to, beforeAt, chatId),

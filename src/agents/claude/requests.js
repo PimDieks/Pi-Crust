@@ -7,7 +7,7 @@
 //   query: { supportedModels, setModel, interrupt, applyFlagSettings, supportedCommands } | null   the live SDK query (any may be missing)
 //   messages(): Promise<stored message[]>   this session's history through the SDK (history.js)
 // }
-// Served: get_state, get_available_models, set_model, get_available_thinking_levels, set_thinking_level, abort, get_messages,
+// Served: get_fork_messages and fork (ctx.forkMessages, ctx.fork: the turns of turns.js), get_state, get_available_models, set_model, get_available_thinking_levels, set_thinking_level, abort, get_messages,
 // get_commands, get_last_assistant_text. Everything else the app can send answers { success:false, unsupported:true, error }
 // with the reason below, never silence. (prompt is the adapter's own: it feeds the input stream. extension_ui_response has no
 // response record in the contract and is the permission gate's, so answer() returns null for it.)
@@ -25,9 +25,7 @@ const UNSUPPORTED = Object.freeze({
 	set_session_name: "Claude Agent chats are named automatically.",
 	get_session_stats: "Session statistics are a Pi feature. The header shows the context and the estimated cost.",
 	export_html: "Export as HTML is not available for Claude Agent chats.",
-	get_fork_messages: "Rewinding the conversation is not available for Claude Agent chats yet. Your files can still be restored.",
-	fork: "Forking is not available for Claude Agent chats yet.",
-	clone: "Cloning is not available for Claude Agent chats yet.",
+	clone: "Cloning a chat is not available for Claude Agent chats yet. /fork from the end of the chat does the same in a new tab.",
 });
 
 const ok = (req, data) => ({ type: "response", id: req.id, command: req.type, success: true, ...(data !== undefined ? { data } : {}) });
@@ -65,7 +63,7 @@ async function answer(req, ctx) {
 					} catch {}
 					model = { provider: PROVIDER, id: entry ? entry.id : st.modelId, name: entry ? entry.name : st.modelId };
 				}
-				return ok(req, { model, thinkingLevel: st.effort || null, sessionFile: st.sessionId || null, sessionName: null, isStreaming: !!st.streaming, isCompacting: false, permissionMode: st.permissionMode || null });
+				return ok(req, { model, thinkingLevel: st.effort || null, sessionFile: st.sessionId || null, sessionName: st.sessionName || null, isStreaming: !!st.streaming, isCompacting: false, permissionMode: st.permissionMode || null });
 			}
 			case "get_available_models":
 				return ok(req, { models: await loadModels(ctx) });
@@ -108,6 +106,15 @@ async function answer(req, ctx) {
 				const list = q && typeof q.supportedCommands === "function" ? await q.supportedCommands() : st.commands || [];
 				const commands = (Array.isArray(list) ? list : []).filter((c) => c && typeof c.name === "string").map((c) => ({ name: c.name, description: c.description || "", source: "claude", ...(c.argumentHint ? { argumentHint: c.argumentHint } : {}) }));
 				return ok(req, { commands });
+			}
+			case "get_fork_messages":
+				return ok(req, { messages: await ctx.forkMessages() });
+			case "fork": {
+				// In this chat's own tab (rewind, edit and resend): the conversation goes back to before the message. A fork in a new tab is a call of
+				// the app's main process (adapter.forkSpec), not a request.
+				if (typeof req.entryId !== "string" || !req.entryId) return fail(req, "No message was given to go back to.");
+				const r = await ctx.fork(req.entryId);
+				return r && r.ok ? ok(req, { text: r.text, cancelled: false }) : fail(req, (r && r.error) || "The conversation could not be rewound.");
 			}
 			case "get_last_assistant_text":
 				return ok(req, { text: st.lastAssistantText || null });

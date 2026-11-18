@@ -299,7 +299,9 @@
 			typeInto("/");
 			await wait(250);
 			const rows = slashNames();
-			const want = { "/fork": "Forking a chat is not available for Claude Agent chats yet.", "/clone": "Cloning a chat is not available for Claude Agent chats yet.", "/export": "Export as HTML is not available for Claude Agent chats.", "/compact": "Claude Agent compacts long chats by itself.", "/session": "Session statistics are not available for Claude Agent chats.", "/name": "Naming a chat is not available for Claude Agent chats." };
+			const want = { "/clone": "Cloning a chat is not available for Claude Agent chats yet.", "/export": "Export as HTML is not available for Claude Agent chats.", "/compact": "Claude Agent compacts long chats by itself.", "/session": "Session statistics are not available for Claude Agent chats.", "/name": "Naming a chat is not available for Claude Agent chats." };
+			const forkRow = rows.find((x) => x.name === "/fork");
+			check(forkRow && !forkRow.off, `/fork in a Claude Agent chat: ${forkRow ? forkRow.title : "missing"}`); // phase 7: fork is available (a new tab)
 			for (const [n, why] of Object.entries(want)) {
 				const r = rows.find((x) => x.name === n);
 				check(r && r.off && r.title === why && r.desc === why, `${n}: ${r ? `${r.off} ${r.title}` : "missing"}`);

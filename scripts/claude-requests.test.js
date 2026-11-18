@@ -31,6 +31,8 @@ const golden = (n) => lines(path.join(DIR, `${n}.golden.jsonl`));
 const types = (r) => r.map((x) => x.type);
 const HISTORY = JSON.parse(fs.readFileSync(path.join(DIR, "history.json"), "utf8"));
 // Records the translator goldens know; the adapter adds statuses, responses and the pause event around them.
+// The user row carries the uuid the adapter gave the message (random); the goldens do not have it. claude-rewind-fork.test.js checks it.
+const noUuid = (r) => (r.message && r.message.uuid ? { ...r, message: Object.fromEntries(Object.entries(r.message).filter(([k]) => k !== "uuid")) } : r);
 const isPi = (r) => !["extension_ui_request", "response", "claude_paused"].includes(r.type);
 
 async function rig({ configDir = path.join(tmp, "cfg"), settings = {}, breakSdk } = {}) {
@@ -85,7 +87,7 @@ for (const name of REPLAYS) {
 		const turns = want.filter((r) => r.type === "agent_settled").length;
 		await t.until(() => t.settled(turns));
 		await t.until(() => t.events.records.some((r) => r.type === "extension_ui_request"));
-		let got = t.events.records.filter(isPi);
+		let got = t.events.records.filter(isPi).map(noUuid);
 		if (BREAK === "replay") got = got.filter((r) => r.type !== "tool_execution_end" || r.toolName === "subagent");
 		assert.equal(got.length, want.length, `record count (${types(got).join(",")})`);
 		got.forEach((r, i) => assert.deepEqual(r, want[i], `record ${i} (${r.type})`));
@@ -115,7 +117,7 @@ test("interrupt, then a second prompt in the same open session", async () => {
 	assert.ok(t.adapter.canSend(t.h), "the input is still open");
 	assert.ok(t.adapter.send(t.h, { type: "prompt", message: "Reply with the single word: ready." }));
 	await t.until(() => t.settled(2));
-	const got = t.events.records.filter(isPi);
+	const got = t.events.records.filter(isPi).map(noUuid);
 	assert.equal(got.length, want.length);
 	got.forEach((r, i) => assert.deepEqual(r, want[i], `record ${i} (${r.type})`));
 	assert.deepEqual(got.filter((r) => r.type === "agent_settled"), [{ type: "agent_settled", aborted: true }, { type: "agent_settled" }]);
@@ -190,7 +192,7 @@ test("get_commands, get_last_assistant_text, get_messages (through the SDK, in t
 
 test("every request type the app sends gets an answer; what Claude cannot serve says so and why", async () => {
 	const t = await rig();
-	const served = new Set(["get_state", "get_available_models", "set_model", "get_available_thinking_levels", "set_thinking_level", "abort", "get_messages", "get_commands", "get_last_assistant_text"]);
+	const served = new Set(["get_state", "get_available_models", "set_model", "get_available_thinking_levels", "set_thinking_level", "abort", "get_messages", "get_commands", "get_last_assistant_text", "get_fork_messages", "fork"]);
 	for (const type of REQUEST_TYPES) {
 		if (type === "prompt" || type === "extension_ui_response") continue; // the adapter's own; the gate's (no response record in the contract)
 		const extra = type === "set_model" ? { modelId: "sonnet" } : type === "set_thinking_level" ? { level: "low" } : {};
