@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { killTree } = require("./kill-tree");
+const { makeFindPi } = require("./pi-cache");
 const { watchTree } = require("./watch-tree");
 const { createPrLookup } = require("./pr-lookup");
 const { NOISE_DIRS, isNoise, createIgnoreCheck, debounceMax } = require("./watch-filter");
@@ -84,10 +85,9 @@ function buildEnv() {
 // Where Pi is installed, independent of the opened repo: PI_CRUST_PI, nvm's default version, any other nvm
 // version (newest first), then Homebrew / ~/.local. Returns the resolved CLI script and the Node next to it, so Pi
 // always runs on the Node it was installed with, whatever the repo's .nvmrc says.
-let piCache;
-function findPi() {
-	if (piCache !== undefined) return piCache;
-	if (IS_WIN) return (piCache = findPiWin());
+function locatePi() {
+	if (SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1") return null; // selftest only: act as if Pi isn't installed
+	if (IS_WIN) return findPiWin();
 	const home = os.homedir();
 	const nvmDir = path.join(home, ".nvm", "versions", "node");
 	const candidates = [];
@@ -117,15 +117,14 @@ function findPi() {
 		} catch {}
 		// A JS entry point next to a Node binary: run it with that Node. Otherwise run the binary as is.
 		if (script && fs.existsSync(nodeHere) && /\.(c|m)?js$/.test(script)) {
-			piCache = { binDir, command: nodeHere, args: [script] };
-		} else {
-			piCache = { binDir, command: bin, args: [] };
+			return { binDir, command: nodeHere, args: [script] };
 		}
-		return piCache;
+		return { binDir, command: bin, args: [] };
 	}
-	piCache = null;
-	return piCache;
+	return null;
 }
+// Remembered until `findPi({ fresh: true })` (see pi-cache.js): installing Pi while the app runs must work without a restart.
+const findPi = makeFindPi(locatePi);
 
 // Windows: PI_CRUST_PI (cli.js, pi.cmd or pi.exe), npm's global folder (%APPDATA%\npm), nvm-windows (the active
 // %NVM_SYMLINK%, then %NVM_HOME%\vX newest first), then PATH. Never through the pi.cmd shim (a .cmd only runs in a
@@ -161,7 +160,8 @@ function scriptOfPrefix(prefix) {
 	return null;
 }
 function findPiWin() {
-	const nodeFor = (binDir) => (fs.existsSync(path.join(binDir, "node.exe")) ? path.join(binDir, "node.exe") : onPath("node.exe"));
+	const usualNode = () => [process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs", "node.exe"), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "nodejs", "node.exe")].find((p) => p && fs.existsSync(p)) || null; // a Node installed after the app started isn't on its PATH yet
+	const nodeFor = (binDir) => (fs.existsSync(path.join(binDir, "node.exe")) ? path.join(binDir, "node.exe") : onPath("node.exe") || usualNode());
 	const viaScript = (binDir, script) => {
 		const node = script && nodeFor(binDir);
 		return node ? { binDir, command: node, args: [script] } : null;
@@ -265,7 +265,7 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	const args = ["--mode", "rpc", ...["crust-context.ts", "crust-guard.ts", "advisor.ts"].flatMap((f) => ["-e", path.join(__dirname, "pi-extension", f)])];
 	if (sessionFile) args.push("--session", sessionFile);
 	const pi = findPi();
-	const [cmd, cmdArgs] = pi ? [pi.command, [...pi.args, ...args]] : ["pi", args];
+	const [cmd, cmdArgs] = pi ? [pi.command, [...pi.args, ...args]] : [SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1" ? "pi-crust-selftest-no-such-pi" : "pi", args];
 	// Windows: no process groups, and detached would open a console window.
 	const proc = spawn(cmd, cmdArgs, { cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });
 	const chat = { id: chatId, proc, cwd };
@@ -329,7 +329,8 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	proc.on("error", (e) => {
 		clearInterval(probe);
 		failMainRequests(proc, "Pi stopped"); // before current(): killed processes are not current any more
-		if (current()) send("pi:exit", { chatId, error: e.message });
+		// notInstalled: the program wasn't found (not a vanished folder, which gives the same ENOENT): the UI says "Pi isn't installed yet" and offers setup.
+		if (current()) send("pi:exit", { chatId, error: e.message, errorCode: e.code, notInstalled: e.code === "ENOENT" && fs.existsSync(cwd || REPO) });
 	});
 	proc.on("exit", (code, signal) => {
 		clearInterval(probe);
@@ -506,7 +507,13 @@ ipcMain.handle("pi:closeChat", async (_e, chatId) => {
 	if (entry?.cwd) unwatchWorktreeIfUnused(entry.cwd);
 	return true;
 });
+// Look for Pi again and rebuild the environment (its folder on PATH): Pi may have been installed while the app was running.
+function refreshPi() {
+	findPi({ fresh: true });
+	ENV = buildEnv();
+}
 async function restartChat(chatId, sessionFile) {
+	refreshPi();
 	const old = chats.get(chatId)?.proc;
 	const cwd = openList.find((e) => e.id === chatId)?.cwd || null;
 	chats.delete(chatId);
@@ -932,7 +939,7 @@ ipcMain.on("ui:focus", () => {
 });
 // PI_CRUST_SELFTEST_ONLY=timeline,annotate: run only those tour steps (by feature script name; "core" = the built-in tour).
 const SELFTEST_ONLY = SELFTEST ? (process.env.PI_CRUST_SELFTEST_ONLY || "").split(",").map((s) => s.trim().toLowerCase().replace(/\.js$/, "")).filter(Boolean) : [];
-ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY, selftestNoPrompt: SELFTEST && process.env.PI_CRUST_SELFTEST_NOPROMPT === "1" }));
+ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY, selftestNoPrompt: SELFTEST && process.env.PI_CRUST_SELFTEST_NOPROMPT === "1", selftestNoPi: SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1" }));
 
 // ---------------------------------------------------------------------------
 // Repos: recent list, discovery, switching.
@@ -1663,6 +1670,7 @@ const ctx = {
 	},
 	run,
 	findPi,
+	refreshPi,
 	devUrl: DEV_URL,
 	figmaStatus: () => figmaMain.status(),
 	insideRepo,

@@ -110,4 +110,40 @@
 		const wired = r.facts.pi.state !== "ok" || a.state !== "unknown";
 		console.error(`SELFTEST health-real: ${r.rows.map((x) => `${x.id}=${x.state}`).join(" ")} pi=${r.facts.pi.version} node=${r.facts.node.version} git=${r.facts.git.version} auth="${a.line}" -> ${r.rows.length === 5 && wired ? "OK" : "MISMATCH"}`);
 	}, "health-real");
+
+	// A chat whose Pi is really missing. Run with PI_CRUST_SELFTEST_NO_PI=1: main skips the search and spawns a program that
+	// doesn't exist, so the error is the real ENOENT from the real spawn. Without the variable this is the control run:
+	// Pi starts and there must be no error box and no "Open setup" button. Either way "ENOENT" must not reach the screen.
+	selftestSteps.push(async ({ snap, wait }) => {
+		const noPi = !!info?.selftestNoPi;
+		let opened = null;
+		window.addEventListener("crust:open-setup", (e) => (opened = e.detail));
+		for (let t = 0; t < 15000 && !(active.dead || active.state.ready); t += 100) await wait(100);
+		const body = () => document.body.innerText;
+		const errBoxes = () => [...document.querySelectorAll(".msg.error")];
+		const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label && b.offsetParent);
+		const clean = !/ENOENT|spawn pi/i.test(body());
+		if (!noPi) {
+			const ok = active.state.ready && !active.dead && !errBoxes().length && !btn("Open setup") && clean;
+			console.error(`SELFTEST onboarding-exit control: ready=${active.state.ready} errorBoxes=${errBoxes().length} openSetup=${!!btn("Open setup")} enoentOnScreen=${!clean} -> ${ok ? "OK" : "MISMATCH"}`);
+			return;
+		}
+		const box = errBoxes().find((b) => b.textContent.startsWith("Pi isn't installed yet. Open setup to install it."));
+		console.error(`SELFTEST onboarding-exit message: dead=${active.dead} box="${box ? box.textContent : errBoxes().map((b) => b.textContent).join(" | ")}" enoentOnScreen=${!clean} -> ${active.dead && box && clean ? "OK" : "MISMATCH"}`);
+		await snap("onboarding-exit-message");
+		btn("Open setup")?.click();
+		console.error(`SELFTEST onboarding-exit button: event=${JSON.stringify(opened)} -> ${opened && opened.source === "pi-missing" && opened.chatId === active.id ? "OK" : "MISMATCH"}`);
+		// typing into the dead chat: a toast that points at setup, not "Pi is still starting…"
+		opened = null;
+		notReadyToast();
+		const toastEl = [...document.querySelectorAll(".toast")].find((t) => t.textContent.startsWith("Pi isn't running. Open setup."));
+		toastEl?.querySelector("button")?.click();
+		console.error(`SELFTEST onboarding-exit toast: "${toastEl ? toastEl.textContent : ""}" event=${opened && opened.source} -> ${toastEl && opened && opened.source === "toast" ? "OK" : "MISMATCH"}`);
+		// Restart Pi with Pi still missing: the same message again (one new box), no crash, no ENOENT text.
+		const n = errBoxes().length;
+		await crust.pi.restart(active.id);
+		for (let t = 0; t < 8000 && errBoxes().length === n; t += 100) await wait(100);
+		const again = errBoxes().length === n + 1 && errBoxes().at(-1).textContent.startsWith("Pi isn't installed yet.") && !/ENOENT|spawn pi/i.test(body());
+		console.error(`SELFTEST onboarding-exit restart: boxes ${n} -> ${errBoxes().length} -> ${again ? "OK" : "MISMATCH"}`);
+	}, "onboarding-exit");
 })();

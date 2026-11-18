@@ -231,7 +231,7 @@ async function handleBuiltinCommand(text) {
 	const cmd = allBuiltinCommands().find((c) => c.name === m[1]);
 	if (!cmd) return false;
 	if (!state.ready) {
-		toast("Pi is still starting…", "warning");
+		notReadyToast();
 		return true;
 	}
 	const r = await rpc("get_commands");

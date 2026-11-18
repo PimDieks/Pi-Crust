@@ -728,6 +728,17 @@ function addNotice(text, cls = "notice") {
 	scroll();
 }
 
+// Setup (the welcome view) isn't built yet: this only announces the request. The welcome view listens for it:
+//   window.addEventListener("crust:open-setup", (e) => open the view; e.detail = { source: "pi-missing" | "toast", chatId? })
+function openSetup(source, chatId) {
+	window.dispatchEvent(new CustomEvent("crust:open-setup", { detail: { source, chatId } }));
+}
+// A message was typed while Pi isn't ready: "starting" for a real start, "open setup" when Pi isn't installed.
+function notReadyToast() {
+	if (active?.piMissing) toast("Pi isn't running. Open setup.", "warning", { label: "Open setup", onClick: () => openSetup("toast", active.id) });
+	else toast("Pi is still starting…", "warning");
+}
+
 // `action` ({ label, onClick }) adds a small button to the toast.
 function toast(message, type = "info", action) {
 	const t = el("div", `toast ${type}`, message);
@@ -1915,7 +1926,7 @@ async function submit({ steer = false } = {}) {
 	const typed = input.value.trim();
 	const picks = active ? active.picks : [];
 	if (!typed && !picks.length) return;
-	if (!state.ready) return toast("Pi is still starting…", "warning");
+	if (!state.ready) return notReadyToast();
 	const blocks = picks.filter((p) => typeof p === "string");
 	const images = picks.filter((p) => typeof p !== "string").map(({ type, data, mimeType }) => ({ type, data, mimeType }));
 	const text = blocks.length ? `${blocks.join("\n\n")}\n\n${typed}`.trim() : typed;
@@ -1939,7 +1950,7 @@ async function submit({ steer = false } = {}) {
 // Send a prompt (or a /command); queued as steering while Pi works. Returns false when Pi rejected it.
 async function sendPrompt(text, images = [], { steer = false } = {}) {
 	if (!state.ready) {
-		toast("Pi is still starting…", "warning");
+		notReadyToast();
 		return false;
 	}
 	if (!images.length && text.startsWith("/") && (await handleBuiltinCommand(text))) return true;
@@ -2190,6 +2201,7 @@ crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree }) 
 	}
 	c.state.ready = false;
 	c.dead = false;
+	c.piMissing = false;
 	if (fresh) {
 		// Held messages live in main: pick up what is already there (renderer reload, chat restored).
 		crust.pi.held(chatId).then((held) => {
@@ -2247,6 +2259,12 @@ crust.pi.onExit((e) => {
 			box.append(`${why}. `);
 			btn = el("button", "btn", "Open in main checkout");
 			btn.onclick = () => crust.pi.openInMain(c.id);
+		} else if (e.notInstalled) {
+			// The program wasn't found (ENOENT): say what to do instead of showing Node's "spawn pi ENOENT".
+			c.piMissing = true;
+			box.append("Pi isn't installed yet. Open setup to install it. ");
+			btn = el("button", "", "Open setup");
+			btn.onclick = () => openSetup("pi-missing", c.id);
 		} else {
 			box.append(`Pi stopped (${why}). `);
 			btn = el("button", "", "Restart Pi");
