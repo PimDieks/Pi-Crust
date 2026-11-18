@@ -83,7 +83,7 @@ const keystore = (key) => ({ read: async () => (key ? { source: "stored", key } 
 async function claudeRig(key = "sk-ant-test-DUMMYKEY-0123456789") {
 	const sdk = await standIn();
 	sdk.reset();
-	const adapter = createClaudeAdapter({ keystore: keystore(key), configDir: path.join(tmp, "cfg"), isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, getSettings: () => ({}), env: {} });
+	const adapter = createClaudeAdapter({ enginePath: () => ({ path: "C:/stub/claude.exe" }), keystore: keystore(key), configDir: path.join(tmp, "cfg"), isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, getSettings: () => ({}), env: {} });
 	const events = { ready: [], exit: [] };
 	const sink = { isCurrent: () => true, ready: (h, d) => events.ready.push(d), record() {}, stderr() {}, exit: (h, i) => events.exit.push(i) };
 	const until = async (f) => {

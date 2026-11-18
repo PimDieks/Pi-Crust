@@ -234,7 +234,7 @@
 			sync(made);
 			renderTabs();
 			check(chip.textContent === "Claude Agent" && vis(chip), `Claude chip reads "${chip.textContent}"`);
-			check(!/claude code/i.test(document.body.innerText), "the words Claude Code are on screen");
+			check(!/claude code/i.test(document.body.innerText), "the words Claude Code are on screen: " + (document.body.innerText.match(/.{0,60}claude code.{0,60}/i) || [""])[0]);
 				// 2. every text that names this chat's agent uses its label
 				check(agentLabel({ agent: { id: "claude", label: "claude" } }) === "Claude Agent", "an unstarted Claude chat's label is the raw id");
 				check(!/Starting/.test($("#status-line").textContent) && !/Pi/.test($("#status-line").textContent), `status line: "${$("#status-line").textContent}"`);

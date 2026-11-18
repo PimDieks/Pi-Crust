@@ -37,7 +37,7 @@ async function rig({ key = KEY, killTree, loadSdk, projectFiles = {}, settings =
 			return { ...m, query: (q) => m.query({ ...q, options: { ...q.options, leak: q.options.env.ANTHROPIC_API_KEY } }) };
 		};
 	}
-	const adapter = createClaudeAdapter({ keystore: keystore(key), configDir, ...(fsImpl ? { fs: fsImpl } : {}), isPackaged: () => false, loadSdk: realLoad, killTree: killTree || ((p, f) => kills.push([p, f])), getSettings: () => settings, env });
+	const adapter = createClaudeAdapter({ enginePath: () => ({ path: "C:/stub/claude.exe" }), keystore: keystore(key), configDir, ...(fsImpl ? { fs: fsImpl } : {}), isPackaged: () => false, loadSdk: realLoad, killTree: killTree || ((p, f) => kills.push([p, f])), getSettings: () => settings, env });
 	const events = { ready: [], records: [], exit: [], stderr: [] };
 	const sink = { isCurrent: () => true, ready: (h, d) => events.ready.push(d), record: (h, r) => events.records.push(r), stderr: (h, t) => events.stderr.push(t), exit: (h, i) => events.exit.push(i) };
 	const until = async (f, ms = 3000) => {
@@ -89,7 +89,7 @@ test("the budget comes from a setting; a result of error_max_budget_usd is its o
 	const h = t.adapter.start({ cwd: t.cwd, mode: "plan" }, t.sink);
 	await t.until(() => t.events.ready.length === 1);
 	assert.strictEqual(t.sdk.calls[0].options.maxBudgetUsd, 2.5);
-	assert.strictEqual(t.sdk.calls[0].options.permissionMode, "plan");
+	assert.strictEqual(t.sdk.calls[0].options.permissionMode, "default", "Plan runs the SDK in default too; our gate blocks");
 	assert.ok(t.adapter.send(h, { type: "prompt", message: "hi" }));
 	await t.until(() => t.events.records.some((r) => r.type === "claude_paused"));
 	assert.strictEqual(t.events.records.find((r) => r.type === "claude_paused").totalCostUsd, 2.51);

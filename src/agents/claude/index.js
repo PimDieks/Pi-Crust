@@ -26,6 +26,11 @@ const CLAUDE_MD_CAP_BYTES = 32 * 1024;
 const NO_KEY = "No Anthropic API key is set. Add one in the Claude Agent key panel, or set ANTHROPIC_API_KEY.";
 const NO_CONFIG_DIR = "Claude Agent has no app config folder, so it was not started (it would otherwise use another Claude sign-in).";
 const NO_ENGINE = "The Claude Agent engine is not installed yet.";
+// Slash commands the SDK would run itself when a message starts with "/" (they can change settings, add folders, plugins, MCP servers or hooks,
+// or sign in). Only these harmless, read-only ones are forwarded; every other command is answered locally as not available. Decided from the
+// engine's own command list (capture-info.jsonl): they show the context, the usage and the recap, or the unused skills.
+const SLASH_ALLOW = Object.freeze(["context", "usage", "recap", "skill-doctor"]);
+const SLASH_START = /^[\s\u200b\ufeff]*\/([^\s]*)/;
 const MODE_FILE = "crust-permission-mode.json"; // the last chosen mode, in the app's own config folder (Pi keeps the same in its own folder)
 const MODE_COMMAND = /^\s*\/crust-mode(?:\s+(\S+))?\s*$/i; // what the mode selector sends; handled here, never given to the model
 
@@ -47,7 +52,7 @@ const CAPABILITIES = A.capabilities({
 	sessionStats: false,
 	sessionName: false,
 	sessionResume: true,
-	subagentCards: false,
+	subagentCards: true, // the translator turns an Agent call into the same subagent card as Pi's (translate.js)
 	advisor: false,
 	costMeter: true,
 	images: true,
@@ -167,7 +172,11 @@ function createClaudeAdapter(deps = {}) {
 	// The SDK options. The key appears only inside options.env.
 	function buildOptions(opts, key, extra = {}) {
 		const settings = (opts.settings && typeof opts.settings === "object" ? opts.settings : null) || cfg.getSettings() || {};
+		// Never without a verified engine: without pathToClaudeCodeExecutable the SDK would search node_modules folders up the tree.
+		// The path comes only from the setup's engine status "ready" (engine.js). The stand-in SDK of a self-test (unpackaged only) needs none.
 		const engine = cfg.enginePath();
+		const standIn = !cfg.isPackaged() && !!cfg.env.PI_CRUST_CLAUDE_SDK;
+		if ((!engine || typeof engine.path !== "string" || !engine.path) && !standIn) throw new Error(NO_ENGINE);
 		const appendText = opts.claudeMd === false ? null : readClaudeMd(opts.cwd);
 		const o = {
 			cwd: opts.cwd,
@@ -252,11 +261,8 @@ function createClaudeAdapter(deps = {}) {
 	// The status record the mode selector reads (the same one Pi's permission extension sends): only sent once the gate is installed.
 	const modeStatus = (h) => status.statusRecord(logic.STATUS_KEY, logic.statusText(h.mode));
 
-	// The SDK-side mode for a chat that is already running: "bypassPermissions" can only be entered when the query started with it.
-	const liveSdkMode = (h, mode) => {
-		const m = sdkModeFor(mode).permissionMode;
-		return m === "bypassPermissions" && !h.startedTrusted ? "default" : m;
-	};
+	// The SDK-side mode follows the chat's mode; every mode is "default" (permissions.js), so a switch never changes what the SDK skips.
+	const liveSdkMode = (h, mode) => sdkModeFor(mode).permissionMode;
 
 	// "/crust-mode <id>": the selector's request. The gate's mode changes (grants are cleared, as in Pi), the SDK's mode follows, the choice
 	// is remembered, and the status goes out: the selector moves only on that status.
@@ -287,7 +293,7 @@ function createClaudeAdapter(deps = {}) {
 	// has no session of its own: pendingFork says which part of the old one it shows.
 	function start(opts, sink) {
 		const mode0 = logic.isMode(opts.mode) ? opts.mode : readLastMode();
-		const handle = { pid: undefined, exitCode: null, signalCode: null, query: null, input: inputQueue(), child: null, closed: false, exitCbs: [], sink, mode: mode0, startedTrusted: mode0 === "trusted", gateInstalled: false, gen: 0, rebuild: null, turns: [], turnsLoading: null, pendingFork: null, forkInfo: null };
+		const handle = { pid: undefined, exitCode: null, signalCode: null, query: null, input: inputQueue(), child: null, closed: false, exitCbs: [], sink, mode: mode0, gateInstalled: false, gen: 0, rebuild: null, turns: [], turnsLoading: null, pendingFork: null, forkInfo: null };
 		// What the adapter knows about this chat: its own translator, usage totals, the model and effort in force.
 		handle.translator = createTranslator({ now: cfg.now });
 		handle.track = status.newTrack();
@@ -517,7 +523,7 @@ function createClaudeAdapter(deps = {}) {
 			else if (r.type === "agent_settled") m.streaming = false;
 			else if (r.type === "message_end" && r.message && r.message.role === "assistant" && r.message.stopReason !== "error") {
 				const text = (r.message.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-				if (text) m.lastAssistantText = text;
+				if (text) m.lastAssistantText = scrub(text, h.key);
 			}
 			h.sink.record(h, scrubDeep(r, h.key));
 		}
@@ -567,7 +573,7 @@ function createClaudeAdapter(deps = {}) {
 		},
 		forkMessages: async () => turnsLib.forkMessages(await turnsOf(h)),
 		fork: (entryId) => forkInPlace(h, entryId),
-		scrub: (t) => scrub(t),
+		scrub: (t) => scrub(t, h.key),
 	});
 
 	// Pi-shaped requests in. A prompt feeds the input stream and its row is emitted here (the stream never echoes it); the rest is
@@ -579,6 +585,12 @@ function createClaudeAdapter(deps = {}) {
 			return true;
 		}
 		if (record.type === "prompt") {
+			const slash = SLASH_START.exec(String(record.message == null ? "" : record.message));
+			if (slash && !SLASH_ALLOW.includes(slash[1])) {
+				// The SDK would run this command itself (/add-dir, /plugin, /mcp, /hooks, /permissions, /config, /login ...): it never gets it.
+				if (record.id !== undefined) h.sink.record(h, { type: "response", id: record.id, command: "prompt", success: false, error: `/${slash[1].slice(0, 40)} is not available in Claude Agent chats.` });
+				return true;
+			}
 			const text = String(record.message == null ? "" : record.message);
 			const images = Array.isArray(record.images) ? record.images.filter((im) => im && im.data).map((im) => ({ data: im.data, mimeType: im.mimeType || "image/png" })) : [];
 			const uuid = cfg.uuid();
@@ -591,7 +603,7 @@ function createClaudeAdapter(deps = {}) {
 		}
 		Promise.resolve(requests.answer(record, answerCtx(h))).then(
 			(resp) => {
-				if (resp && record.id !== undefined && !h.closed) h.sink.record(h, resp);
+				if (resp && record.id !== undefined && !h.closed) h.sink.record(h, scrubDeep(resp, h.key)); // a history or an error can carry the key
 			},
 			() => {},
 		);
@@ -730,3 +742,4 @@ module.exports.DEFAULT_MAX_BUDGET_USD = DEFAULT_MAX_BUDGET_USD;
 module.exports.NO_KEY = NO_KEY;
 module.exports.scrub = scrub;
 module.exports.scrubDeep = scrubDeep;
+module.exports.SLASH_ALLOW = SLASH_ALLOW;

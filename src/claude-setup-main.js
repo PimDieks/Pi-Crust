@@ -36,6 +36,8 @@ function register(ctx) {
 		auth: adapter.auth,
 		settings: { get: () => ctx.readSettings(), set: (patch) => ctx.writeSettings(patch) },
 		send: (channel, payload) => ctx.send(channel, payload),
+		fetch: fake ? fake.fetch : ctx.selftest === true ? async () => { throw new Error("no network in a self-test"); } : undefined, // a self-test never reaches Anthropic
+		waitingChats: () => (typeof ctx.setupWaitingChats === "function" ? ctx.setupWaitingChats() : []),
 		hold: (name) => (fake ? fake.control.hold(name) : Promise.resolve()),
 	});
 	adapter.configure({ keystore, configDir, getSettings: () => ctx.readSettings(), isPackaged: () => app.isPackaged, enginePath: () => setup.enginePath() });
@@ -44,8 +46,10 @@ function register(ctx) {
 	ipcMain.handle("claude:state", () => setup.state());
 	ipcMain.handle("claude:saveKey", (_e, key) => (typeof key === "string" && key.length <= 400 ? setup.saveKey(key) : { ok: false, error: "That does not look like a key." }));
 	ipcMain.handle("claude:removeKey", () => setup.removeKey());
-	ipcMain.handle("claude:enginePlan", () => setup.enginePlan());
-	ipcMain.handle("claude:engineDownload", (_e, token) => setup.engineDownload({ token: typeof token === "string" ? token : "" }));
+	// The plan and the download are bound to the asking window and chat (setup.js); the renderer only names the chat.
+	const asker = (e, chatId) => ({ senderId: e && e.sender ? e.sender.id : null, chatId: typeof chatId === "string" ? chatId : null });
+	ipcMain.handle("claude:enginePlan", (e, chatId) => setup.enginePlan(asker(e, chatId)));
+	ipcMain.handle("claude:engineDownload", (e, token, chatId) => setup.engineDownload({ token: typeof token === "string" ? token : "", ...asker(e, chatId) }));
 	ipcMain.handle("claude:engineCancel", () => setup.engineCancel());
 	ipcMain.handle("claude:setLimit", (_e, n) => setup.setLimit(n));
 	if (fake) ipcMain.handle("claude:fakeSet", (_e, cmd) => fake.fakeSet(cmd));
@@ -54,7 +58,7 @@ function register(ctx) {
 			engine.stopNow && engine.stopNow();
 		} catch {}
 	});
-	setup.emit().catch(() => {}); // fills the cache: a restored Claude Agent chat starts as soon as both steps are known to be done
+	setup.emit().then(() => setup.checkStored()).catch(() => {}); // fills the cache: a restored Claude Agent chat starts as soon as both steps are known to be done; a key still not checked is checked
 	setup.fake = !!fake;
 	return setup;
 }

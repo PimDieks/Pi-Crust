@@ -180,13 +180,13 @@ Pi stays the default. Next to it Pi Crust has a second agent, **Claude Agent**, 
 
 A new Claude Agent chat opens with a setup card: step 1 is the key, step 2 is the engine. The message box stays off, and says why, until both are done. Nothing covers the app. Details and fixes are in [SETUP.md](SETUP.md#claude-agent-optional).
 
-**Cost.** The cost shown for a chat is an estimate, not your bill. A chat pauses at about 5 dollars and asks before it goes on: a card at the end of the chat says what the chat has used, with **Continue** (up to another 5 dollars) and **Change limit**. The message box stays off until you choose. You can also set the limit in `settings.json` (see Configuration).
+**Cost.** The cost shown for a chat is an estimate, not your bill. A chat pauses at about 5 dollars and asks before it goes on: a card at the end of the chat says what the chat has used, with **Continue** (up to another 5 dollars) and **Change limit**. The message box stays off until you choose. You can also change the limit in the Setup panel (the Claude Agent spend limit row, once you have started a Claude Agent chat) or in `settings.json` (see Configuration).
 
 **How it differs from a Pi chat.**
 
 | | Claude Agent chat |
 |---|---|
-| Works the same | Permission modes and the approval prompt, Stop, model choice, thinking level (shown as effort), slash commands, images, tool cards, the context meter, checkpoints and Rewind, Earlier chats (they list both agents), and Fork (opens a new tab) |
+| Works the same | Permission modes and the approval prompt, Stop, model choice, thinking level (shown as effort), slash commands (only a few of the engine's own, such as `/context` and `/usage`, are passed on; the others, like `/mcp` or `/plugin`, answer "not available"), images, subagent cards, tool cards, the context meter, checkpoints and Rewind, Earlier chats (they list both agents), and Fork (opens a new tab) |
 | Different | The cost is an estimate. A message you send while it works runs after the current step, so there is no Alt+Enter steering and no queue strip. It compacts long chats by itself |
 | Not available | `/clone`, `/export`, `/compact`, `/session`, `/name`, the advisor, and everything that comes from Pi's extensions: Pi's subscriptions and the Copilot quota. These controls are shown off with a reason, or are absent |
 | Not on the phone | The [phone view](#remote-from-your-phone) shows Pi chats only |
@@ -198,6 +198,7 @@ A new Claude Agent chat opens with a setup card: step 1 is the key, step 2 is th
 
 **Safety.**
 - The four **permission modes** and the same **approval prompt** apply to Claude Agent chats too (see Permission modes in the Chat section). The mode selector, the prompt and its answers work as in a Pi chat.
+- Every mode runs the engine in its ordinary permission mode and Pi Crust decides each call, so even in Trusted the protected list (and reading a process environment, `/proc/.../environ`) still asks.
 - They are a **safety net, not a sandbox**. A command you approve can do anything you can. On Windows the engine has no sandbox of its own, so the modes and the prompt are the only guard.
 - A Claude Agent chat reads the project's `CLAUDE.md` as instructions (a file over 32 KB, a link, or one that leads out of the project folder is ignored). The project's own Claude settings and your own Claude settings are **not** loaded, so nothing in them can approve an action around the mode selector. Pi Crust gives the engine its own config folder, so a Claude sign-in you have on this computer is never used.
 - The API key is kept in the operating system's protected store. It is kept out of the commands the agent runs. A key in the `ANTHROPIC_API_KEY` environment variable is used only when you have not saved one in the app.
@@ -371,7 +372,7 @@ Turn it on with *Remote access…* in the command palette, `/remote`, or the �
 | `figmaFiles` | The Figma file for the Figma picker, per project (saved in Design › Figma status or by pasting a link); `figmaFileKey` and `figmaFileName` are the older app-wide value, used when a project has none |
 | `storybookUrl` | Storybook address; empty means auto-detect |
 | `designTokensFile` | JSON with `colors`, `spacing`, `radii`, `typography`, relative to the repo |
-| `claudeMaxBudgetUsd` | Claude Agent: the amount in US dollars at which a chat pauses and asks before going on (default 5, at least 0.5). **Change limit** on the pause card writes it |
+| `claudeMaxBudgetUsd` | Claude Agent: the amount in US dollars at which a chat pauses and asks before going on (default 5, at least 0.5). **Change limit** on the pause card and the Setup panel's spend limit row write it |
 | `claudeMaxTurns` | Claude Agent: the number of steps a run may take before it pauses (default 100) |
 | `toolCallCheckIn` | Ask "Keep going?" after this many tool calls in one run (default 40, `0` = off). Applies to chats started afterwards |
 | `mendix` | Per-repo Mendix passwords and port; written by the app |

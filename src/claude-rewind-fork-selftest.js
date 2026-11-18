@@ -85,7 +85,9 @@ selftestSteps.push(async ({ snap, wait }) => {
 		const forkOptions = [...document.querySelectorAll("#modal .options button")].map((b) => b.textContent);
 		check(forkOptions[0] === "End of the chat: keep everything so far" && forkOptions.length === 3, `fork options: ${forkOptions}`);
 		check(/new tab/.test($("#modal").textContent), "the fork dialog does not say it opens a new tab");
-		await snap("claude-rewind-fork-fork-dialog");
+		check(forkOptions[1] === `1. ${MSG1}` && forkOptions[2] === `2. ${MSG2}`, `the message lines lost letters: ${forkOptions.slice(1)}`); // every s of the text is still there
+		await wait(700); // the dialog fades in: the shots wait for it
+		await shots("fork-dialog");
 		await answerDialog(forkOptions[0]);
 		await forkDone;
 		check(await until(() => chats.size === tabsBefore + 1 && active !== made), "no new tab");

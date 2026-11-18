@@ -1,19 +1,21 @@
 // First-use setup of the Claude Agent (phase 7): the two steps of the card at the top of a new Claude Agent chat, in the main process.
-//   Step 1, the API key: saved here (checked with one tiny request through the adapter, then stored by keystore.js). The key arrives as an
-//   argument, goes to the adapter and the store, and is not kept, logged or put in any state or error text.
+//   Step 1, the API key: saved here (tested with one request that costs no tokens, keycheck.js, then stored by keystore.js). The key arrives as
+//   an argument, goes to the check and the store, and is not kept, logged or put in any state or error text.
 //   Step 2, the engine: planned, then downloaded with the plan's one-time token (engine.js refuses a download without it).
 // What the window sees is only state(): { key, engine, ready, started, limitUsd }. No dialog, no key, no path.
 //
 //   state()         -> the object above (async: the key store and the engine are asked)
-//   saveKey(key)    -> { ok: true } | { ok: false, error }     the check, then the store. Without an engine the key is stored first and checked
-//                      as soon as the engine is there (the check runs the engine); a wrong key is then removed again and step 1 shows why.
+//   saveKey(key)    -> { ok: true } | { ok: true, unchecked: true } | { ok: false, error }   saving tests the key (no engine needed). A wrong key is
+//                      not stored and the card says why. With no network the key is stored and marked "not checked yet", and checked later (checkStored).
 //   removeKey()     -> { ok } | { ok: false, error }           only a stored key; one in ANTHROPIC_API_KEY is not ours to remove
-//   enginePlan()    -> engine.plan(): { ok, token, text, ... }
-//   engineDownload({ token }) / engineCancel()
+//   enginePlan({ senderId, chatId }) -> engine.plan(): { ok, token, text, ... }, only for a window and a Claude Agent chat waiting in setup
+//   engineDownload({ token, senderId, chatId }) / engineCancel()
 //   setLimit(n)     -> { ok, limitUsd }                         the spend limit per run (a setting, default 5)
 //   markStarted()   -> the Setup panel lists the Claude Agent rows from now on
 //   isReady() / enginePath() / onReady(fn): synchronous views of the last state, for starting chats
 "use strict";
+
+const { checkKey: onlineCheck } = require("./keycheck");
 
 const DEFAULT_LIMIT_USD = 5;
 const MAX_LIMIT_USD = 1000;
@@ -33,9 +35,23 @@ function keyReason(error) {
 
 const mb = (bytes) => (Number.isFinite(bytes) ? `${Math.round(bytes / 1e6)} MB` : null); // decimal, as download sizes are usually quoted
 
-function createSetup({ keystore, engine, auth, settings, send = () => {}, hold = async () => {} } = {}) {
+// The engine plan and download are only accepted for a window and a chat that is waiting for the setup (the token never works for anything else).
+const PLANS_PER_MINUTE = 3;
+const REFUSED = {
+	state: "The engine is not missing, so there is nothing to download.",
+	chat: "Start a Claude Agent chat first: the engine is downloaded from its setup card.",
+	busy: "A download is already running.",
+	rate: "Too many download plans in a minute. Wait a moment and try again.",
+	token: "Nothing was confirmed. Look at the question again.",
+};
+
+function createSetup({ keystore, engine, auth, settings, send = () => {}, hold = async () => {}, waitingChats = () => [], now = Date.now, plansPerMinute = PLANS_PER_MINUTE, fetch: fetchApi } = {}) {
+	const checkKey = (key) => onlineCheck(key, fetchApi ? { fetch: fetchApi } : {});
 	if (!keystore || !engine || !auth || !settings) throw new TypeError("createSetup needs keystore, engine, auth and settings");
 	let busy = false; // a key is being checked
+	let issued = null; // { token, senderId, chatId }: the one plan handed out, bound to its window and chat
+	let downloading = false; // our own download call is running
+	const planTimes = []; // when plans were issued (last minute)
 	let keyFail = null; // { reason } of the last failed save or check, until the next try
 	let ksCache = null;
 	let cache = { keyDone: false, engineDone: false, enginePath: null, enginePathVersion: null };
@@ -91,7 +107,8 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 		return s;
 	}
 
-	// The check of a key that was stored before the engine was there. A wrong one is removed again.
+	// The check of a key that was stored without a verdict (the network was down when it was saved). Not the engine's: the same one request
+	// as on save (keycheck.js). A wrong key is removed again; still no network keeps it "not checked yet".
 	async function checkStored() {
 		if (busy || !settings.get()[SETTING.unchecked]) return;
 		busy = true;
@@ -99,17 +116,15 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 		try {
 			await hold("keyCheck");
 			const r = await keystore.read();
-			const res = r && r.key ? await auth.check(r.key) : { ok: false, error: "The stored key could not be read." };
+			const res = r && r.key ? await checkKey(r.key) : { ok: false, wrong: true, error: "The stored key could not be read." };
 			if (res.ok) settings.set({ [SETTING.unchecked]: false });
-			else {
+			else if (res.wrong) {
 				keyFail = { reason: keyReason(res.error) };
 				await keystore.clear().catch(() => {});
 				settings.set({ [SETTING.unchecked]: false });
 			}
-		} catch (e) {
-			keyFail = { reason: keyReason(e && e.message) };
-			await keystore.clear().catch(() => {});
-			settings.set({ [SETTING.unchecked]: false });
+		} catch {
+			// no verdict: the key stays stored and unchecked
 		} finally {
 			busy = false;
 			await emit(true);
@@ -133,19 +148,16 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 			await emit();
 			try {
 				await hold("keyCheck");
-				const es = await engine.status();
-				if (es && es.state === "ready") {
-					const r = await auth.login(key); // the check (one tiny request), then the store
-					if (!r.ok) {
-						keyFail = { reason: keyReason(r.error) };
-						return { ok: false, error: keyFail.reason };
-					}
-					settings.set({ [SETTING.unchecked]: false });
-				} else {
-					await keystore.set(key); // checked once the engine is there
-					settings.set({ [SETTING.unchecked]: true });
+				// Saving tests the key, with or without the engine: one request that costs no tokens (keycheck.js). A wrong key is not stored;
+				// with no network the key is stored and marked "not checked yet", and checked later.
+				const res = await checkKey(key);
+				if (res.wrong) {
+					keyFail = { reason: keyReason(res.error) };
+					return { ok: false, error: keyFail.reason };
 				}
-				return { ok: true };
+				await keystore.set(key);
+				settings.set({ [SETTING.unchecked]: !res.ok });
+				return res.ok ? { ok: true } : { ok: true, unchecked: true };
 			} catch (e) {
 				keyFail = { reason: e && e.name === "KeystoreError" ? String(e.message) : keyReason(e && e.message) };
 				return { ok: false, error: keyFail.reason };
@@ -165,15 +177,42 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 				return { ok: false, error: e && e.message ? String(e.message) : "The key could not be removed." };
 			}
 		},
-		async enginePlan() {
+		// from: { senderId, chatId } of the window that asks. Refused unless (a) the engine is missing or failed, (b) a Claude Agent chat waits in
+		// setup (the asked one, else the first), (c) no download runs, (d) fewer than plansPerMinute plans came in the last minute.
+		async enginePlan(from = {}) {
+			const es = (await engine.status().catch(() => null)) || { state: "missing" };
+			if (es.state === "ready") return { ok: false, error: "The Claude engine is already installed.", installed: true };
+			if (downloading || es.state === "downloading") return { ok: false, error: REFUSED.busy };
+			if (es.state !== "missing" && es.state !== "failed") return { ok: false, error: REFUSED.state };
+			const waiting = [...waitingChats()];
+			const chatId = from.chatId !== undefined && from.chatId !== null ? (waiting.includes(from.chatId) ? from.chatId : null) : waiting[0] === undefined ? null : waiting[0];
+			if (chatId === null) return { ok: false, error: REFUSED.chat };
+			const t = now();
+			while (planTimes.length && t - planTimes[0] >= 60000) planTimes.shift();
+			if (planTimes.length >= plansPerMinute) return { ok: false, error: REFUSED.rate };
+			planTimes.push(t);
 			const r = await engine.plan();
+			issued = r && r.ok ? { token: r.token, senderId: from.senderId, chatId } : null;
 			await emit();
 			return r;
 		},
-		async engineDownload(o) {
-			const r = await engine.download(o && typeof o === "object" ? { token: o.token } : {});
-			await emit();
-			return r;
+		async engineDownload(o = {}) {
+			const spent = issued; // one time only: a wrong try spends the plan too
+			issued = null;
+			const es = (await engine.status().catch(() => null)) || { state: "missing" };
+			if (es.state === "ready") return { ok: false, error: "The Claude engine is already installed.", installed: true, code: "installed" };
+			if (downloading || es.state === "downloading") return { ok: false, error: REFUSED.busy, code: "busy" };
+			if (es.state !== "missing" && es.state !== "failed") return { ok: false, error: REFUSED.state, code: "state" };
+			const ok = spent && typeof o.token === "string" && o.token === spent.token && o.senderId === spent.senderId && waitingChats().includes(spent.chatId) && (o.chatId === undefined || o.chatId === null || o.chatId === spent.chatId);
+			if (!ok) return { ok: false, error: REFUSED.token, code: "no-confirm" };
+			downloading = true;
+			try {
+				const r = await engine.download({ token: o.token });
+				await emit();
+				return r;
+			} finally {
+				downloading = false;
+			}
 		},
 		async engineCancel() {
 			const r = engine.cancel();
@@ -185,13 +224,16 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 			if (!Number.isFinite(v) || v < MIN_LIMIT_USD || v > MAX_LIMIT_USD) return { ok: false, error: `Enter an amount from $${MIN_LIMIT_USD.toFixed(2)} to $${MAX_LIMIT_USD}.` };
 			const rounded = Math.round(v * 100) / 100;
 			settings.set({ [SETTING.limit]: rounded });
+			emit().catch(() => {}); // the Setup panel row shows the new amount
 			return { ok: true, limitUsd: rounded };
 		},
 		markStarted() {
+			checkStored().catch(() => {}); // a key that is still not checked gets its check when a Claude Agent chat starts
 			if (settings.get()[SETTING.started]) return;
 			settings.set({ [SETTING.started]: Date.now() });
 			emit().catch(() => {}); // the Setup panel lists the Claude Agent rows from now on
 		},
+		checkStored, // also on app start: a key that is still not checked
 		isReady: () => cache.keyDone && cache.engineDone && !settings.get()[SETTING.unchecked],
 		enginePath: () => (cache.enginePath ? { path: cache.enginePath } : { path: null, reason: NO_ENGINE_YET }),
 		onReady(fn) {

@@ -95,11 +95,11 @@ Pi is all you need. If you also want chats with the second agent, **Claude Agent
 
 You need your own Anthropic API key. Usage is billed to your own Anthropic account. A Claude subscription does not work for this agent.
 
-**Step 1: the API key.** Press **Add key**, paste your key and press **Save key**. Pi Crust tests it with one tiny request and tells you here if Anthropic does not accept it. The key is stored encrypted by your operating system and is never shown again. If you have not saved a key but `ANTHROPIC_API_KEY` is set on this computer, that one is used. A key you save in the app wins over it.
+**Step 1: the API key.** Press **Add key**, paste your key and press **Save key**. Pi Crust tests it when you save it, with one request to Anthropic's models list (it costs no tokens and needs no engine), and tells you here if Anthropic does not accept it; a wrong key is not stored. The key is stored encrypted by your operating system and is never shown again. If you have not saved a key but `ANTHROPIC_API_KEY` is set on this computer, that one is used. A key you save in the app wins over it.
 
-If the engine is not downloaded yet, the key is saved first and checked as soon as the engine is there.
+If Pi Crust cannot reach Anthropic when you save (no connection), the key is stored and shown as "not checked yet"; it is checked again later, when Pi Crust starts or a Claude Agent chat opens.
 
-**Step 2: the engine.** Press **Download**. It is about 175 MB, downloaded once and checked before use. The message box stays off, with a reason, until both steps are done. Then the chat starts.
+**Step 2: the engine.** Press **Download** (it works from the setup card of a Claude Agent chat that is waiting; the app refuses it otherwise, and refuses a download while one runs or once the engine is there). It is about 175 MB, downloaded once and checked before use. The message box stays off, with a reason, until both steps are done. Then the chat starts.
 
 **Change or remove the key.** In the same card (and in the Setup panel, once you have started a Claude Agent chat) press **Change key** to paste a new one. The old key stays until the new one is accepted. **Remove key** deletes the stored key from this computer. The key stays valid at Anthropic: delete it in your Anthropic account if you want it gone for good.
 

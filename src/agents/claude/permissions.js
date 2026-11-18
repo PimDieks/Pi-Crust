@@ -67,15 +67,17 @@ const TOOL_TABLE = Object.freeze({
 	Agent: "subagent",
 });
 
-// Pi Crust mode -> SDK options. Ask before edits and Ask before commands both run the SDK in "default" and decide here, so the ladder
-// is ours and not the SDK's acceptEdits semantics (plan section 3.5, the recommended route). Trusted needs the extra opt-in flag.
+// Pi Crust mode -> SDK options. EVERY chat mode runs the SDK in "default" and the decision is ours (the PreToolUse hook and canUseTool), so
+// the ladder is ours and not the SDK's semantics, and the protected list still asks in Trusted. No mode ever maps to the SDK's
+// permission-skipping mode ("bypassPermissions") or passes its opt-in flag (allowDangerouslySkipPermissions): the SDK would then skip
+// canUseTool and the "ask" of the hook. Plan is enforced by our gate too (it blocks every write and command).
 const SDK_MODES = Object.freeze({
-	plan: Object.freeze({ permissionMode: "plan" }),
+	plan: Object.freeze({ permissionMode: "default" }),
 	"ask-edits": Object.freeze({ permissionMode: "default" }),
 	"ask-commands": Object.freeze({ permissionMode: "default" }),
-	trusted: Object.freeze({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true }),
+	trusted: Object.freeze({ permissionMode: "default" }),
 });
-// An unreadable mode gets "default", never the skip-all mode.
+// An unreadable mode gets "default" too.
 const sdkModeFor = (mode) => ({ ...(SDK_MODES[logic.isMode(mode) ? mode : logic.DEFAULT_MODE]) });
 
 // The name the shared logic should see. An unmapped name is never passed raw: "bash" or "edit" in lower case would be taken for Pi's own tools.
@@ -103,20 +105,48 @@ function judgedInput(toolName, input) {
 }
 
 // Reading a process environment (/proc/<pid>/environ) would show the API key to the agent. Strings are judged one by one, but a path and a
-// pattern or glob can be split over fields or hidden by quotes, so ANY touch of /proc asks (after dropping quotes and folding slashes);
-// Plan blocks it.
+// pattern or glob can be split over fields, hidden by quotes or escapes, or written with wildcards, so ANY touch of /proc asks (after dropping
+// quotes and escapes and folding slashes), and so does any search rooted at "/" or with a wildcard in the first part of an absolute path
+// (it could reach /proc without naming it). Plan blocks it. The rule applies in every mode, Trusted too (it asks there).
 const PROC_RE = /\/proc(?![\w-])/i;
+const WILD = /[*?\[\]{}]/;
 const foldText = (t) => t.replace(/\\/g, "/").replace(/["'`]/g, "").replace(/\/{2,}/g, "/");
+// POSIX reading: a backslash escapes the next character and is not a separator (/pr\oc is /proc).
+const posixText = (t) => t.replace(/\\([\s\S])/g, "$1").replace(/["'`]/g, "").replace(/\/{2,}/g, "/");
 function stringsOf(v, out = [], depth = 0) {
 	if (typeof v === "string") out.push(v);
 	else if (v && typeof v === "object" && depth < 6) for (const x of Object.values(v)) stringsOf(x, out, depth + 1);
 	return out;
 }
-function readsEnviron(kind, judged) {
+const PATH_FIELD = /path|file|dir|cwd/i;
+const GLOB_FIELD = /^(glob|include)$/i; // Grep's "pattern" is a regex (a search word), not a path; Glob's "pattern" is added below
+const SEARCH_NAMES = new Set(["Grep", "Glob", "LS"]);
+// A shell word that starts at "/" and has a wildcard in its first part (/pro?/self/environ, /pr*/...).
+const SHELL_WILD_ROOT = /(?:^|[\s=:;|&(<>])\/[^\s\/]*[*?\[{][^\s]*/;
+function searchesRoot(toolName, judged) {
+	if (!judged || typeof judged !== "object") return false;
+	const paths = [];
+	const globs = [];
+	for (const [k, v] of Object.entries(judged)) {
+		if (typeof v !== "string") continue;
+		if (PATH_FIELD.test(k)) paths.push(posixText(v));
+		else if (GLOB_FIELD.test(k)) globs.push(posixText(v));
+	}
+	if (toolName === "Glob" && typeof judged.pattern === "string") globs.push(posixText(judged.pattern)); // a Glob pattern is itself a path
+	if (toolName === "Glob") for (const g of globs) paths.push(g);
+	const rooted = (p) => /^\/*$/.test(p) && p.startsWith("/");
+	const wildFirst = (p) => p.startsWith("/") && WILD.test(p.replace(/^\/+/, "").split("/")[0]);
+	if (paths.some((p) => rooted(p) || wildFirst(p))) return true;
+	for (const p of paths) for (const g of globs) if (PROC_RE.test(foldText(p + "/" + g))) return true;
+	return false;
+}
+function readsEnviron(kind, judged, toolName) {
 	const texts = [];
 	if (kind === "shell" && judged && typeof judged.command === "string") texts.push(judged.command);
 	if (kind === "safe" && judged && typeof judged === "object") stringsOf(judged, texts);
-	return texts.some((t) => PROC_RE.test(foldText(t)));
+	if (texts.some((t) => PROC_RE.test(foldText(t)) || PROC_RE.test(posixText(t)))) return true;
+	if (kind === "shell" && texts.some((t) => SHELL_WILD_ROOT.test(posixText(t)))) return true;
+	return kind === "safe" && SEARCH_NAMES.has(toolName) && searchesRoot(toolName, judged);
 }
 const ENVIRON_ASK = {
 	action: "ask",
@@ -167,7 +197,7 @@ function judge({ mode, toolName, input, grants, cwd, shell, protect }) {
 	const judged = judgedInput(toolName, input);
 	let d = logic.decide({ mode, toolName: lname, input: judged, cwd, grants: g, protect, shell });
 	if (!d || (d.action !== "allow" && d.action !== "ask" && d.action !== "block")) return null;
-	if (mode !== "trusted" && d.action !== "block" && readsEnviron(kind, judged)) {
+	if (d.action !== "block" && readsEnviron(kind, judged, toolName)) {
 		if (mode === "plan") d = { action: "block", reason: "Plan mode is read-only and may not read a process environment (/proc/.../environ). Nothing was run." };
 		else d = ENVIRON_ASK;
 	}

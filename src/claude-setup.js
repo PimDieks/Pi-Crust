@@ -66,7 +66,7 @@
 				btn("Try again", () => ((sf.keyOpen = true), (sf.keyError = null), sf.render(true)), { id: "add-key" });
 			} else if (k.state === "done") {
 				state = "done";
-				line.textContent = k.source === "env" ? "Using the ANTHROPIC_API_KEY on this computer." : k.pendingCheck ? "Key saved. It is checked once the engine is downloaded." : "Key saved on this computer, checked.";
+				line.textContent = k.source === "env" ? "Using the ANTHROPIC_API_KEY on this computer." : k.pendingCheck ? "Key saved, not checked yet: Pi Crust could not reach Anthropic. It checks again later." : "Key saved on this computer, checked.";
 				btn("Change key", () => ((sf.keyOpen = true), sf.render(true)), { id: "change-key" });
 				if (k.source === "stored" || k.pendingCheck) btn("Remove key", () => removeKey(sf), { id: "remove-key" });
 			} else {
@@ -220,13 +220,13 @@
 		sf.engineErr = null;
 		sf.render();
 		try {
-			const plan = await crust.claude.enginePlan();
+			const plan = await crust.claude.enginePlan(sf.chatId);
 			if (!plan || !plan.ok) {
 				sf.engineBusy = false;
 				if (!plan || !plan.installed) sf.engineErr = (plan && plan.error) || "The download could not start.";
 				return sf.render();
 			}
-			crust.claude.engineDownload(plan.token).then(
+			crust.claude.engineDownload(plan.token, sf.chatId).then(
 				(r) => {
 					sf.engineBusy = false;
 					if (r && !r.ok && r.code !== "cancelled") sf.engineErr = r.error || "The download failed.";
@@ -253,7 +253,7 @@
 		const card = { chat, el: root, sf: {}, timer: null };
 		root.append(head, intro, steps);
 		const mk = (kind, num) => {
-			const sf = { kind, keyOpen: false, keyBusy: false, keyError: null, engineBusy: false, engineErr: null };
+			const sf = { chatId: chat.id, kind, keyOpen: false, keyBusy: false, keyError: null, engineBusy: false, engineErr: null };
 			const host = el("div", "sc-step");
 			host.dataset.step = kind;
 			sf.render = (focusField) => {
@@ -468,8 +468,63 @@
 				panel.push(li);
 				sf.render();
 			}
+			panel.push(limitRow());
 		}
 		return panel;
+	}
+
+	// The spend limit per run, changed from the Setup panel as well as from the pause card: same amount range, checked by main (setup.setLimit).
+	function limitRow() {
+		const li = el("li", "ob-row sc-row ready");
+		li.dataset.id = "claude-limit";
+		const sf = { draft: null, error: null, saved: false };
+		sf.render = () => {
+			const current = S && Number.isFinite(Number(S.limitUsd)) ? Number(S.limitUsd) : DEFAULT_LIMIT;
+			const mark = el("span", "ob-mark sc-mark", "✓");
+			mark.setAttribute("aria-hidden", "true");
+			const text = el("div", "ob-text");
+			const title = el("span", "ob-label sc-title", "Claude Agent spend limit");
+			title.append(el("span", "ob-optional", "Optional"));
+			const head = el("div", "sc-head");
+			head.append(title);
+			const line = el("div", "ob-line sc-line", `A Claude Agent run pauses and asks once it has used about ${usd(current)}.`);
+			const f = el("form", "sc-field pc-limit");
+			f.noValidate = true;
+			const label = el("label", "pc-label", "Spend limit per run");
+			const num = el("input");
+			num.type = "number";
+			num.min = "0.5";
+			num.max = "1000";
+			num.step = "0.5";
+			num.id = "claude-limit-input";
+			num.value = sf.draft !== null ? sf.draft : String(current);
+			num.oninput = () => (sf.draft = num.value);
+			label.htmlFor = num.id;
+			const save = el("button", "btn secondary", "Save");
+			save.type = "submit";
+			save.dataset.action = "save-limit-panel";
+			f.append(label, num, save);
+			f.onsubmit = async (e) => {
+				e.preventDefault();
+				const r = await crust.claude.setLimit(Number(num.value));
+				sf.error = r.ok ? null : r.error;
+				sf.saved = !!r.ok;
+				if (r.ok) sf.draft = null;
+				sf.render();
+			};
+			text.append(head, line, f);
+			if (sf.error || sf.saved) {
+				const note = el("div", sf.error ? "ob-line pc-error" : "ob-line", sf.error || "Saved.");
+				if (sf.error) note.setAttribute("role", "alert");
+				text.append(note);
+			}
+			const had = li.contains(document.activeElement);
+			li.replaceChildren(mark, text, el("div", "sc-actions"));
+			if (had) li.querySelector("input")?.focus();
+		};
+		surfaces.add(sf);
+		sf.render();
+		return li;
 	}
 
 	// --- wiring ------------------------------------------------------------------------------------------------------

@@ -54,7 +54,7 @@ async function rig({ uuids = [], configDir = path.join(tmp, `cfg-${fs.readdirSyn
 	cwd = cwd || fs.mkdtempSync(path.join(tmp, "proj-"));
 	let n = 0;
 	const queue = uuids.slice();
-	const adapter = createClaudeAdapter({ keystore: keystore(), configDir, ...(fsImpl ? { fs: fsImpl } : {}), isPackaged: () => false, loadSdk: async () => (wrapSdk ? wrapSdk(sdk) : sdk), killTree: () => {}, getSettings: () => ({}), env: {}, uuid: () => queue.shift() || `new-${++n}` });
+	const adapter = createClaudeAdapter({ enginePath: () => ({ path: "C:/stub/claude.exe" }), keystore: keystore(), configDir, ...(fsImpl ? { fs: fsImpl } : {}), isPackaged: () => false, loadSdk: async () => (wrapSdk ? wrapSdk(sdk) : sdk), killTree: () => {}, getSettings: () => ({}), env: {}, uuid: () => queue.shift() || `new-${++n}` });
 	const events = { ready: 0, records: [], exit: [] };
 	const sink = { isCurrent: () => true, ready: () => events.ready++, record: (h, r) => events.records.push(r), stderr: () => {}, exit: (h, i) => events.exit.push(i) };
 	const h = adapter.start({ cwd, sessionRef, fork }, sink);

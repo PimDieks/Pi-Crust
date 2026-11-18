@@ -46,8 +46,8 @@ contextBridge.exposeInMainWorld("crust", {
 		state: () => ipcRenderer.invoke("claude:state"),
 		saveKey: (key) => ipcRenderer.invoke("claude:saveKey", key),
 		removeKey: () => ipcRenderer.invoke("claude:removeKey"),
-		enginePlan: () => ipcRenderer.invoke("claude:enginePlan"),
-		engineDownload: (token) => ipcRenderer.invoke("claude:engineDownload", token),
+		enginePlan: (chatId) => ipcRenderer.invoke("claude:enginePlan", chatId),
+		engineDownload: (token, chatId) => ipcRenderer.invoke("claude:engineDownload", token, chatId),
 		engineCancel: () => ipcRenderer.invoke("claude:engineCancel"),
 		setLimit: (usd) => ipcRenderer.invoke("claude:setLimit", usd),
 		fakeSet: (cmd) => ipcRenderer.invoke("claude:fakeSet", cmd), // self-test only: main registers it only with the test switches

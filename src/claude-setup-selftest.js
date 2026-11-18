@@ -146,7 +146,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		await window.crustOnboarding.open("claude-setup");
 		await wait(500);
 		const rowsAfter = obRows();
-		check(rowsAfter.slice(-2).join() === "claude-key,claude-engine" && rowsAfter.length === rowsBefore.length + 2, `Setup panel after: ${rowsAfter}`);
+		check(rowsAfter.slice(-3).join() === "claude-key,claude-engine,claude-limit" && rowsAfter.length === rowsBefore.length + 3, `Setup panel after: ${rowsAfter}`);
 		const pillNow = $("#setup-pill").textContent;
 		check(pillNow === pillBefore, `the Setup count changed: "${pillBefore}" -> "${pillNow}"`);
 		check($("#onboarding").textContent.includes("Claude Agent key") && $("#onboarding").textContent.includes("Claude Agent engine"), "panel row label missing");
@@ -160,11 +160,18 @@ selftestSteps.push(async ({ snap, wait }) => {
 		const field = stepOf("key").querySelector(".sc-field input");
 		check(field && field.type === "password" && field.autocomplete === "off" && vis(field) && !dialogOpen, "the key field is not masked or not in the card");
 		await shots("key-field", "save-key");
-		// a wrong key, stored before the engine is there: checked after the download (step 5)
+		// a wrong key is refused when it is saved, engine or not: not stored, the card says why
 		await typeKey(BAD);
-		check(field.value === "", "the key stayed in the field after saving");
+		check(await until(() => info1("key")?.state === "failed" && /did not accept this key/.test(info1("key").line)), `wrong key on save: ${JSON.stringify(info1("key"))}`);
+		check((await crust.claude.state()).key.state === "failed", "the wrong key was stored");
+		btn("key", "add-key").click(); // Try again
+		await wait(150);
+		// no connection when it is saved: the key is stored and marked not checked yet; checked after the engine download (step 5)
+		await fake({ net: "down" });
+		await typeKey(BAD);
+		check(stepOf("key").querySelector(".sc-field input") === null || stepOf("key").querySelector(".sc-field input").value === "", "the key stayed in the field after saving");
 		check(await until(() => info1("key")?.state === "done"), `key step after save: ${JSON.stringify(info1("key"))}`);
-		check(/checked once the engine is downloaded/.test(info1("key").line) && info1("key").buttons.join() === "Change key,Remove key", `pending key: ${JSON.stringify(info1("key"))}`);
+		check(/not checked yet/.test(info1("key").line) && info1("key").buttons.join() === "Change key,Remove key", `pending key: ${JSON.stringify(info1("key"))}`);
 		const leak = JSON.stringify(ui.state()) + document.body.innerText + [...document.querySelectorAll("[title],[aria-label]")].map((n) => n.title + n.getAttribute("aria-label")).join();
 		check(!leak.includes(BAD), "the key is in the state or on the page");
 		check(info1("key").mark === "✓", `key done mark: "${info1("key").mark}"`);
@@ -202,6 +209,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		btn("engine", "download").click(); // Try again
 		await until(() => /Downloading/.test(info1("engine")?.line || ""));
 		await fake({ hold: "keyCheck" });
+		await fake({ net: "up" }); // the connection is back: the stored key is checked as soon as the engine is there
 		await fake({ engine: "finish" });
 		check(await until(() => info1("engine")?.state === "done"), `engine done: ${JSON.stringify(info1("engine"))}`);
 		check(/Engine ready/.test(info1("engine").line), "engine done line");
@@ -248,6 +256,19 @@ selftestSteps.push(async ({ snap, wait }) => {
 		row("claude-key").querySelector('[data-action="cancel-key"]').click();
 		row("claude-key").querySelector('[data-action="remove-key"]').click();
 		check(await until(() => row("claude-key")?.classList.contains("todo") || /Add key/.test(row("claude-key")?.textContent || "")), "Remove key in the panel did not remove the key");
+		// the spend limit row: the same validation as the pause card
+		const limitIn = row("claude-limit")?.querySelector("#claude-limit-input");
+		check(!!limitIn, "the panel has no spend limit field");
+		if (limitIn) {
+			limitIn.value = "0.1";
+			row("claude-limit").querySelector("form").requestSubmit();
+			check(await until(() => /\$0\.50/.test(row("claude-limit")?.querySelector(".pc-error")?.textContent || "")), "a limit under the minimum was not refused in the panel");
+			const input2 = row("claude-limit").querySelector("#claude-limit-input");
+			input2.value = "7.5";
+			row("claude-limit").querySelector("form").requestSubmit();
+			check(await until(() => ui.state()?.limitUsd === 7.5 && /Saved/.test(row("claude-limit")?.textContent || "")), "a valid limit was not saved from the panel");
+			await crust.claude.setLimit(5);
+		}
 		window.crustOnboarding.close({ restore: false });
 		await wait(200);
 		await fake({ key: "reset" });

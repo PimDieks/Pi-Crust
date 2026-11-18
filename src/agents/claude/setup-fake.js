@@ -112,10 +112,22 @@ function createFakes() {
 			set({ state: "missing" });
 		}
 		if (cmd.key === "reset") stored = null;
+		if (cmd.net === "down") net.down = true;
+		if (cmd.net === "up") net.down = false;
 		return { ok: true };
 	}
 
-	return { keystore, engine, control, fakeSet };
+	// The key test (keycheck.js) never reaches the network in a self-test: this fetch answers like the API does. net "down" throws (no connection),
+	// otherwise the stand-in's rejected key gets a 401 and every other key a 200.
+	const net = { down: false };
+	const REJECTED = "sk-ant-test-rejected-0000";
+	const fetch = async (url, init) => {
+		if (net.down) throw new TypeError("fetch failed (no connection in the test)");
+		const key = init && init.headers && init.headers["x-api-key"];
+		return { status: key === REJECTED ? 401 : 200 };
+	};
+
+	return { keystore, engine, control, fakeSet, fetch, net };
 }
 
 module.exports = { createFakes };

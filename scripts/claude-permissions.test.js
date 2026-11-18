@@ -83,11 +83,12 @@ for (const [label, tool, input, want] of CELLS) {
 	}
 }
 
-test("every mode maps to SDK options; trusted alone skips, an unreadable mode never does", () => {
-	assert.equal(P.sdkModeFor("plan").permissionMode, "plan");
-	assert.equal(P.sdkModeFor("ask-edits").permissionMode, "default");
-	assert.equal(P.sdkModeFor("ask-commands").permissionMode, "default");
-	assert.deepEqual(P.sdkModeFor("trusted"), { permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
+test("every mode runs the SDK in default; none maps to the permission-skipping mode or passes its opt-in flag", () => {
+	for (const id of logic.MODE_IDS) assert.deepEqual(P.sdkModeFor(id), { permissionMode: "default" }, id);
+	for (const [id, o] of Object.entries(P.SDK_MODES)) {
+		assert.notEqual(o.permissionMode, "bypassPermissions", id);
+		assert.ok(!("allowDangerouslySkipPermissions" in o), id);
+	}
 	for (const bad of [undefined, null, "yolo", 7, "__proto__", "constructor"]) assert.equal(P.sdkModeFor(bad).permissionMode, "default", String(bad));
 	for (const id of logic.MODE_IDS) assert.ok(P.SDK_MODES[id], id);
 });
@@ -461,5 +462,54 @@ test("ask prompts show the plain tool name and make no claim about the subagent'
 		assert.doesNotMatch(t, /not controlled by the permission mode|are checked|are controlled/i, tool);
 		assert.match(t, /starting the subagent/i, tool);
 		assert.deepEqual(s.asked[0].prompt.options.slice(-1), ["Deny"]);
+	}
+});
+
+// Review round: the failing inputs of the security review, and the same rule in Trusted.
+const PROC_ROUND = [
+	["Grep", { pattern: "sk-ant", path: "/", glob: "proc/*/environ" }],
+	["Grep", { pattern: "x", path: "/pro?/x" }],
+	["Grep", { pattern: "x", path: "/p[r]oc/self" }],
+	["Grep", { pattern: "x", path: "/{proc,tmp}/self" }],
+	["Grep", { pattern: "ANTHROPIC", path: "/" }],
+	["Glob", { pattern: "/pr*/self/environ" }],
+	["Glob", { pattern: "proc/*/environ", path: "/" }],
+	["Bash", { command: "cat /pr\\oc/self/environ" }],
+	["Bash", { command: "cat /pro?/self/environ" }],
+	["Bash", { command: "cat /p*/self/environ" }],
+];
+test("a search rooted at / or with a wildcard in the first part, and a backslash inside a POSIX path, ask like /proc itself (Plan denies)", async () => {
+	for (const [tool, input] of PROC_ROUND) {
+		const a = rig("ask-commands", "Deny");
+		assert.equal((await a.can(tool, input)).behavior, "deny", JSON.stringify(input));
+		assert.equal(a.asked.length, 1, "asks: " + tool + " " + JSON.stringify(input));
+		const p = rig("plan", "Allow once");
+		assert.equal((await p.can(tool, input)).behavior, "deny", "plan " + JSON.stringify(input));
+		assert.equal(p.asked.length, 0);
+	}
+});
+
+test("the /proc rule applies in Trusted too: it asks, and Allow once lets the call through", async () => {
+	for (const [tool, input] of [...PROC_ROUND, ["Read", { file_path: "/proc/self/environ" }], ["Bash", { command: "cat /proc/self/environ" }]]) {
+		const d = rig("trusted", "Deny");
+		assert.equal((await d.can(tool, input)).behavior, "deny", JSON.stringify(input));
+		assert.equal(d.asked.length, 1, "Trusted asks: " + tool + " " + JSON.stringify(input));
+		assert.match(d.asked[0].prompt.title, /process environment/);
+		const ok = rig("trusted", "Allow once");
+		assert.equal((await ok.can(tool, input)).behavior, "allow");
+	}
+});
+
+test("the broader /proc rule does not ask for ordinary searches", async () => {
+	for (const [tool, input] of [
+		["Grep", { pattern: "proc", path: inP("src") }],
+		["Grep", { pattern: "/", path: inP("src") }],
+		["Grep", { pattern: "a|b", path: inP("src"), glob: "*.js" }],
+		["Glob", { pattern: "**/*.js", path: inP("src") }],
+		["Read", { file_path: inP("src/process.js") }],
+	]) {
+		const a = rig("ask-commands", "undefined");
+		assert.equal((await a.can(tool, input)).behavior, "allow", JSON.stringify(input));
+		assert.equal(a.asked.length, 0);
 	}
 });

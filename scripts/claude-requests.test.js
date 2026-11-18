@@ -41,7 +41,7 @@ async function rig({ configDir = path.join(tmp, "cfg"), settings = {}, breakSdk 
 	const cwd = fs.mkdtempSync(path.join(tmp, "proj-"));
 	let loaded = sdk;
 	if (breakSdk) loaded = breakSdk(sdk);
-	const adapter = createClaudeAdapter({
+	const adapter = createClaudeAdapter({ enginePath: () => ({ path: "C:/stub/claude.exe" }),
 		keystore: { read: async () => ({ source: "stored", key: KEY }), status: async () => ({ source: "stored" }), set: async () => ({ ok: true }), clear: async () => ({ ok: true }) },
 		configDir,
 		isPackaged: () => false,

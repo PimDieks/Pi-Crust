@@ -1520,6 +1520,7 @@ const ctx = {
 		return SELFTEST;
 	},
 	send,
+	setupWaitingChats: () => [...setupWaiting], // chats that wait for their agent's setup (the engine download is only accepted for one of them)
 	// Remote (remote-main.js): talk to Pi and own chats from outside the renderer.
 	piSend,
 	piRequest,

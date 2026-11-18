@@ -139,7 +139,7 @@ async function forkInNewTab() {
 	if (!r.success) return toast(r.error || "Couldn't read the messages", "error");
 	const list = r.data?.messages || [];
 	if (!list.length) return toast("Nothing to fork from yet", "warning");
-	const label = (m, i) => `${i + 1}. ${(m.text || "").replace(/s+/g, " ").slice(0, 100)}`;
+	const label = ForkLabel.forkLabel;
 	const res = await showDialog({ method: "select", title: "Fork from where? The fork opens in a new tab", options: [FORK_END, ...list.map(label)] });
 	if (!res.value) return;
 	const picked = res.value === FORK_END ? null : list.find((m, i) => label(m, i) === res.value);
@@ -160,7 +160,7 @@ async function forkChat() {
 	if (!r.success) return toast(r.error || "Couldn't read the messages", "error");
 	const list = r.data?.messages || [];
 	if (!list.length) return toast("Nothing to fork from yet", "warning");
-	const label = (m, i) => `${i + 1}. ${(m.text || "").replace(/\s+/g, " ").slice(0, 100)}`;
+	const label = ForkLabel.forkLabel;
 	const res = await showDialog({ method: "select", title: "Fork from which message?", options: list.map(label) });
 	if (!res.value) return;
 	const picked = list.find((m, i) => label(m, i) === res.value);

@@ -258,7 +258,7 @@ test("the adapter passes hooks next to canUseTool; the gate runs end to end with
 	sdk.reset();
 	const cwd = fs.mkdtempSync(path.join(tmp, "p-"));
 	const ks = { read: async () => ({ source: "stored", key: "k-test-not-real" }), status: async () => ({ source: "stored" }), set: async () => ({}), clear: async () => ({}) };
-	const ad = createClaudeAdapter({ keystore: ks, configDir: path.join(tmp, "cfg"), isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, getSettings: () => ({}), env: {} });
+	const ad = createClaudeAdapter({ enginePath: () => ({ path: "C:/stub/claude.exe" }), keystore: ks, configDir: path.join(tmp, "cfg"), isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, getSettings: () => ({}), env: {} });
 	const ready = [];
 	const asked = [];
 	const sink = { isCurrent: () => true, ready: (h, d) => ready.push(d), record: () => {}, stderr: () => {}, exit: () => {}, ask: async (h, prompt) => (asked.push(prompt.title), "Allow once") };

@@ -18,7 +18,7 @@ async function rig({ configDir = fs.mkdtempSync(path.join(tmp, "cfg-")) } = {}) 
 	sdk.reset();
 	const cwd = fs.mkdtempSync(path.join(tmp, "proj-"));
 	const keystore = { read: async () => ({ source: "stored", key: "sk-ant-test-DUMMYKEY-0123456789" }), status: async () => ({ source: "stored" }), set: async () => ({ ok: true }), clear: async () => ({ ok: true }) };
-	const adapter = createClaudeAdapter({ keystore, configDir, isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, getSettings: () => ({}), env: {} });
+	const adapter = createClaudeAdapter({ enginePath: () => ({ path: "C:/stub/claude.exe" }), keystore, configDir, isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, getSettings: () => ({}), env: {} });
 	const records = [];
 	const sink = { isCurrent: () => true, ready() {}, record: (h, r) => records.push(r), stderr() {}, exit() {} };
 	const until = async (f, ms = 3000) => {
@@ -52,7 +52,7 @@ test("no key: no mode is reported (nothing is installed)", async () => {
 	const sdk = await import(pathToFileURL(STAND_IN).href);
 	sdk.reset();
 	const records = [];
-	const adapter = createClaudeAdapter({ keystore: { read: async () => ({ source: "none", key: null }), status: async () => ({ source: "none" }) }, configDir: tmp, isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, env: {} });
+	const adapter = createClaudeAdapter({ enginePath: () => ({ path: "C:/stub/claude.exe" }), keystore: { read: async () => ({ source: "none", key: null }), status: async () => ({ source: "none" }) }, configDir: tmp, isPackaged: () => false, loadSdk: async () => sdk, killTree: () => {}, env: {} });
 	const exits = [];
 	adapter.start({ cwd: tmp }, { isCurrent: () => true, ready() {}, record: (h, r) => records.push(r), exit: (h, i) => exits.push(i) });
 	await new Promise((r) => setTimeout(r, 100));
@@ -85,7 +85,7 @@ test("/crust-mode reaches the adapter: the gate, the SDK, the status and the ans
 	assert.ok(statusAt >= 0 && statusAt < t.records.indexOf(resp), "the status comes before the answer");
 	assert.strictEqual(h.canUseTool.grants.edits, false);
 	assert.strictEqual(h.canUseTool.grants.keys.size, 0, "grants are cleared on a mode change");
-	assert.deepStrictEqual(t.sdk.calls[0].modes, ["plan"]);
+	assert.deepStrictEqual(t.sdk.calls[0].modes, ["default"], "Plan is our gate, not the SDK mode");
 	assert.ok(!t.sdk.calls[0].calls.includes("user_message"), "the request was not sent to the model");
 	assert.ok(!t.records.some((r) => r.type === "message_start" && r.message && r.message.role === "user"), "no user row");
 	// the gate now judges in Plan
@@ -94,24 +94,25 @@ test("/crust-mode reaches the adapter: the gate, the SDK, the status and the ans
 	t.adapter.stop(h);
 });
 
-test("Trusted from a chat that did not start in Trusted stays 'default' on the SDK side; the choice is remembered for the next chat", async () => {
+test("Trusted never leaves the SDK in anything but 'default' and passes no skip flag, started in Trusted or switched to it; the choice is remembered", async () => {
 	const t = await rig();
 	const h = t.adapter.start({ cwd: t.cwd }, t.sink);
 	await t.until(() => t.modes().length === 1);
 	t.adapter.send(h, { id: 1, type: "prompt", message: "/crust-mode trusted" });
 	await t.until(() => t.answered(1));
-	assert.deepStrictEqual(t.sdk.calls[0].modes, ["default"], "no bypassPermissions without the start flag");
+	assert.deepStrictEqual(t.sdk.calls[0].modes, ["default"], "no bypassPermissions after a switch to Trusted");
 	assert.strictEqual(h.mode, "trusted");
 	t.adapter.stop(h);
 	const h2 = t.adapter.start({ cwd: t.cwd }, t.sink);
 	await t.until(() => t.modes().length === 3);
 	assert.strictEqual(t.modes()[2], "Mode: Trusted");
-	assert.strictEqual(t.sdk.calls[1].options.permissionMode, "bypassPermissions");
+	assert.strictEqual(t.sdk.calls[1].options.permissionMode, "default");
+	assert.ok(!("allowDangerouslySkipPermissions" in t.sdk.calls[1].options), "no opt-in flag");
 	t.adapter.send(h2, { id: 2, type: "prompt", message: "/crust-mode ask-edits" });
 	await t.until(() => t.answered(2));
 	t.adapter.send(h2, { id: 3, type: "prompt", message: "/crust-mode trusted" });
 	await t.until(() => t.answered(3));
-	assert.deepStrictEqual(t.sdk.calls[1].modes, ["default", "bypassPermissions"]);
+	assert.deepStrictEqual(t.sdk.calls[1].modes, ["default", "default"]);
 	t.adapter.stop(h2);
 });
 
