@@ -11,7 +11,7 @@
 	if (!pill || !panel) return;
 
 	const STEPS = [
-		{ id: 1, text: "Install Figma desktop and sign in (figma.com/downloads)." },
+		{ id: 1, text: "Install Figma desktop and sign in." },
 		{ id: 2, text: "Open a design file in Figma desktop." },
 		{ id: 3, text: "Switch to Dev Mode: the toggle at the top of the toolbar, or press Shift+D." },
 		{ id: 4, text: "In the right sidebar, find MCP server and click Enable desktop MCP server." },
@@ -25,6 +25,7 @@
 	let busy = false; // a check is running
 	let editing = false; // file link input shown
 	let fileError = "";
+	let draft = ""; // half-typed file link, survives every redraw
 	let seq = 0;
 	let announced = "";
 
@@ -56,7 +57,7 @@
 		const text = busy || !res ? "Figma: checking…" : res.pill;
 		pill.textContent = text;
 		pill.classList.toggle("on", !busy && res?.state === "ready");
-		pill.title = `${age()}. Click for Figma setup.`;
+		pill.title = `${text}. ${age()}`; // the full state, so a truncated pill is still readable
 		const say = busy ? "" : text;
 		if (say && say !== announced) {
 			announced = say;
@@ -76,6 +77,7 @@
 			const row = el("div", "fp-row");
 			const change = el("button", "fp-link", "Change");
 			change.type = "button";
+			change.dataset.k = "file-change";
 			change.onclick = () => {
 				editing = true;
 				fileError = "";
@@ -91,8 +93,12 @@
 			input.placeholder = "https://www.figma.com/design/…";
 			input.setAttribute("aria-label", "Figma file link");
 			input.spellcheck = false;
+			input.dataset.k = "file-input";
+			input.value = draft;
+			input.oninput = () => (draft = input.value);
 			const save = el("button", "btn secondary", "Save");
 			save.type = "button";
+			save.dataset.k = "file-save";
 			const doSave = async () => {
 				const r = await crust.figma.setFile(input.value);
 				if (!r.ok) {
@@ -101,6 +107,7 @@
 				}
 				fileError = "";
 				editing = false;
+				draft = "";
 				res = { ...res, fileLink: r.fileLink };
 				render();
 			};
@@ -113,22 +120,39 @@
 		box.append(el("div", "fp-hint", "Compare and Tokens don't need this."));
 	}
 
+	// Redraw the panel, keeping what the user is doing: the focused control, and the caret and text of the file link.
 	function render() {
 		paintPill();
 		if (panel.hidden) return;
+		const a = document.activeElement;
+		const keep = a && panel.contains(a) && a.dataset.k ? { k: a.dataset.k, s: a.selectionStart, e: a.selectionEnd } : null;
+		draw();
+		if (keep) {
+			const n = panel.querySelector(`[data-k="${keep.k}"]`);
+			if (n) {
+				n.focus({ preventScroll: true });
+				if (keep.s != null && n.setSelectionRange) n.setSelectionRange(keep.s, keep.e);
+			}
+		}
+	}
+
+	function draw() {
+		panel.classList.toggle("busy", busy);
+		panel.setAttribute("aria-busy", busy ? "true" : "false");
 		const kids = [el("div", "fp-title", "Figma connection")];
 		const line = el("p", "fp-line", stateLine());
 		line.setAttribute("aria-live", "polite");
 		kids.push(line);
-		if (!busy && res?.state === "problem") {
+		if (res?.state === "problem") {
 			const copy = el("button", "btn secondary", "Copy");
 			copy.type = "button";
+			copy.dataset.k = "copy";
 			copy.onclick = () => navigator.clipboard?.writeText(res.message).catch(() => {});
 			const row = el("div", "fp-row");
 			row.append(copy);
 			kids.push(row);
 		}
-		const plan = busy ? null : stepsFor(res);
+		const plan = stepsFor(res); // while a check runs the last known steps stay, dimmed
 		if (plan) {
 			const wrap = el("div", "fp-steps-wrap");
 			const list = (items) => {
@@ -151,16 +175,17 @@
 		}
 		const test = el("button", "btn secondary", busy ? "Checking…" : "Test connection");
 		test.type = "button";
-		test.disabled = busy;
-		if (busy) test.setAttribute("aria-busy", "true");
-		test.onclick = runTest;
+		test.dataset.k = "test";
+		if (busy) test.setAttribute("aria-disabled", "true"); // not disabled: keyboard focus stays on it
+		test.onclick = () => !busy && runTest();
 		const row = el("div", "fp-row");
 		const help = el("button", "fp-link", "Figma's own steps");
 		help.type = "button";
+		help.dataset.k = "help";
 		help.onclick = () => crust.figma.openHelp();
 		row.append(test, help, el("span", "fp-age", age()));
 		kids.push(row);
-		if (checks && !busy) {
+		if (checks) {
 			const ul = el("ul", "fp-checks");
 			ul.setAttribute("aria-label", "What was checked");
 			for (const c of checks) {
@@ -210,16 +235,26 @@
 	}
 
 	pill.onclick = () => (panel.hidden ? open() : close());
-	pill.addEventListener("mouseenter", () => (pill.title = `${age()}. Click for Figma setup.`));
 	document.addEventListener("keydown", (e) => {
-		if (e.key === "Escape" && !panel.hidden && !e.defaultPrevented) {
-			e.preventDefault();
-			close(true);
-		}
+		if (e.key !== "Escape" || panel.hidden || e.defaultPrevented) return;
+		const a = document.activeElement;
+		if (a !== pill && !panel.contains(a)) return; // focus is elsewhere: Escape belongs to whatever has it
+		e.preventDefault();
+		close(true);
 	});
 	onCrust("tab:changed", (name) => {
 		if (name === "design") refresh();
 	});
+	// Another project: its own file link, so drop the old project's state and ask again.
+	const projectChanged = () => {
+		editing = false;
+		fileError = "";
+		draft = "";
+		checks = null;
+		res = null;
+		refresh();
+	};
+	crust.repos.onChanged(projectChanged);
 
 	// --- selftest: every state, driven by the stub Figma server that runs inside the app (needs PI_CRUST_SELFTEST=1 and
 	// PI_CRUST_FIGMA_STUB=<port> with PI_CRUST_FIGMA_MCP_URL pointing at it; `npm run selftest -- figma-panel` with both set). ---
@@ -301,6 +336,42 @@
 		const unset = !!panel.querySelector(".fp-file input") && text(".fp-file").includes("Figma file link (only for the Figma picker)") && text(".fp-file").includes("Compare and Tokens don't need this.");
 		console.error(`SELFTEST figma file link unset: placeholder="${panel.querySelector(".fp-file input")?.placeholder}" -> ${unset && panel.querySelector(".fp-file input").placeholder === "https://www.figma.com/design/…" ? "OK" : "MISMATCH"}`);
 		await shots("file-unset");
+		// a redraw (a check running) keeps the half-typed link, its caret, keyboard focus and the steps on screen
+		{
+			const inp = panel.querySelector(".fp-file input");
+			inp.value = "https://www.fig";
+			inp.dispatchEvent(new Event("input"));
+			inp.focus();
+			inp.setSelectionRange(5, 9);
+			await crust.figma.stubMode("no-selection", { delayMs: 700 });
+			window.crustFigma.recheck();
+			await wait(200);
+			const same = () => {
+				const i = panel.querySelector(".fp-file input");
+				return `value=${i.value === "https://www.fig"} focus=${document.activeElement === i} caret=${i.selectionStart}-${i.selectionEnd}`;
+			};
+			const during = `busy=${window.crustFigma.state().busy} ${same()} steps=${panel.querySelectorAll(".fp-steps li").length} aria-busy=${panel.getAttribute("aria-busy")}`;
+			await shots("busy-link");
+			await until(idle);
+			const after = same();
+			const good = during === "busy=true value=true focus=true caret=5-9 steps=5 aria-busy=true" && after === "value=true focus=true caret=5-9";
+			console.error(`SELFTEST figma redraw keeps input: during [${during}] after [${after}] -> ${good ? "OK" : "MISMATCH"}`);
+			const tb = [...panel.querySelectorAll("button")].find((b) => b.textContent === "Test connection");
+			tb.focus();
+			window.crustFigma.recheck();
+			await wait(200);
+			const k1 = document.activeElement?.dataset?.k;
+			await until(idle);
+			const k2 = document.activeElement?.dataset?.k;
+			console.error(`SELFTEST figma redraw keeps focus on Test connection: during=${k1} after=${k2} -> ${k1 === "test" && k2 === "test" ? "OK" : "MISMATCH"}`);
+			// another project: the half-typed link and the old state go, a new check runs
+			window.crustFigma.projectChanged();
+			await wait(100);
+			const reset = `input="${panel.querySelector(".fp-file input")?.value}" busy=${window.crustFigma.state().busy}`;
+			await until(idle);
+			console.error(`SELFTEST figma project change: ${reset} -> ${reset === 'input="" busy=true' && !window.crustFigma.state().busy ? "OK" : "MISMATCH"}`);
+			await crust.figma.stubMode("no-selection", {});
+		}
 		const input = panel.querySelector(".fp-file input");
 		input.value = "not a link";
 		[...panel.querySelectorAll(".fp-file button")].find((b) => b.textContent === "Save").click();
@@ -322,13 +393,34 @@
 		console.error(`SELFTEST figma stale green: "${green}" then "${pill.textContent}" -> ${green === "Figma: ready" && pill.textContent === "Figma: not connected" ? "OK" : "MISMATCH"}`);
 		// keyboard and screen reader basics: pill is a button, Escape closes the panel, status is announced
 		const announce = live.textContent;
+		const tip = pill.title;
+		console.error(`SELFTEST figma pill tooltip: "${tip}" -> ${/^Figma: not connected\. Checked (just now|\d+ s ago)$/.test(tip) ? "OK" : "MISMATCH"}`);
+		// Escape with focus somewhere else leaves the panel alone
+		const other = document.createElement("input");
+		document.body.append(other);
+		other.focus();
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		const stays = !panel.hidden && document.activeElement === other;
+		other.remove();
+		console.error(`SELFTEST figma escape elsewhere: panelOpen=${!panel.hidden} -> ${stays ? "OK" : "MISMATCH"}`);
+		[...panel.querySelectorAll("button")].find((b) => b.textContent === "Test connection").focus();
 		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 		await wait(100);
-		console.error(`SELFTEST figma a11y: pill=${pill.tagName} live="${announce}" panelHidden=${panel.hidden} expanded=${pill.getAttribute("aria-expanded")} -> ${pill.tagName === "BUTTON" && announce === "Figma: not connected" && panel.hidden && pill.getAttribute("aria-expanded") === "false" ? "OK" : "MISMATCH"}`);
+		console.error(`SELFTEST figma a11y: pill=${pill.tagName} live="${announce}" panelHidden=${panel.hidden} expanded=${pill.getAttribute("aria-expanded")} focusOnPill=${document.activeElement === pill} -> ${document.activeElement === pill && pill.tagName === "BUTTON" && announce === "Figma: not connected" && panel.hidden && pill.getAttribute("aria-expanded") === "false" ? "OK" : "MISMATCH"}`);
+		// a script focus counts as keyboard focus (:focus-visible) when it moves on from a text field
+		const probeInput = document.createElement("input");
+		document.body.append(probeInput);
+		await crust.selftest.focusEmulation(true);
+		probeInput.focus();
+		pill.focus();
+		probeInput.remove();
+		console.error(`SELFTEST figma pill focus ring: outline=${getComputedStyle(pill).outlineStyle} ${getComputedStyle(pill).outlineWidth} focus-visible=${pill.matches(":focus-visible")} focus=${pill.matches(":focus")} docFocus=${document.hasFocus()} -> ${pill.matches(":focus-visible") && getComputedStyle(pill).outlineStyle !== "none" ? "OK" : "MISMATCH"}`);
+		await shots("pill-focus");
+		pill.blur();
 		await crust.figma.stubMode("closed", { clearFile: true });
 		setTheme(theme0);
 	});
 
-	window.crustFigma = { recheck: refresh, openPanel: () => (panel.hidden ? open() : refresh()), state: () => ({ res, busy, open: !panel.hidden }) };
+	window.crustFigma = { projectChanged, recheck: refresh, openPanel: () => (panel.hidden ? open() : refresh()), state: () => ({ res, busy, open: !panel.hidden }) };
 	paintPill();
 })();

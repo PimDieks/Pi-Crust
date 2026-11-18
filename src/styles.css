@@ -1191,7 +1191,9 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 #figma-pill.on { color: var(--text-success); border-color: var(--fills-success); background: transparent; }
 #figma-pill.on::before { background: var(--fills-success); border-color: var(--fills-success); }
 #figma-pill.on:hover { background: var(--fills-success-muted); }
-.design-bar .seg { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.design-bar .seg { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 3px; margin: -3px; } /* room inside the scroll box so focus rings are not clipped */
+#figma-panel.busy .fp-steps-wrap, #figma-panel.busy .fp-checks { opacity: .6; }
+#figma-panel .btn[aria-disabled="true"] { opacity: .6; cursor: default; }
 #figma-pill:focus-visible, .fp-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 #figma-pill[aria-expanded="true"] { background: var(--hover); }
 #figma-pill.on[aria-expanded="true"] { background: var(--fills-success-muted); }

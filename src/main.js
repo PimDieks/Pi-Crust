@@ -1499,6 +1499,12 @@ if (SELFTEST) {
 	ipcMain.handle("selftest:capture", (_e, name) => capture(name));
 	ipcMain.handle("selftest:zoom", (_e, level) => setZoom(level));
 	ipcMain.handle("selftest:bounds", () => ({ view: browserView.getBounds(), z: zoomFactor(), visible: browserView.getVisible(), hidden: [...browserHidden] }));
+	// The offscreen selftest window is never focused: let the page behave as if it were (so :focus-visible rings show).
+	ipcMain.handle("selftest:focusEmulation", async (_e, on) => {
+		const d = win.webContents.debugger;
+		if (!d.isAttached()) d.attach("1.3");
+		await d.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: !!on });
+	});
 }
 
 // A menu without the default ⌘R (it would reload the UI and lose the chat view).
