@@ -61,7 +61,7 @@ mkdir -p ~/Library/Application\ Support/pi-crust/models && curl -L -o ~/Library/
 ```
 
 - **Storybook "In Figma" filter**: the figma-console MCP server configured in `~/.pi/agent/mcp.json` (or `figmaConsoleMcp` in `settings.json`) and its Desktop Bridge plugin running in Figma.
-- **Figma picker / Design compare**: Figma desktop with the desktop MCP server enabled (Dev Mode → Inspect).
+- **Figma picker / Design compare**: Figma desktop with a Dev or Full seat and the desktop MCP server enabled (open a design file, switch to Dev Mode, then in the right sidebar's MCP server section click Enable desktop MCP server). The Figma status pill in the Design tab checks it and shows the steps still open.
 
 ### Remote access with Tailscale (optional)
 

@@ -252,18 +252,29 @@ async function pickFigma() {
 	$("#pick-figma").setAttribute("aria-busy", "true");
 	try {
 		const r = await crust.figma.pickSelection();
-		if (r.error) return toast(r.error, "error");
+		if (r.error) {
+			toast(r.error, "error", r.needsFileLink ? { label: "Open Figma status", onClick: () => openFigmaPanel() } : undefined);
+			if (r.needsFileLink) openFigmaPanel();
+			else window.crustFigma?.recheck();
+			return;
+		}
 		const id = (r.block.match(/node-id="([^"]*)"/) || [])[1];
 		if (id && active?.picks.some((b) => typeof b === "string" && b.startsWith("<figma-node") && b.includes(`node-id="${id}"`))) return toast("Already added", "info");
 		addPicks([r.block]);
 	} catch (e) {
-		toast(`Figma pick failed: ${e.message || e}`, "error");
+		toast(`Figma pick failed: ${e.message || e}. See Design › Figma status.`, "error");
+		window.crustFigma?.recheck();
 	} finally {
 		figmaPicking = false;
 		$("#pick-figma").removeAttribute("aria-busy");
 	}
 }
 $("#pick-figma").addEventListener("click", pickFigma);
+// Opens the Design tab with the Figma status panel (the picker needs the file link, set there).
+function openFigmaPanel() {
+	switchTab("design");
+	window.crustFigma?.openPanel();
+}
 // The URL the embedded browser really has (the address bar can hold unsubmitted text); design captures use this one.
 let liveBrowserUrl = "";
 crust.browser.onState((s) => {
@@ -2269,6 +2280,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 		$("#input").value = prompt;
 		submit();
 	});
+	// NOPROMPT selftest: no turn will settle, so start the tour (the chosen steps) right away.
+	if (info.selftest && info.selftestNoPrompt && !selftestTouring) setTimeout(() => ((selftestTouring = true), runSelftestTour()), 4000);
 	initViews();
 	initChanges();
 	initTerminal();

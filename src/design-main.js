@@ -3,15 +3,7 @@
 // register(ctx) wires the IPC handlers.
 "use strict";
 
-function figmaError(e) {
-	const msg = String((e && e.message) || e);
-	const code = e && ((e.cause && e.cause.code) || e.code);
-	if (code === "ECONNREFUSED" || code === "ECONNRESET" || /fetch failed|timed out|ECONNREFUSED/i.test(msg))
-		return "Figma desktop isn't reachable. Open Figma desktop and enable the desktop MCP server: Dev Mode → Inspect.";
-	if (/only available if your active tab/i.test(msg)) return "The active Figma tab is not a design file. Switch to a design (or FigJam) file in Figma desktop.";
-	if (/nothing is selected/i.test(msg)) return "Nothing is selected in Figma. Select a frame in Figma desktop first.";
-	return msg;
-}
+const figmaError = (e) => require("./figma-status").figmaError(e, { noun: "frame" });
 
 // width / height of a node from get_metadata XML (`<frame id="1:2" name="Card" x=".." y=".." width="390" height="844">`).
 function parseFrameSize(xml, nodeId) {

@@ -1,5 +1,7 @@
 # Figma picker (small version)
 
+Setup and status: the Figma status pill and panel in the Design tab (phase 4) show what is missing and hold the file link per project.
+
 Pick an element in localhost (existing 🎯) and a layer in **Figma desktop** (new Figma-logo button). Type the request; Pi checks tokens and spacing (using whatever design-check instructions the repo has).
 
 ## Pi Crust

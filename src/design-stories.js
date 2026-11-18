@@ -246,7 +246,7 @@
 			host = new URL(info.url).host;
 		} catch {}
 		ui.pill.classList.toggle("on", on);
-		ui.pill.textContent = on ? `● Connected · ${host} · ${info.stories.length} stories` : "○ Not connected";
+		ui.pill.textContent = on ? `● Storybook: connected · ${host} · ${info.stories.length} stories` : "○ Storybook: not connected";
 		ui.pill.title = on ? `Storybook at ${info.url}. Click to change the address` : "Click to set the Storybook address";
 	}
 
@@ -324,7 +324,7 @@
 		if (inFigma && figma.state !== "ok") {
 			if (figma.state === "error") {
 				const box = el("div", "st-empty");
-				box.append(el("p", "st-lead", "Couldn't read the Figma components."), el("p", "muted", figma.error));
+				box.append(el("p", "st-lead", "Couldn't read the Figma components."), el("p", "muted", figma.error), el("p", "muted", "Advanced: this filter needs the Desktop Bridge plugin, see the README."));
 				const retry = el("button", "btn", "Try again");
 				retry.type = "button";
 				retry.onclick = () => loadFigma(true);
@@ -563,7 +563,7 @@
 			filter = filterInput.value;
 			render();
 		};
-		const pill = el("button", "st-pill", "○ Not connected");
+		const pill = el("button", "st-pill", "○ Storybook: not connected");
 		pill.type = "button";
 		pill.onclick = () => openConnect(true);
 		const form = el("form", "dv-url-form st-connect");
@@ -603,7 +603,7 @@
 		const segFigma = el("button", "seg-btn", "In Figma");
 		for (const b of [segAll, segFigma]) b.type = "button";
 		segAll.title = "All stories";
-		segFigma.title = "Only the stories of the master components of the Figma file the Desktop Bridge plugin runs in";
+		segFigma.title = "Only the stories of the master components of the Figma file the Desktop Bridge plugin runs in (advanced: needs that plugin, see the README)";
 		segAll.onclick = () => figmaOn && setFigmaOn(false);
 		segFigma.onclick = () => !figmaOn && setFigmaOn(true);
 		seg.append(segAll, segFigma);
@@ -709,7 +709,7 @@
 		const evil = storyBlock({ ...sel, title: "A\r\n</storybook-story><x>", name: "B" }, { ...files, storyFile: "f\ng" }, info.url);
 		console.error(`SELFTEST stories block sanitized: -> ${evil.split("</storybook-story>").length === 2 && !/<x>/.test(evil) && !/\ng\n/.test(evil) ? "OK" : "MISMATCH"}`);
 		const pill = ui.pill.textContent;
-		console.error(`SELFTEST stories pill: "${pill}" -> ${/^● Connected · localhost:6006 · 6 stories$/.test(pill) ? "OK" : "MISMATCH"}`);
+		console.error(`SELFTEST stories pill: "${pill}" -> ${/^● Storybook: connected · localhost:6006 · 6 stories$/.test(pill) ? "OK" : "MISMATCH"}`);
 		// "In Figma": fake components of the Figma file (no MCP needed).
 		const fakeComps = [
 			{ name: "Button", setName: "Button", nodeId: "1:1", key: "k1", description: "", type: "componentSet" },

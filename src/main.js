@@ -905,25 +905,13 @@ ipcMain.handle("browser:pick", async (_e, opts) => {
 });
 
 // Figma desktop picker: current selection via the Figma desktop MCP server.
-const figmaFile = () => {
-	const s = readSettings();
-	return {
-		key: s.figmaFileKey || process.env.PI_CRUST_FIGMA_FILE_KEY || null,
-		name: s.figmaFileName || (process.env.PI_CRUST_FIGMA_FILE_KEY && !s.figmaFileKey ? process.env.PI_CRUST_FIGMA_FILE_NAME || "file" : ""),
-	};
-};
-function figmaError(e) {
-	const msg = String((e && e.message) || e);
-	const code = e && ((e.cause && e.cause.code) || e.code);
-	if (code === "ECONNREFUSED" || code === "ECONNRESET" || /fetch failed|timed out|ECONNREFUSED/i.test(msg))
-		return "Figma desktop isn't reachable. Open Figma desktop and enable the desktop MCP server: Dev Mode → Inspect.";
-	if (/only available if your active tab/i.test(msg)) return "The active Figma tab is not a design file. Switch to a design (or FigJam) file in Figma desktop.";
-	if (/nothing is selected/i.test(msg)) return "Nothing is selected in Figma. Select a layer in Figma desktop first.";
-	return msg;
-}
+// File link and status IPC live in figma-main.js (per-project link, falls back to the old app-wide value and the env var).
+const figmaMain = require("./figma-main").register({ ipcMain, readSettings, writeSettings, selftest: SELFTEST, get repo() { return REPO; } });
+const figmaFile = () => require("./figma-main").legacyFile(figmaMain.file());
+const figmaError = (e) => require("./figma-status").figmaError(e);
 ipcMain.handle("figma:pickSelection", async () => {
 	try {
-		if (!figmaFile().key) return { error: "No Figma file set. Paste a Figma link into the prompt once to set the file." };
+		if (!figmaFile().key) return { error: "The Figma picker needs the file link. Paste it in Design › Figma status.", needsFileLink: true };
 		const { callTool } = require("./figma-mcp");
 		const { buildBlock } = require("./figma-selection");
 		const defsText = await callTool("get_variable_defs", {});
@@ -936,13 +924,6 @@ ipcMain.handle("figma:pickSelection", async () => {
 		return { error: figmaError(e) };
 	}
 });
-ipcMain.handle("figma:setFileFromText", (_e, text) => {
-	const f = require("./figma-selection").parseFigmaUrl(String(text || ""));
-	if (!f) return null;
-	writeSettings({ figmaFileKey: f.key, figmaFileName: f.name });
-	return { key: f.key, name: f.name };
-});
-ipcMain.handle("figma:file", () => figmaFile());
 
 // The embedded browser is a separate WebContentsView; once it held focus, clicking the UI focuses the
 // DOM element but not the UI's webContents, so Chromium draws no caret. Hand focus back explicitly.
@@ -1433,7 +1414,7 @@ function createWindow() {
 		show: !START_HIDDEN,
 		...(SELFTEST && process.env.PI_CRUST_SELFTEST_OFFSCREEN === "1" ? { x: -4000, y: -4000, focusable: false, skipTaskbar: true } : {}), // selftest only: no window on the user's screen
 		backgroundColor: nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0",
-		webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false },
+		webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: !(SELFTEST && process.env.PI_CRUST_SELFTEST_OFFSCREEN === "1") }, // offscreen selftest: keep painting so captures are current
 	});
 	win.loadFile(path.join(__dirname, "index.html"));
 	for (const ev of ["focus", "blur"]) win.on(ev, () => send("app:focus", ev === "focus"));
@@ -1519,6 +1500,12 @@ if (SELFTEST) {
 	ipcMain.handle("selftest:capture", (_e, name) => capture(name));
 	ipcMain.handle("selftest:zoom", (_e, level) => setZoom(level));
 	ipcMain.handle("selftest:bounds", () => ({ view: browserView.getBounds(), z: zoomFactor(), visible: browserView.getVisible(), hidden: [...browserHidden] }));
+	// The offscreen selftest window is never focused: let the page behave as if it were (so :focus-visible rings show).
+	ipcMain.handle("selftest:focusEmulation", async (_e, on) => {
+		const d = win.webContents.debugger;
+		if (!d.isAttached()) d.attach("1.3");
+		await d.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: !!on });
+	});
 }
 
 // A menu without the default ⌘R (it would reload the UI and lose the chat view).

@@ -121,6 +121,11 @@ contextBridge.exposeInMainWorld("crust", {
 		pickSelection: () => ipcRenderer.invoke("figma:pickSelection"),
 		setFileFromText: (text) => ipcRenderer.invoke("figma:setFileFromText", text),
 		file: () => ipcRenderer.invoke("figma:file"),
+		status: () => ipcRenderer.invoke("figma:status"),
+		test: () => ipcRenderer.invoke("figma:test"),
+		setFile: (link) => ipcRenderer.invoke("figma:setFile", link),
+		openHelp: () => ipcRenderer.invoke("figma:openHelp"),
+		stubMode: (mode, o) => ipcRenderer.invoke("figma:stubMode", mode, o), // selftest only
 		screenshot: () => ipcRenderer.invoke("figma:screenshot"),
 	},
 	design: {
@@ -206,5 +211,6 @@ contextBridge.exposeInMainWorld("crust", {
 		capture: (name) => ipcRenderer.invoke("selftest:capture", name),
 		zoom: (level) => ipcRenderer.invoke("selftest:zoom", level),
 		bounds: () => ipcRenderer.invoke("selftest:bounds"),
+		focusEmulation: (on) => ipcRenderer.invoke("selftest:focusEmulation", on),
 	},
 });
