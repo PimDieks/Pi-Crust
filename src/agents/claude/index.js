@@ -30,8 +30,9 @@ const NO_ENGINE = "The Claude Agent engine is not installed yet.";
 // or sign in). Only these harmless, read-only ones are forwarded; every other command is answered locally as not available. Decided from the
 // engine's own command list (capture-info.jsonl): they show the context, the usage and the recap, or the unused skills.
 const SLASH_ALLOW = Object.freeze(["context", "usage", "recap", "skill-doctor"]);
-// A command is a first token of "/" plus a name of letters, digits and dashes, and nothing else ("/src/a.js broken" is ordinary text).
-const SLASH_START = /^[\s\u200b\ufeff]*\/([A-Za-z0-9-]+)(?=\s|$)/;
+// A command is a first token of "/" plus a name of letters, digits, dashes, underscores and colons (namespaced and MCP-style names such as
+// /plugin:cmd and /mcp__srv__x), and nothing else: no "/" and no "." ("/src/a.js broken" is ordinary text).
+const SLASH_START = /^[\s\u200b\ufeff]*\/([A-Za-z0-9_:-]+)(?=\s|$)/;
 const MODE_FILE = "crust-permission-mode.json"; // the last chosen mode, in the app's own config folder (Pi keeps the same in its own folder)
 const MODE_COMMAND = /^\s*\/crust-mode(?:\s+(\S+))?\s*$/i; // what the mode selector sends; handled here, never given to the model
 
@@ -292,6 +293,14 @@ function createClaudeAdapter(deps = {}) {
 	// fork: { from, at, view, turns, parent, title } is a chat that goes on from a copy of another session (forkSpec below): resume `from` with
 	// forkSession, cut at the assistant uuid `at` (none = the whole session); `from` null = a fresh session. Until its first message the chat
 	// has no session of its own: pendingFork says which part of the old one it shows.
+	// The trial log (src/trial.js, only when its unpackaged-only switch is set): cfg.trial is null otherwise. It never throws into the chat.
+	let chatNo = 0;
+	const gateTrace = (ev) => {
+		try {
+			const t = cfg.trial;
+			if (t) (ev.phase === "hook" ? t.hook : t.final)(ev);
+		} catch {}
+	};
 	function start(opts, sink) {
 		const mode0 = logic.isMode(opts.mode) ? opts.mode : readLastMode();
 		const handle = { pid: undefined, exitCode: null, signalCode: null, query: null, input: inputQueue(), child: null, closed: false, exitCbs: [], sink, mode: mode0, gateInstalled: false, gen: 0, rebuild: null, turns: [], turnsLoading: null, pendingFork: null, forkInfo: null };
@@ -300,6 +309,7 @@ function createClaudeAdapter(deps = {}) {
 		handle.track = status.newTrack();
 		handle.meta = { cwd: opts.cwd, sessionId: opts.sessionRef || null, modelId: null, chosen: false, effort: null, streaming: false, lastAssistantText: null, commands: [], permissionMode: null, lastContext: null };
 		handle.limits = {};
+		handle.traceNo = ++chatNo;
 		const fk = opts.fork && typeof opts.fork === "object" ? opts.fork : null;
 		if (fk) {
 			handle.turns = (Array.isArray(fk.turns) ? fk.turns : []).map(turnsLib.cleanTurn).filter(Boolean);
@@ -350,11 +360,12 @@ function createClaudeAdapter(deps = {}) {
 						return typeof opts.ask === "function" ? opts.ask(shown, meta) : sink.ask ? sink.ask(handle, shown, meta) : undefined;
 					},
 					cwd: opts.cwd,
+					trace: gateTrace,
 				});
 				handle.canUseTool = canUseTool;
 				// The gate sits in a PreToolUse hook (it sees every call, subagents and reads inside the project too): it denies what the rules
 				// block and sends everything else to canUseTool, the only place that allows. The mode is this chat's, never the hook input's.
-				const hooks = makeHooks({ getMode: () => handle.mode, grants: canUseTool.grants, cwd: opts.cwd });
+				const hooks = makeHooks({ getMode: () => handle.mode, grants: canUseTool.grants, cwd: opts.cwd, trace: gateTrace });
 				const lim = opts.settings || cfg.getSettings() || {};
 				handle.limits = { budgetUsd: num(lim.claudeMaxBudgetUsd, DEFAULT_MAX_BUDGET_USD), maxTurns: Math.floor(num(lim.claudeMaxTurns, DEFAULT_MAX_TURNS)) };
 				// One query; a rewind in the chat's own tab runs a second one on the same handle (the first is closed and its loop drops out).
@@ -397,6 +408,11 @@ function createClaudeAdapter(deps = {}) {
 							if (gen !== handle.gen) return "superseded";
 							if (sink.isCurrent && !sink.isCurrent(handle)) continue;
 							observe(handle, message);
+							if (message && message.type === "system" && message.subtype === "init" && cfg.trial) {
+								try {
+									cfg.trial.chatStart(handle.traceNo, { ...message, agents: Array.isArray(message.agents) ? message.agents : init && init.agents }, handle.mode, gen > 1);
+								} catch {}
+							}
 							emit(handle, handle.translator.push(message));
 							if (message && message.type === "result") await afterResult(handle, message);
 						}
@@ -731,7 +747,7 @@ function createClaudeAdapter(deps = {}) {
 		onAppStart: () => {},
 		// The app hands over its pieces once it has them (userData folder, safeStorage, settings).
 		configure(next = {}) {
-			for (const k of ["keystore", "configDir", "getSettings", "isPackaged", "loadSdk", "killTree", "enginePath"]) if (next[k] !== undefined) cfg[k] = next[k];
+			for (const k of ["keystore", "configDir", "getSettings", "isPackaged", "loadSdk", "killTree", "enginePath", "trial"]) if (next[k] !== undefined) cfg[k] = next[k];
 			sdkPromise = null;
 			return adapter;
 		},

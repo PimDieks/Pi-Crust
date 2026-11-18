@@ -66,7 +66,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		askOverlay("ask", { title: "Layers test", message: "Pick one", options: ["One", "Two"] }),
 		askOverlay("perm-ask", { title: 'Allow this command?\ngit commit -m "Fix login"\nMode: Ask before commands', options: PERM_OPTIONS }),
 		// A Claude Agent chat's approval prompt (a subagent start, the sentence the adapter shows): the same dock and the same prompt as a Pi chat's.
-		askOverlay("claude-perm-ask", { title: ["Allow a Agent?", "Task: Look through the tests and list the slow ones", "You approve starting the subagent. What its own tools do is not covered by this answer.", "Mode: Ask before commands"].join(String.fromCharCode(10)), options: PERM_OPTIONS }),
+		askOverlay("claude-perm-ask", { title: ["Allow starting a subagent?", "Task: Look through the tests and list the slow ones", "Its own commands and edits ask separately.", "Mode: Ask before commands"].join(String.fromCharCode(10)), options: PERM_OPTIONS }),
 		// The long command takes part in the explicit cases only (alone, toasts, slash menu, welcome view), not in the pair matrix.
 		askOverlay("perm-ask-long", { title: `Allow this command?\nThis command is ${LONG_COMMAND.length} characters long. Read all of it before you allow it.\n${LONG_COMMAND}\nMode: Ask before commands`, options: PERM_OPTIONS }, { with: [] }),
 		// The Claude Agent's setup card (top of the chat) and pause card (end of the conversation): in the chat's flow, no layer of their own.

@@ -414,9 +414,20 @@ test("ask prompts show the plain tool name and make no claim about the subagent'
 		await s.can(tool, { description: "d", prompt: "do it" });
 		const t = s.asked[0].prompt.title;
 		assert.doesNotMatch(t, /not controlled by the permission mode|are checked|are controlled/i, tool);
-		assert.match(t, /starting the subagent/i, tool);
+		assert.equal(t.split("\n")[0], "Allow starting a subagent?", tool);
+		assert.doesNotMatch(t, /Allow a Agent|not covered by this answer/, tool);
+		assert.match(t, /\nTask: do it\nIts own commands and edits ask separately\.\nMode: /, tool);
 		assert.deepEqual(s.asked[0].prompt.options.slice(-1), ["Deny"]);
 	}
+});
+
+test("the risky edit prompt names the Claude Agent, not Pi; the shared text for Pi is unchanged", async () => {
+	const w = rig("ask-commands", "Deny");
+	await w.can("Write", { file_path: inP(".git/config"), content: "x" });
+	const t = w.asked[0].prompt.title;
+	assert.match(t, /This file can change what git or Claude Agent runs\./);
+	assert.doesNotMatch(t, /Pi runs/);
+	assert.equal(require("../src/permission-logic").PROTECTED_WHY, "This file can change what git or Pi runs.");
 });
 
 // The /proc rule (review round 2): one precise rule for the file tools, one plain check for the shell, none in Trusted. The real defence for

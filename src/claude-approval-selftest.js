@@ -30,11 +30,23 @@ selftestSteps.push(async ({ snap, wait }) => {
 	const box = () => $("#ask");
 	const promptUp = () => vis(box()) && box().classList.contains("perm");
 	const labels = () => [...box().querySelectorAll(".options button")].map((b) => b.textContent);
+	// The default answer is VISIBLY focused: exactly one answer has the filled look (accent border, tinted fill, bold), and it is the one Enter gives, whether or
+	// not the window has OS focus (a background or offscreen window has no :focus styling; the screenshots below are taken in such a window).
+	const defaultButton = (want) => [...box().querySelectorAll(".options button")].find((b) => b.textContent === want);
+	const lookDefault = (label, want) => {
+		const all = [...box().querySelectorAll(".options button")];
+		const def = defaultButton(want);
+		const filled = (b) => getComputedStyle(b).borderTopColor !== "rgba(0, 0, 0, 0)" && Number(getComputedStyle(b).fontWeight) >= 600;
+		check(!!def && filled(def), `${label}: "${want}" does not look focused (border ${def && getComputedStyle(def).borderTopColor}, weight ${def && getComputedStyle(def).fontWeight})`);
+		check(all.filter(filled).length === 1, `${label}: ${all.filter(filled).length} answers look focused, want exactly 1`);
+	};
+	let currentWant = null;
 	const shots = async (name) => {
 		const was = themeSetting();
 		for (const th of ["light", "dark"]) {
 			setTheme(th);
 			await wait(350);
+			lookDefault(`${name} ${th} (window without focus)`, currentWant);
 			await snap(`claude-approval-${name}-${th}`);
 		}
 		setTheme(was);
@@ -64,6 +76,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(box().classList.contains("risky") === !!spec.risky, `${label}: risky=${box().classList.contains("risky")}, want ${!!spec.risky}`);
 		const want = spec.risky ? "Deny" : "Allow once";
 		check(document.activeElement?.textContent === want, `${label}: the focused answer is "${document.activeElement?.textContent}", want ${want}`);
+		check(!!defaultButton(want) && defaultButton(want).classList.contains("ask-default"), `${label}: "${want}" is not marked as the default`);
 		check(!/claude:|sk-ant-/.test(text), `${label}: internal name or key in the prompt`);
 		if (spec.guard) {
 			// Enter inside the first 500 ms is ignored: a key meant for the message box cannot answer it.
@@ -71,6 +84,9 @@ selftestSteps.push(async ({ snap, wait }) => {
 			check(early === true, `${label}: Enter inside the key guard was not ignored (${early === null ? "too late to test" : "answered"})`);
 			check(promptUp(), `${label}: the key guard let Enter answer the prompt`);
 		}
+		currentWant = want;
+		await wait(300); // the fill fades in
+		lookDefault(label, want);
 		if (spec.shot) await shots(spec.shot);
 		await wait(Math.max(0, 600 - (performance.now() - opened))); // a click from the keyboard or a script is ignored inside the 500 ms key guard, like a key
 		if (spec.answer === "enter") {
@@ -118,9 +134,9 @@ selftestSteps.push(async ({ snap, wait }) => {
 				{ has: ["npm run build"], options: THREE, answer: "Allow for this chat" },
 				// (the third build has no prompt: the next one is lint)
 				{ has: ["npm run lint"], options: THREE, answer: "Deny" },
-				{ has: ["Task: Run the tests", "starting the subagent"], options: THREE, answer: "Allow once", shot: "subagent" },
+				{ has: ["Allow starting a subagent?", "Task: Run the tests", "Its own commands and edits ask separately."], options: THREE, answer: "Allow once", shot: "subagent" },
 				{ has: ["npm run test"], options: THREE, answer: "Deny" },
-				{ has: ["config", "Allow this edit?"], options: TWO, risky: true, answer: "enter", shot: "risky" },
+				{ has: ["config", "Allow this edit?", "This file can change what git or Claude Agent runs."], options: TWO, risky: true, answer: "enter", shot: "risky" },
 			],
 			"ask-commands",
 		);

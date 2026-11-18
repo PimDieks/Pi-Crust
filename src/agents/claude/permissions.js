@@ -190,11 +190,17 @@ function psGrants(grants) {
 // What the user reads: the plain tool name (not our internal "claude:WebFetch"), and for a subagent only what is known: starting it is what is
 // approved; whether its own tool calls reach this gate is not proven, so the text does not claim they are checked.
 const SUBAGENT_LINE = "Its own tools are not controlled by the permission mode.";
+// A real run showed the hook sees a subagent's own calls, and they go through this gate too: each asks by itself.
+const SUBAGENT_NOW = "Its own commands and edits ask separately.";
+const AGENT_LABEL = "Claude Agent"; // the chat's agent label (agents/claude/index.js)
 function plainPrompt(d, toolName, lname, kind) {
 	if (!d.prompt || typeof d.prompt.title !== "string") return d;
 	let title = d.prompt.title;
-	if (lname !== toolName && typeof toolName === "string" && toolName) title = title.split(lname).join(toolName);
-	if (kind === "subagent") title = title.split(SUBAGENT_LINE).join("You approve starting the subagent. What its own tools do is not covered by this answer.");
+	// the tool is named "Agent" or "Task" to the SDK, but what the user approves is starting a subagent
+	if (kind === "subagent") title = title.split("Allow a subagent?").join("Allow starting a subagent?").split(SUBAGENT_LINE).join(SUBAGENT_NOW);
+	else if (lname !== toolName && typeof toolName === "string" && toolName) title = title.split(lname).join(toolName);
+	// the shared text names Pi; this chat's agent is the Claude Agent
+	title = title.split(logic.PROTECTED_WHY).join(logic.PROTECTED_WHY.replace("Pi runs", AGENT_LABEL + " runs"));
 	return title === d.prompt.title ? d : { ...d, prompt: { ...d.prompt, title } };
 }
 
@@ -223,9 +229,20 @@ function judge({ mode, toolName, input, grants, cwd, shell, protect }) {
 //   prompt = { title, options, risky } straight from the shared logic.
 // grants: this chat's grants (logic.createGrants()), kept in memory only. The adapter clears them on mode change and tab close.
 // cwd: the project folder (string or function). shell/protect: optional, passed to the logic as it takes them.
-function makeCanUseTool({ getMode, ask, grants = logic.createGrants(), cwd, shell, protect } = {}) {
+// trace (optional, the trial log): trace({ phase: "final", id, tool, outcome, prompted, sub }) once per call. Names and outcomes only; a throw is ignored.
+function makeCanUseTool({ getMode, ask, grants = logic.createGrants(), cwd, shell, protect, trace } = {}) {
 	const val = (v) => (typeof v === "function" ? v() : v);
 	async function canUseTool(toolName, input, opts) {
+		const st = { prompted: false };
+		const r = await decide(toolName, input, opts, st);
+		if (typeof trace === "function") {
+			try {
+				trace({ phase: "final", id: opts && opts.toolUseID, tool: toolName, outcome: r && r.behavior === "allow" ? "allow" : "deny", prompted: st.prompted, sub: !!(opts && opts.agentID) });
+			} catch {}
+		}
+		return r;
+	}
+	async function decide(toolName, input, opts, st) {
 		const signal = opts && opts.signal;
 		try {
 			if (signal && signal.aborted) return deny(ABORTED);
@@ -239,6 +256,7 @@ function makeCanUseTool({ getMode, ask, grants = logic.createGrants(), cwd, shel
 			let verdict = d;
 			if (d.action === "ask") {
 				if (typeof ask !== "function") return deny(NO_ANSWER);
+				st.prompted = true;
 				let onAbort;
 				const aborted = new Promise((resolve) => {
 					if (signal) {
@@ -284,7 +302,8 @@ const HOOK_DENY_REASON = "The permission check failed, so the call was denied. N
 const hookAnswer = (decision, reason) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: decision, ...(reason ? { permissionDecisionReason: String(reason) } : {}) } });
 const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
-function makePreToolUseHook({ getMode, grants = logic.createGrants(), cwd, shell, protect, timeoutMs = HOOK_TIMEOUT_MS } = {}) {
+// trace (optional, the trial log): trace({ phase: "hook", id, tool, answer, sub }) once per call: the tool name and the answer only.
+function makePreToolUseHook({ getMode, grants = logic.createGrants(), cwd, shell, protect, timeoutMs = HOOK_TIMEOUT_MS, trace } = {}) {
 	const val = (v) => (typeof v === "function" ? v() : v);
 	async function decideHook(input) {
 		if (!isObj(input) || input.hook_event_name !== "PreToolUse") return hookAnswer("deny", HOOK_DENY_REASON);
@@ -299,14 +318,22 @@ function makePreToolUseHook({ getMode, grants = logic.createGrants(), cwd, shell
 	}
 	return async function preToolUseHook(input) {
 		let timer;
+		let res;
 		try {
 			const timeout = new Promise((resolve) => (timer = setTimeout(() => resolve(hookAnswer("deny", HOOK_DENY_REASON)), timeoutMs)));
-			return await Promise.race([decideHook(input), timeout]);
+			res = await Promise.race([decideHook(input), timeout]);
 		} catch {
-			return hookAnswer("deny", HOOK_DENY_REASON);
+			res = hookAnswer("deny", HOOK_DENY_REASON);
 		} finally {
 			clearTimeout(timer);
 		}
+		if (typeof trace === "function") {
+			try {
+				const o = isObj(input) ? input : {};
+				trace({ phase: "hook", id: o.tool_use_id, tool: o.tool_name, answer: res.hookSpecificOutput.permissionDecision, sub: typeof o.agent_id === "string" && o.agent_id !== "" });
+			} catch {}
+		}
+		return res;
 	};
 }
 

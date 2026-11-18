@@ -3,16 +3,15 @@
 // the gate's own title and options: Allow once, Allow for this chat, Deny; no Cancel) goes to the renderer, which draws the one approval prompt
 // (key guard, risky prompts open on Deny), and its extension_ui_response comes back through answerUi() below.
 // Anything but a clear answer is a deny (the promise resolves undefined, which the gate reads as no): a closed or replaced chat, an aborted call,
-// a window that is gone, a timeout, Cancel. The prompt text is scrubbed of the API key by the adapter before it gets here.
+// a window that is gone, Cancel. There is no timeout: a Pi chat's prompt has none either (its extension asks without one and the renderer only
+// times out a request that carries a timeout). The prompt text is scrubbed of the API key by the adapter before it gets here.
 "use strict";
 
-const TIMEOUT_MS = 10 * 60 * 1000;
-
-// deps: { send(channel, payload), hasWindow(): boolean, isCurrent(chatId, handle): boolean, timeoutMs? }
+// deps: { send(channel, payload), hasWindow(): boolean, isCurrent(chatId, handle): boolean, timeoutMs? (tests only) }
 function createApprovals(deps) {
 	const pending = new Map(); // id -> { chatId, handle, settle }
 	let seq = 0;
-	const timeoutMs = deps.timeoutMs || TIMEOUT_MS;
+	const timeoutMs = deps.timeoutMs > 0 ? deps.timeoutMs : 0;
 
 	// Resolves the chosen option text, or undefined (= deny). Never rejects.
 	function ask(chatId, handle, prompt, meta) {
@@ -33,8 +32,10 @@ function createApprovals(deps) {
 					resolve(value);
 				};
 				pending.set(id, { chatId, handle, settle });
-				timer = setTimeout(() => settle(undefined, "timeout"), timeoutMs);
-				if (timer.unref) timer.unref();
+				if (timeoutMs) {
+					timer = setTimeout(() => settle(undefined, "timeout"), timeoutMs);
+					if (timer.unref) timer.unref();
+				}
 				if (signal) {
 					onAbort = () => settle(undefined, "cancelled");
 					signal.addEventListener("abort", onAbort, { once: true });
@@ -66,4 +67,4 @@ function createApprovals(deps) {
 	return { ask, answer, owns, closeChat, closeAll, size: () => pending.size };
 }
 
-module.exports = { createApprovals, TIMEOUT_MS };
+module.exports = { createApprovals };

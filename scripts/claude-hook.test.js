@@ -133,7 +133,7 @@ test("without the hook the SDK approves the Agent tool and an inside Read by its
 		assert.equal(g.viaCanUseTool, true, c.tool_name + " (hook)");
 	}
 	assert.equal(hooked.asked.length, 1, "the Agent tool asked the user; the inside Read did not");
-	assert.match(hooked.asked[0].prompt.title, /Agent/);
+	assert.match(hooked.asked[0].prompt.title, /^Allow starting a subagent?/);
 });
 test("Agent in Plan is denied by the hook with a reason, and canUseTool is never reached", async () => {
 	const { options, asked } = rig("plan");

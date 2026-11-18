@@ -170,13 +170,13 @@ test("a message is a command only when its first token is / and a name of letter
 	const t = await rig();
 	const h = await t.start();
 	const sent = () => h.turns.length;
-	for (const msg of ["/src/a.js broken", "/a.b", "/tmp/x", "/etc/hosts is odd", "/ hello", "/add-dir/x", "/add-dir.x", "//mcp", "/.hidden file", "  /src/app.js fails"]) {
+	for (const msg of ["/src/a.js broken", "/a.b", "/tmp/x", "/etc/hosts is odd", "/ hello", "/add-dir/x", "/add-dir.x", "//mcp", "/.hidden file", "  /src/app.js fails", "/foo:bar/baz", "/foo_bar.js broke", "/foo:bar.x"]) {
 		const before = sent();
 		const r = await t.ask(h, "prompt", { message: msg });
 		assert.equal(r.success, true, msg);
 		assert.equal(sent(), before + 1, "forwarded as text: " + JSON.stringify(msg));
 	}
-	for (const msg of ["/add-dir C:/", "/mcp", "/hooks", "  /config a=b", "/login", "/unknown", "/some-name-1 x"]) {
+	for (const msg of ["/add-dir C:/", "/mcp", "/hooks", "  /config a=b", "/login", "/unknown", "/some-name-1 x", "/foo:bar", "/foo_bar x", "/plugin:cmd arg", "/mcp__srv__prompt x", "  /Foo:Bar_1-x"]) {
 		const r = await t.ask(h, "prompt", { message: msg });
 		assert.equal(r.success, false, "still a command: " + msg);
 		assert.match(r.error, /not available in Claude Agent chats/, msg);

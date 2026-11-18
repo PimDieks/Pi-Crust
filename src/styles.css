@@ -322,7 +322,7 @@ select option { background: var(--panel-2); color: var(--text); }
 /* A permission prompt: exactly one row is filled, the one with the focus (:focus), which is what Enter answers.
    The others are plain and equal ("Allow for this chat" stays plain). Deny is never red; it is filled only when it holds the focus,
    which is where the risky prompts (the ones with a warning line) open. */
-#ask.perm .options button:focus { background: color-mix(in srgb, var(--accent) 18%, var(--hover)); border-color: var(--accent); font-weight: 600; }
+#ask.perm .options button:focus, #ask.perm .options button.ask-default { background: color-mix(in srgb, var(--accent) 18%, var(--hover)); border-color: var(--accent); font-weight: 600; }
 #ask textarea, #ask input { width: 100%; padding: 8px; }
 #ask textarea { min-height: 120px; font-family: var(--mono); font-size: var(--fs-sm); }
 #ask .modal-actions { margin-top: 10px; }

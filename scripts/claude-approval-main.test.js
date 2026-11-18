@@ -16,6 +16,21 @@ function rig({ window = true, current = true, timeoutMs } = {}) {
 }
 const H = { pid: 1 };
 
+test("with no limit given a prompt waits as long as a Pi chat's does, and closing the chat or the window still denies it", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const r = rig();
+	const p = r.a.ask("c1", H, PROMPT, {});
+	t.mock.timers.tick(48 * 60 * 60 * 1000);
+	assert.equal(r.a.size(), 1, "still open after two days");
+	assert.equal(r.resolved().length, 0);
+	r.a.closeChat("c1");
+	assert.equal(await p, undefined);
+	const q = r.a.ask("c2", H, PROMPT, {});
+	r.a.closeAll();
+	assert.equal(await q, undefined);
+	assert.equal(require("../src/claude-approval-main").TIMEOUT_MS, undefined);
+});
+
 test("the prompt goes out as an extension_ui_request select with the gate's own options and no Cancel; the chosen option comes back", async () => {
 	const t = rig();
 	const p = t.a.ask("c1", H, PROMPT, {});

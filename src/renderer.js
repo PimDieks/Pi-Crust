@@ -1647,6 +1647,16 @@ function fillDialog(box, r, finish) {
 		}
 	};
 	const first = (perm && box.querySelector(risky ? ".ask-deny" : ".ask-allow")) || box.querySelector(".options button, .history-item, input, textarea, .modal-actions button:last-child") || box;
+	// The answer Enter gives (the focused one) also carries a class: its filled look must not depend on the window having OS focus (a
+	// background or offscreen window has no :focus styling), so it is always visible. The class follows the focus (arrows, Tab).
+	if (perm && first.matches?.(".options button")) {
+		first.classList.add("ask-default");
+		box.querySelector(".options").addEventListener("focusin", (e) => {
+			if (!e.target.matches?.("button")) return;
+			for (const b of box.querySelectorAll(".options button.ask-default")) b.classList.remove("ask-default");
+			e.target.classList.add("ask-default");
+		});
+	}
 	first.focus();
 }
 

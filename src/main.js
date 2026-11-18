@@ -1438,10 +1438,12 @@ function toggleWindow() {
 	const appData = app.getPath("appData");
 	const userData = path.join(appData, "pi-crust");
 	const legacy = path.join(appData, "pi-studio");
+	// A person's trial (PI_CRUST_USERDATA, unpackaged only, src/trial.js) gets its own folder and leaves the real one, and the old Pi Studio folder, alone.
+	const trialData = require("./trial").userDataOverride({ isPackaged: app.isPackaged });
 	try {
-		if (!fs.existsSync(userData) && fs.existsSync(legacy)) fs.renameSync(legacy, userData);
+		if (!trialData && !fs.existsSync(userData) && fs.existsSync(legacy)) fs.renameSync(legacy, userData);
 	} catch {}
-	app.setPath("userData", (SELFTEST && process.env.PI_CRUST_SELFTEST_USERDATA) || userData); // selftest only: keep test runs out of the user's real settings and recent projects
+	app.setPath("userData", (SELFTEST && process.env.PI_CRUST_SELFTEST_USERDATA) || trialData || userData); // the self-test's folder keeps test runs out of the user's real settings and recent projects
 }
 const isPrimary = SELFTEST || app.requestSingleInstanceLock();
 if (!isPrimary) {

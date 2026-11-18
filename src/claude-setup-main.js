@@ -8,6 +8,12 @@
 const path = require("node:path");
 const fs = require("node:fs");
 
+// The trial log of a person's own trial run (src/trial.js): only when the unpackaged-only switch is set, and never in a self-test.
+function trialLog(selftest, isPackaged) {
+	const t = require("./trial");
+	return selftest === true ? null : t.createTrialLog({ file: t.trialLogFile({ isPackaged }) });
+}
+
 function register(ctx) {
 	const { app, ipcMain } = ctx;
 	const adapter = require("./agents/claude");
@@ -41,7 +47,7 @@ function register(ctx) {
 		windowOf: (chatId) => (typeof ctx.windowIdOfChat === "function" ? ctx.windowIdOfChat(chatId) : null),
 		hold: (name) => (fake ? fake.control.hold(name) : Promise.resolve()),
 	});
-	adapter.configure({ keystore, configDir, getSettings: () => ctx.readSettings(), isPackaged: () => app.isPackaged, enginePath: () => setup.enginePath() });
+	adapter.configure({ keystore, configDir, getSettings: () => ctx.readSettings(), isPackaged: () => app.isPackaged, enginePath: () => setup.enginePath(), trial: trialLog(ctx.selftest, app.isPackaged) });
 	if (ctx.selftest === true && !fake) setup.isReady = () => false; // a self-test without the fakes never starts a Claude Agent chat
 
 	ipcMain.handle("claude:state", () => setup.state());
