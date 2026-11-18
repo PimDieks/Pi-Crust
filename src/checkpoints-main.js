@@ -29,9 +29,9 @@ function cleanEnv(base, extra = {}) {
 
 function git(cwd, args, env) {
 	return new Promise((resolve) => {
-		// Automatic on every message: hardened (no fsmonitor, no hooks such as reference-transaction). Filters stay on,
-		// so a snapshot stores what git add would (LFS pointers, line endings).
-		execFile("git", hardenGitArgs(args), { cwd, env, maxBuffer: 50e6, windowsHide: true }, (err, stdout, stderr) =>
+		// Automatic on every message: hardened (no fsmonitor, no hooks such as reference-transaction, no filter driver that runs
+		// a program; Git LFS's stay on, so a snapshot still stores LFS pointers). See git-harden.js.
+		execFile("git", hardenGitArgs(args, { cwd }), { cwd, env, maxBuffer: 50e6, windowsHide: true }, (err, stdout, stderr) =>
 			resolve({ ok: !err, stdout: String(stdout || ""), stderr: String(stderr || "") || (err ? err.message : "") }),
 		);
 	});

@@ -18,11 +18,13 @@ const fs = require("fs");
 const os = require("os");
 const nodePath = require("path");
 const { spawnSync } = require("child_process");
-const { GIT_HARDEN_GLOBAL } = require("./git-harden");
+const { GIT_HARDEN_GLOBAL, parseList, configExtras } = require("./git-harden");
 
 const MAX_FILES = 200;
 const SKIP_VALUE_KEYS = /^(alias|user|author|committer)\./i;
 const INCLUDE_KEY = /^(include\.path|includeif\..*\.path)$/i;
+// Keys whose values are commands that git runs during status, diff, log, show, blame, add ...
+const COMMAND_KEY = /^(filter\.|hook\.|diff\.|core\.(fsmonitor|pager)$|pager\.|gpg\.)/i;
 
 function expandHome(p, home) {
 	if (p === "~") return home;
@@ -30,22 +32,44 @@ function expandHome(p, home) {
 	return p;
 }
 
-// "origin\0key\nvalue\0" (with --show-origin) or "key\nvalue\0"; a key without a value has no newline.
-function parseList(out, withOrigin) {
-	const parts = String(out || "").split("\0");
-	const rows = [];
-	for (let i = 0; i < parts.length; i++) {
-		let origin = null;
-		if (withOrigin) {
-			origin = parts[i];
-			i++;
+// Words of a config value the way a shell reads them: quotes group (a path with spaces is one word) and are dropped.
+function shellWords(v) {
+	const out = [];
+	let cur = "";
+	let quote = null;
+	let has = false;
+	for (const ch of String(v)) {
+		if (quote) {
+			if (ch === quote) quote = null;
+			else cur += ch;
+		} else if (ch === '"' || ch === "'") {
+			quote = ch;
+			has = true;
+		} else if (/\s/.test(ch)) {
+			if (has || cur) out.push(cur);
+			cur = "";
+			has = false;
+		} else {
+			cur += ch;
+			has = true;
 		}
-		const rec = parts[i];
-		if (rec === undefined || rec === "") continue;
-		const nl = rec.indexOf("\n");
-		rows.push({ origin, key: nl < 0 ? rec : rec.slice(0, nl), value: nl < 0 ? "" : rec.slice(nl + 1) });
 	}
-	return rows;
+	if (has || cur) out.push(cur);
+	return out;
+}
+// Every path a word might name: the word, the parts around "=" and ",", and an option glued to its path ("-r./x").
+function pathCandidates(word) {
+	const c = new Set();
+	const add = (w) => {
+		if (!w) return;
+		c.add(w);
+		c.add(w.replace(/^-+[A-Za-z0-9]/, "")); // -r./x
+		c.add(w.replace(/^-+[A-Za-z0-9_-]*/, "")); // --require./x
+	};
+	add(word);
+	for (const part of word.split(/[=,;|&<>()`$]+/)) add(part);
+	c.delete("");
+	return [...c];
 }
 
 // readGitProtection(cwd, { spawn, env, home }) -> { ok, files: [abs], dirs: [abs], root, error? }
@@ -96,6 +120,7 @@ function readGitProtection(cwd, opts = {}) {
 		// 2./3. Read every file raw (no includes), follow every include directive, collect hooks folders and value paths.
 		const seen = new Set();
 		const values = [];
+		const allRows = [];
 		while (queue.length) {
 			const f = queue.shift();
 			const k = process.platform === "win32" ? f.toLowerCase() : f;
@@ -115,7 +140,8 @@ function readGitProtection(cwd, opts = {}) {
 					continue;
 				}
 				if (key === "core.hookspath" && r.value) dirs.add(nodePath.resolve(root, expandHome(r.value, home)));
-				if (!SKIP_VALUE_KEYS.test(key)) values.push(r.value);
+				allRows.push({ key: r.key, value: r.value });
+				if (!SKIP_VALUE_KEYS.test(key)) values.push({ key, value: r.value });
 			}
 		}
 		const rootKey = (p) => (process.platform === "win32" ? p.toLowerCase() : p).replace(/[\\/]+$/, "");
@@ -124,8 +150,11 @@ function readGitProtection(cwd, opts = {}) {
 			ancestors.add(rootKey(p));
 			if (nodePath.dirname(p) === p) break;
 		}
-		for (const v of values) {
-			for (const word of String(v).split(/[\s"'`$();|&<>=,]+/)) {
+		const inRoot = (p) => rootKey(p).startsWith(rootKey(root) + (process.platform === "win32" ? "\\" : "/"));
+		for (const { key, value } of values) {
+			const words = new Set(String(value).split(/[\s"'`$();|&<>=,]+/)); // the old split, kept
+			for (const w of shellWords(value)) for (const c of pathCandidates(w)) words.add(c); // quoted paths with spaces, glued options
+			for (const word of words) {
 				if (!word || /^[a-z][a-z0-9+.-]*:\/\//i.test(word)) continue;
 				let p;
 				try {
@@ -135,12 +164,18 @@ function readGitProtection(cwd, opts = {}) {
 				}
 				if (ancestors.has(rootKey(p))) continue; // "." or ".." would protect everything
 				files.add(p);
+				// A command's script may load files from its own folder: protect the folder (inside the project, below the root).
+				if (COMMAND_KEY.test(key) && inRoot(p)) {
+					const dir = nodePath.dirname(p);
+					if (!ancestors.has(rootKey(dir)) && inRoot(dir)) files.add(dir);
+				}
 			}
 		}
-		return { ok: true, files: [...files], dirs: [...dirs], root };
+		const extras = configExtras(allRows);
+		return { ok: true, files: [...files], dirs: [...dirs], root, extras };
 	} catch (err) {
 		return { ok: false, files: [], dirs: [], error: String((err && err.message) || err) };
 	}
 }
 
-module.exports = { readGitProtection, parseList };
+module.exports = { readGitProtection, parseList, shellWords, pathCandidates };

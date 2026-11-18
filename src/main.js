@@ -641,7 +641,7 @@ ipcMain.handle("git:status", async (_e, main, chatId) => {
 	return new Promise((resolve) => {
 		if (!REPO) return resolve({ branch: null, files: {} });
 		const worktree = root !== REPO;
-		execFile("git", hardenGitArgs(["status", "--porcelain=v1", "-z", "--untracked-files=all"]), { cwd: root, env: { ...ENV, GIT_OPTIONAL_LOCKS: "0" }, maxBuffer: 20e6, windowsHide: true }, (err, out) => {
+		execFile("git", hardenGitArgs(["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd: root }), { cwd: root, env: { ...ENV, GIT_OPTIONAL_LOCKS: "0" }, maxBuffer: 20e6, windowsHide: true }, (err, out) => {
 			if (err) return resolve({ branch: null, files: {}, worktree });
 			const files = {};
 			const parts = out.split("\0");
@@ -652,7 +652,7 @@ ipcMain.handle("git:status", async (_e, main, chatId) => {
 				files[rec.slice(3)] = code; // keep both columns: index (staged) and worktree
 				if (code[0] === "R" || code[0] === "C") i++; // skip the original path of a rename
 			}
-			execFile("git", hardenGitArgs(["branch", "--show-current"]), { cwd: root, env: ENV, windowsHide: true }, (_e2, b) => resolve({ branch: (b || "").trim() || null, files, worktree, root }));
+			execFile("git", hardenGitArgs(["branch", "--show-current"], { cwd: root }), { cwd: root, env: ENV, windowsHide: true }, (_e2, b) => resolve({ branch: (b || "").trim() || null, files, worktree, root }));
 		});
 	});
 });
@@ -1108,7 +1108,7 @@ function run(cmd, args, opts = {}) {
 
 // Read-only git for the Changes tab, graph and palette: hardened, so the repository can't make it run code (git-harden.js).
 // User actions (commit, push, discard) use run("git", ...) and keep the user's hooks.
-const gitRead = (args, opts) => run("git", hardenGitArgs(args), opts);
+const gitRead = (args, opts) => run("git", hardenGitArgs(args, { cwd: opts && opts.cwd }), opts);
 
 ipcMain.handle("git:diff", async (_e, chatId, rel, status) => {
 	const root = await rootFor(chatId);

@@ -30,7 +30,7 @@ function createIgnoreCheck(root, { spawnSync, ttlMs = 30_000, now = Date.now } =
 		dirRel = dirRel.replace(/\\/g, "/");
 		if (cache.has(dirRel)) return cache.get(dirRel);
 		let ignored;
-		const r = spawnSync("git", hardenGitArgs(["check-ignore", "-q", "--", dirRel + "/"]), { cwd: root, timeout: 3000, windowsHide: true });
+		const r = spawnSync("git", hardenGitArgs(["check-ignore", "-q", "--", dirRel + "/"], { cwd: root }), { cwd: root, timeout: 3000, windowsHide: true });
 		if (r.status === 0) ignored = true;
 		else if (r.status === 1) ignored = false;
 		else ignored = dirRel.split("/").pop() === "dist"; // not a git repo, or git failed
