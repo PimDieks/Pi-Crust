@@ -4,7 +4,6 @@ const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { killTree } = require("./kill-tree");
 const { makeFindPi } = require("./pi-cache");
 const { watchTree } = require("./watch-tree");
 const { createPrLookup } = require("./pr-lookup");
@@ -1528,14 +1527,7 @@ app.on("window-all-closed", () => {
 	if (quitting || SELFTEST || IS_WIN) app.quit();
 });
 app.on("before-quit", () => killAllChats());
-process.on("exit", () => {
-	for (const { proc } of chats.values()) {
-		if (proc.exitCode !== null) continue;
-		try {
-			killTree(proc, IS_WIN, { sync: true }); // Windows: only /F ends a windowless console process
-		} catch {}
-	}
-});
+process.on("exit", () => require("./exit-backstop").killAllSync(chats.values())); // a crash must not leave a Pi behind
 
 process.on("uncaughtException", (e) => {
 	console.error(e);

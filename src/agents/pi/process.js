@@ -131,8 +131,8 @@ function onceExit(proc, cb) {
 	proc.once("exit", cb);
 }
 // What is left of the process tree (subagents, commands) after the process itself ended or is ending.
-function killRemains(proc) {
-	killTree(proc, true);
+function killRemains(proc, { sync = false } = {}) {
+	killTree(proc, true, { sync });
 }
 // One JSON record to Pi; false when not writable.
 function send(proc, record) {

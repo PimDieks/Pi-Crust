@@ -16,7 +16,7 @@
 //   canSend(handle): boolean            the handle exists and a record can be written
 //   state(handle): { pid, exitCode, signalCode }   exitCode and signalCode are null while it runs
 //   onceExit(handle, cb): void          cb runs once when the process ends
-//   killRemains(handle): void           kill what the process left behind (its tree)
+//   killRemains(handle, { sync }?): void   kill what the process left behind (its tree); sync waits for the kill (process exit handlers)
 //   send(handle, record): boolean       one JSON record in; false when not writable
 //   stop(handle): void                  orderly, then tree kill
 //   listSessions({ cwd }): SessionInfo[]   { path, name, firstPrompt, mtime, size }; path is an opaque string
