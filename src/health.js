@@ -23,7 +23,7 @@
 			"all-ready",
 			{ figma: "ready" },
 			[
-				"pi|ready|Pi 1.4.0 is installed.|-",
+				"pi|ready|Pi 1.5.2 is installed.|-",
 				"auth|ready|Signed in to Claude.|-",
 				"git|ready|Git 2.47.1 is installed.|-",
 				"project|ready|Working in /stub/site.|-",
@@ -47,7 +47,7 @@
 			"env-key-and-plain-folder",
 			{ auth: "env", project: "notgit" },
 			[
-				"pi|ready|Pi 1.4.0 is installed.|-",
+				"pi|ready|Pi 1.5.2 is installed.|-",
 				"auth|ready|Using an API key from your computer's settings.|-",
 				"git|ready|Git 2.47.1 is installed.|-",
 				"project|todo|That folder isn't a Git project yet. Make it one?|Make it a Git project",
@@ -94,12 +94,13 @@
 		const after = (await crust.health.recheck()).rows[0].state;
 		console.error(`SELFTEST health flip: ${before} -> ${after} -> ${before === "todo" && after === "ready" ? "OK" : "MISMATCH"}`);
 		// Onboarding state stays in memory under the stub (the real settings.json is untouched).
-		const o1 = await crust.health.onboarding();
+		const noReady = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== "lastReadyAt")); // main records lastReadyAt itself after every check
+		const o1 = noReady(await crust.health.onboarding());
 		const set = await crust.health.onboardingSet("skippedAt");
-		const o2 = await crust.health.onboarding();
+		const o2 = noReady(await crust.health.onboarding());
 		const bad = await crust.health.onboardingSet("../x");
 		const cleared = await crust.health.onboardingSet("skippedAt", null);
-		console.error(`SELFTEST health onboarding: ${JSON.stringify(Object.keys(o1))} -> ${JSON.stringify(Object.keys(o2))} bad=${bad.ok} cleared=${Object.keys(cleared.onboarding).length} -> ${!o1.skippedAt && set.ok && typeof o2.skippedAt === "number" && bad.ok === false && Object.keys(cleared.onboarding).length === 0 ? "OK" : "MISMATCH"}`);
+		console.error(`SELFTEST health onboarding: ${JSON.stringify(Object.keys(o1))} -> ${JSON.stringify(Object.keys(o2))} bad=${bad.ok} cleared=${Object.keys(noReady(cleared.onboarding)).length} -> ${!o1.skippedAt && set.ok && typeof o2.skippedAt === "number" && bad.ok === false && Object.keys(noReady(cleared.onboarding)).length === 0 ? "OK" : "MISMATCH"}`);
 	}, "health");
 
 	// The real detectors on this machine, no stub (run it without PI_CRUST_HEALTH_STUB): prints what was found. Sign-in comes
@@ -131,15 +132,27 @@
 		await crust.health.stubSet({ pi: "missing", node: "old", git: "missing" });
 		const only = await crust.health.installPlan({ only: ["git"] });
 		console.error(`SELFTEST health-install only git: needs=[${only.needs}] steps=${only.plan.steps.map((s) => s.id)} -> ${only.needs.join() === "git" && only.plan.steps.length === 1 ? "OK" : "MISMATCH"}`);
-		const r = await crust.health.install({ only: ["pi", "git"] });
+		const noTok = await crust.health.install({});
+		console.error(`SELFTEST health-install no token: ok=${noTok.ok} noToken=${noTok.noToken} -> ${noTok.ok === false && noTok.noToken === true ? "OK" : "MISMATCH"}`);
+		const pl = await crust.health.installPlan({ only: ["pi", "git"] });
+		const r = await crust.health.install({ token: pl.token });
+		const reused = await crust.health.install({ token: pl.token });
+		console.error(`SELFTEST health-install reused token: ok=${reused.ok} noToken=${reused.noToken} -> ${reused.ok === false && reused.noToken === true ? "OK" : "MISMATCH"}`);
 		await new Promise((res) => setTimeout(res, 400)); // progress events and the result travel on different channels: let the last events land
 		const would = (r.lines || []).filter((l) => l.startsWith("WOULD ")).length;
 		const stillMissing = r.health.rows[0].state === "todo"; // a dry run installed nothing, so Pi is still missing
 		console.error(`SELFTEST health-install dry run: ok=${r.ok} dryRun=${r.dryRun} would=${would} events=[${events.join(" ")}] piStillMissing=${stillMissing} -> ${r.ok && r.dryRun && would === 2 && stillMissing && events[0] === "start" && events.at(-1) === "end" ? "OK" : "MISMATCH"}`);
 		await crust.health.stubSet({});
 		const none = await crust.health.installPlan();
-		const nothing = await crust.health.install();
-		console.error(`SELFTEST health-install nothing missing: plan.ok=${none.plan.ok} install.ok=${nothing.ok} "${nothing.error}" -> ${!none.plan.ok && !nothing.ok && nothing.error === "Nothing to install." ? "OK" : "MISMATCH"}`);
+		const nothing = await crust.health.install({ token: none.token });
+		console.error(`SELFTEST health-install nothing missing: plan.ok=${none.plan.ok} token=${none.token} install.ok=${nothing.ok} "${nothing.error}" -> ${!none.plan.ok && none.token === null && !nothing.ok && nothing.noToken === true ? "OK" : "MISMATCH"}`);
+		// the list changed after the confirm: refused, the window must ask again
+		await crust.health.stubSet({ pi: "missing", node: "missing" });
+		const before = await crust.health.installPlan();
+		await crust.health.stubSet({ pi: "missing", node: "missing", git: "missing" });
+		const changed = await crust.health.install({ token: before.token });
+		console.error(`SELFTEST health-install changed list: ok=${changed.ok} changed=${changed.changed} needs=[${changed.needs}] -> ${changed.ok === false && changed.changed === true && changed.needs.join() === "node,git,pi" ? "OK" : "MISMATCH"}`);
+		await crust.health.stubSet({});
 	}, "health-install");
 
 	// A chat whose Pi is really missing. Run with PI_CRUST_SELFTEST_NO_PI=1: main skips the search and spawns a program that
@@ -177,5 +190,10 @@ ${$("#toasts").innerText}`; // the chat and its notices; the Commits list may qu
 		for (let t = 0; t < 8000 && errBoxes().length === n; t += 100) await wait(100);
 		const again = errBoxes().length === n + 1 && errBoxes().at(-1).textContent.startsWith("Pi isn't installed yet.") && !/ENOENT|spawn pi/i.test(body());
 		console.error(`SELFTEST onboarding-exit restart: boxes ${n} -> ${errBoxes().length} -> ${again ? "OK" : "MISMATCH"}`);
+		// Pi failing to start makes the setup view check again (for the pill), and no program was started for it
+		const seq0 = window.crustOnboarding._seq();
+		await crust.pi.restart(active.id);
+		for (let t = 0; t < 8000 && window.crustOnboarding._seq() === seq0; t += 100) await wait(100);
+		console.error(`SELFTEST onboarding-exit probe: checks ${seq0} -> ${window.crustOnboarding._seq()} -> ${window.crustOnboarding._seq() > seq0 ? "OK" : "MISMATCH"}`);
 	}, "onboarding-exit");
 })();

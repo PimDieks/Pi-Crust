@@ -35,6 +35,22 @@ function usualDirs(platform, env, home) {
 	const common = ["/opt/homebrew/bin", "/usr/local/bin"];
 	return { node: common, git: common };
 }
+// The first real file called `name` (or name.exe / .cmd / .bat on Windows) in the PATH folders of `env`: an absolute path, or null.
+// Never looks in the current folder, so a git.exe sitting in a project folder is not found by accident.
+function which(name, env, platform, fsx, delimiter) {
+	const exts = platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+	for (const dir of String(env[pathKey(env)] || "").split(delimiter)) {
+		const d = dir.replace(/^"|"$/g, "");
+		if (!d || !path.isAbsolute(d)) continue;
+		for (const ext of exts) {
+			const p = path.join(d, name + ext);
+			try {
+				if (fsx.existsSync(p) && fsx.statSync(p).isFile()) return p;
+			} catch {}
+		}
+	}
+	return null;
+}
 const pathKey = (env) => Object.keys(env).find((k) => k.toUpperCase() === "PATH") || "PATH";
 function withDirs(env, dirs, fsx, delimiter) {
 	const have = dirs.filter((d) => {
@@ -87,7 +103,8 @@ function createHealth(d) {
 		const r = await exec("git", ["--version"], { env: e, cwd: home, timeout: 10_000 });
 		if (r.errCode === "ENOENT") return { state: "missing", version: null };
 		const version = L.parseVersion(first(r.stdout));
-		return r.ok && version ? { state: "ok", version } : { state: "unknown", version: null };
+		// `path`: the Git that answered, as an absolute path (init-git-main runs exactly this one, never a bare "git").
+		return r.ok && version ? { state: "ok", version, path: which("git", e, platform, fsx, delimiter) } : { state: "unknown", version: null };
 	}
 
 	// The folder exists, and is a Git project: it, or a folder above it, has a `.git` (a folder, or a file in a linked worktree).
@@ -117,34 +134,94 @@ function createHealth(d) {
 		}
 	}
 
-	async function facts({ figma = false, devServer = false, fresh = false } = {}) {
+	// onRow(row) gets each row of the view as soon as its facts are in (Pi and Git first, then the rows that need them), so the view
+	// fills in while the slow ones (the sign-in check, Figma) are still running.
+	async function facts({ figma = false, devServer = false, fresh = false } = {}, onRow = () => {}) {
 		const stub = d.stub?.();
 		if (stub) return stub;
-		const [pi, node, git] = await Promise.all([detectPi(fresh), detectNode(), detectGit()]);
-		// No Pi, nothing to ask: `pi auth check` would only fail the same way.
-		let subs = null;
-		if (pi.state !== "missing" && d.subsStatus) {
+		const emit = (row) => {
 			try {
-				subs = await d.subsStatus();
+				onRow(row);
 			} catch {}
-		}
-		let fg = null;
-		if (figma && d.figmaStatus) {
-			try {
-				fg = await d.figmaStatus();
-			} catch {
-				fg = { state: "problem", message: "" };
+		};
+		const piP = detectPi(fresh).then((pi) => (emit(L.piRow(pi)), pi));
+		const nodeP = detectNode();
+		const gitP = detectGit().then((git) => (emit(L.gitRow(git)), git));
+		const projectP = gitP.then((git) => {
+			const project = detectProject();
+			emit(L.projectRow(project, git, home));
+			return project;
+		});
+		// No Pi, nothing to ask: `pi auth check` would only fail the same way.
+		const subsP = piP.then(async (pi) => {
+			let subs = null;
+			if (pi.state !== "missing" && d.subsStatus) {
+				try {
+					subs = await d.subsStatus();
+				} catch {}
 			}
-		}
-		const out = { pi, node, git, auth: { subs }, project: detectProject(), figma: fg };
+			emit(L.authRow({ subs }, pi));
+			return subs;
+		});
+		const figmaP = (async () => {
+			let fg = null;
+			if (figma && d.figmaStatus) {
+				try {
+					fg = await d.figmaStatus();
+				} catch {
+					fg = { state: "problem", message: "" };
+				}
+			}
+			emit(L.figmaRow(fg));
+			return fg;
+		})();
+		const [pi, node, git, project, subs, fg] = await Promise.all([piP, nodeP, gitP, projectP, subsP, figmaP]);
+		const out = { pi, node, git, auth: { subs }, project, figma: fg };
 		if (devServer) out.devServer = await detectDevServer();
 		return out;
 	}
 
-	return { detectPi, detectNode, detectGit, detectProject, detectDevServer, facts, check: async (o = {}) => L.buildHealth(await facts(o), { home }) };
+	// Two checks at once share one run (a run that asks for at least as much as the newcomer). A newcomer is given the rows that
+	// already came in. Not with a stub (selftest): there every answer must reflect the stub as it is right now.
+	const runs = [];
+	function check(o = {}, onRow = () => {}) {
+		const want = { figma: !!o.figma, devServer: !!o.devServer, fresh: !!o.fresh };
+		let run = d.stub?.() ? null : runs.find((r) => (r.o.figma || !want.figma) && (r.o.devServer || !want.devServer) && (r.o.fresh || !want.fresh));
+		if (run) {
+			run.rows.forEach(onRow);
+			run.listeners.add(onRow);
+			return run.promise;
+		}
+		run = { o: want, rows: [], listeners: new Set([onRow]) };
+		runs.push(run);
+		run.promise = (async () => {
+			try {
+				const f = await facts(want, (row) => {
+					run.rows.push(row);
+					run.listeners.forEach((l) => {
+						try {
+							l(row);
+						} catch {}
+					});
+				});
+				const h = L.buildHealth(f, { home });
+				try {
+					d.onResult?.(h);
+				} catch {}
+				return h;
+			} finally {
+				runs.splice(runs.indexOf(run), 1);
+			}
+		})();
+		return run.promise;
+	}
+
+	return { detectPi, detectNode, detectGit, detectProject, detectDevServer, facts, check, runsInFlight: () => runs.length };
 }
 
-const ONBOARDING_KEYS = ["doneAt", "skippedAt", "firstTaskDoneAt", "firstTaskHiddenAt"];
+// lastReadyAt: set by main whenever a check finds every required row ready, cleared when one finds otherwise. Startup reads it to
+// decide whether it has to look at all (setup done and the last check was ready: it does not).
+const ONBOARDING_KEYS = ["doneAt", "skippedAt", "firstTaskDoneAt", "firstTaskHiddenAt", "lastReadyAt"];
 
 function register(ctx) {
 	const { ipcMain } = ctx;
@@ -160,7 +237,22 @@ function register(ctx) {
 		}
 	}
 	let mem = {}; // onboarding state in memory while stubbed: the real settings.json stays untouched
+	const read = () => (stubOn ? mem : ctx.readSettings().onboarding) || {};
+	const setKey = (key, on) => {
+		const next = { ...read(), [key]: on ? Date.now() : undefined };
+		if (!on) delete next[key];
+		if (stubOn) mem = next;
+		else ctx.writeSettings({ onboarding: next });
+		return next;
+	};
+	// Every finished check records whether everything required was ready (only when it changes). A selftest without the stub
+	// never touches the real settings.
+	const trackReady = (h) => {
+		if (ctx.selftest === true && !stubOn) return;
+		if (!!read().lastReadyAt !== !!h.ready) setKey("lastReadyAt", !!h.ready);
+	};
 	const health = createHealth({
+		onResult: trackReady,
 		findPi: (o) => ctx.findPi(o),
 		env: () => ctx.env,
 		subsStatus: () => ctx.subsStatus?.status(),
@@ -174,21 +266,18 @@ function register(ctx) {
 		ctx.refreshPi?.();
 		ctx.subsStatus?.invalidate();
 	};
-	ipcMain.handle("health:check", (_e, o) => health.check(o || {}));
+	// Rows reach the window as they come in ("health:row"), then the whole result is the answer.
+	const rowOut = (row) => ctx.send?.("health:row", row);
+	ipcMain.handle("health:check", (_e, o) => health.check(o || {}, rowOut));
 	ipcMain.handle("health:recheck", (_e, o) => {
 		refresh();
-		return health.check({ ...(o || {}), fresh: true });
+		return health.check({ ...(o || {}), fresh: true }, rowOut);
 	});
-	const read = () => (stubOn ? mem : ctx.readSettings().onboarding) || {};
 	ipcMain.handle("health:onboarding", () => ({ ...read() }));
 	// key: "doneAt" | "skippedAt" | "firstTaskDoneAt"; sets it to now, or clears it with value === null.
 	ipcMain.handle("health:onboardingSet", (_e, key, value) => {
 		if (!ONBOARDING_KEYS.includes(key)) return { ok: false, error: "Unknown key" };
-		const next = { ...read(), [key]: value === null ? undefined : Date.now() };
-		if (next[key] === undefined) delete next[key];
-		if (stubOn) mem = next;
-		else ctx.writeSettings({ onboarding: next });
-		return { ok: true, onboarding: next };
+		return { ok: true, onboarding: setKey(key, value !== null) };
 	});
 	if (stubOn) {
 		ipcMain.handle("health:stubSet", (_e, s) => {

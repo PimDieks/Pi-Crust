@@ -129,7 +129,7 @@ const findPi = makeFindPi(locatePi);
 // Windows: PI_CRUST_PI (cli.js, pi.cmd or pi.exe), npm's global folder (%APPDATA%\npm), nvm-windows (the active
 // %NVM_SYMLINK%, then %NVM_HOME%\vX newest first), then PATH. Never through the pi.cmd shim (a .cmd only runs in a
 // shell, which breaks stdio and arguments): its CLI script runs with the node.exe next to it, else the one on PATH.
-const PI_PACKAGES = [path.join("@earendil-works", "pi-coding-agent"), path.join("@mariozechner", "pi-coding-agent")];
+const PI_PACKAGES = [path.join(...require("./pi-package").PI_PACKAGE.name.split("/"))]; // the deprecated @mariozechner scope is no longer looked for (see pi-package.js)
 function onPath(name, env = process.env) {
 	for (const dir of String(env[pathKey(env)] || "").split(path.delimiter)) {
 		if (!dir) continue;
@@ -259,13 +259,24 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 		return null;
 	}
 	const cwd = wt ? wt.cwd : null;
+	const pi = findPi();
+	if (!pi) {
+		// Pi isn't installed: report it without starting anything. (Never a bare `pi` with the project as the working folder: on
+		// Windows a pi.exe lying in the project would be the one that runs.)
+		if (!openList.some((e) => e.id === chatId)) {
+			openList.push({ id: chatId, file: sessionFile || null, cwd });
+			saveOpenChats();
+		}
+		send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, ...hint });
+		send("pi:exit", { chatId, error: "Pi is not installed", errorCode: "ENOENT", notInstalled: true });
+		return null;
+	}
 	// crust-context.ts reports the context breakdown and models used (see context-panel.js).
 	// crust-guard.ts asks to continue after every N tool calls (settings.json toolCallCheckIn, default 40, 0 = off).
 	// advisor.ts adds Anthropic's advisor tool (pairs in ~/.pi/agent/advisor.json, /advisor command).
 	const args = ["--mode", "rpc", ...["crust-context.ts", "crust-guard.ts", "advisor.ts"].flatMap((f) => ["-e", path.join(__dirname, "pi-extension", f)])];
 	if (sessionFile) args.push("--session", sessionFile);
-	const pi = findPi();
-	const [cmd, cmdArgs] = pi ? [pi.command, [...pi.args, ...args]] : [SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1" ? "pi-crust-selftest-no-such-pi" : "pi", args];
+	const [cmd, cmdArgs] = [pi.command, [...pi.args, ...args]];
 	// Windows: no process groups, and detached would open a console window.
 	const proc = spawn(cmd, cmdArgs, { cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });
 	const chat = { id: chatId, proc, cwd };

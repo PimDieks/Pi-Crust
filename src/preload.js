@@ -18,7 +18,8 @@ contextBridge.exposeInMainWorld("crust", {
 		open: (p) => ipcRenderer.invoke("repos:open", p),
 		onChanged: on("repo:changed"),
 		uiReady: () => ipcRenderer.invoke("ui:ready"),
-		initGit: () => ipcRenderer.invoke("repos:initGit"), // `git init` in the open folder (after the welcome view's confirm)
+		initGitPlan: () => ipcRenderer.invoke("repos:initGitPlan"), // { ok, folder, token, error }: the folder for the confirm, and the one-time token for it
+		initGit: (token) => ipcRenderer.invoke("repos:initGit", { token }), // `git init` in that folder; main refuses without the token from initGitPlan
 	},
 	pi: {
 		send: (chatId, record) => ipcRenderer.invoke("pi:send", chatId, record),
@@ -200,7 +201,9 @@ contextBridge.exposeInMainWorld("crust", {
 		onboardingSet: (key, value) => ipcRenderer.invoke("health:onboardingSet", key, value),
 		stubSet: (s) => ipcRenderer.invoke("health:stubSet", s), // selftest only
 		installPlan: (o) => ipcRenderer.invoke("health:installPlan", o), // { needs, plan: { ok, steps, lines, text, manual } }: the list for the confirm
-		install: (o) => ipcRenderer.invoke("health:install", o), // after the confirm: { ok, error, blocked, manual, details, health }
+		install: (o) => ipcRenderer.invoke("health:install", o), // after the confirm, { token } from installPlan: { ok, error, blocked, changed, cancelled, manual, details, health }
+		installCancel: () => ipcRenderer.invoke("health:installCancel"), // stops a running install
+		onRow: on("health:row"), // a row of the view as soon as its facts are in, while a check is still running
 		onOpen: on("onboarding:open"), // from the Help menu: "setup" | "first-task"
 		onInstallProgress: on("health:install-progress"), // { kind: start | step | line... | done | fail | end, id, text }
 	},
