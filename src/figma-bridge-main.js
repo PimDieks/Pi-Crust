@@ -13,7 +13,9 @@ const { killTree } = require("./kill-tree");
 
 const CONNECT_WAIT_MS = 20_000;
 const CALL_MS = 30_000;
-const MCP_JSON = () => path.join(os.homedir(), ".pi", "agent", "mcp.json");
+// Where the agent keeps its MCP servers: register() takes it from the agent adapter (mcpConfigPath).
+let mcpConfig = () => null;
+const MCP_JSON = () => mcpConfig();
 
 const IS_WIN = process.platform === "win32";
 const comspec = () => process.env.ComSpec || "cmd.exe";
@@ -290,6 +292,7 @@ function createBridge({ readSettings, makeClient = (cfg) => new Client(cfg), con
 }
 
 function register(ctx) {
+	mcpConfig = () => ctx.agents.get().mcpConfigPath();
 	const bridge = createBridge({ readSettings: () => ctx.readSettings() });
 	ctx.ipcMain.handle("figmaBridge:components", (_e, o) => bridge.components(!!(o && o.refresh)));
 	ctx.app.on("before-quit", () => bridge.kill(true));

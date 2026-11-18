@@ -49,13 +49,19 @@ function stop(proc) {
 	}, 4500);
 }
 
-// opts: { pi: { command, args }, cwd, env, sessionRef? }. Returns the child process (the handle).
+// crust-guard.ts asks to continue after every N tool calls: settings.json toolCallCheckIn, default 40, 0 = off. Passed to Pi in the environment.
+function toolCheckIn(settings) {
+	const n = Number(settings && settings.toolCallCheckIn);
+	return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 40;
+}
+
+// opts: { pi: { command, args }, cwd, env, settings, sessionRef? }. Returns the child process (the handle).
 function start(opts, sink) {
 	const args = ["--mode", "rpc", ...EXTENSIONS.flatMap((f) => ["-e", path.join(EXTENSION_DIR, f)])];
 	if (opts.sessionRef) args.push("--session", opts.sessionRef);
 	const [cmd, cmdArgs] = [opts.pi.command, [...opts.pi.args, ...args]];
 	// Windows: no process groups, and detached would open a console window.
-	const proc = spawn(cmd, cmdArgs, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });
+	const proc = spawn(cmd, cmdArgs, { cwd: opts.cwd, env: { ...opts.env, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn(opts.settings)) }, stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });
 	const current = () => sink.isCurrent(proc);
 	let ready = false;
 	const started = Date.now();
@@ -135,4 +141,4 @@ function send(proc, record) {
 	return true;
 }
 
-module.exports = { start, stop, send, canSend, state, onceExit, killRemains, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };
+module.exports = { start, stop, send, canSend, state, onceExit, killRemains, toolCheckIn, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };

@@ -186,7 +186,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 	};
 	// The driver injects crust-context.ts (context breakdown and models used, see context-panel.js), crust-guard.ts (asks to continue after
 	// every N tool calls: settings.json toolCallCheckIn, default 40, 0 = off) and advisor.ts (Anthropic's advisor tool, /advisor command).
-	const handle = agent.start({ pi, cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, sessionRef: sessionFile }, sink);
+	const handle = agent.start({ pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile }, sink);
 	const chat = { id: chatId, agent, handle, cwd };
 	chats.set(chatId, chat);
 	if (!openList.some((e) => e.id === chatId)) {
@@ -625,10 +625,6 @@ function writeSettings(patch) {
 	const next = { ...readSettings(), ...patch };
 	fs.mkdirSync(path.dirname(SETTINGS_FILE()), { recursive: true });
 	fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(next, null, 2));
-}
-function toolCheckIn() {
-	const n = Number(readSettings().toolCallCheckIn);
-	return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 40;
 }
 let zoomLevel = 0;
 function setZoom(level) {
@@ -1447,6 +1443,7 @@ function badgeIcon(count) {
 // What feature modules (src/<feature>-main.js, each exporting register(ctx)) get to work with.
 // Getters, because repo, window and browser view change over the app's life.
 const ctx = {
+	agents,
 	get repo() {
 		return REPO;
 	},
@@ -1514,7 +1511,7 @@ require("./init-git-main").register(ctx);
 require("./remote-main").register(ctx);
 require("./update-main").register(ctx);
 require("./mendix-main").register(ctx);
-require("./advisor-main").register(ctx);
+piAgent.onAppStart(ctx);
 require("./local-main").register(ctx);
 
 app.whenReady().then(() => {
