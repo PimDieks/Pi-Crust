@@ -1,0 +1,35 @@
+{
+	"note": "Places outside src/agents/pi/ and src/pi-extension/ that still name a Pi specific, found by scripts/check-agent-boundary.js. Every entry needs a reason; an entry that matches nothing any more fails the check, so the list can only shrink. Add an entry only with a reason a reviewer can judge, never to make the check pass.",
+	"entries": [
+		{
+			"file": "src/advisor-main.js",
+			"rule": "pi-folder",
+			"reason": "Writes the advisor pointer into Pi's extensions folder (and logs where). It runs only through the Pi adapter's onAppStart. It stays at src/ because the pointer text carries this app's path to pi-extension/advisor.ts; moving it would change the file Pi reads."
+		},
+		{
+			"file": "src/context-panel.js",
+			"rule": "pi-status",
+			"reason": "Reads the context breakdown and Copilot quota that Pi-only extensions publish as statuses. Phase 7 hides these for an agent without the contextBreakdown or costMeter capability."
+		},
+		{
+			"file": "src/remote-state.js",
+			"rule": "pi-status",
+			"reason": "The phone copy of the statuses the desktop reads (permission mode, context). Phase 7 gates them with the same capabilities."
+		},
+		{
+			"file": "src/renderer.js",
+			"rule": "pi-status",
+			"reason": "Handles the status names of Pi's extensions (permission-mode, crust-context, copilot-usage) in handleUiRequest. Part of the record contract (the adapter speaks Pi's shapes); phase 7 gates the display on capabilities."
+		},
+		{
+			"file": "src/pi-package.js",
+			"rule": "pi-package",
+			"reason": "The one place that names Pi's npm package (current and deprecated scope) and the tested version; the Pi lookup and the onboarding install both read it. Phase 7 can give the adapter an install facade and move it."
+		},
+		{
+			"file": "src/onboarding.js",
+			"rule": "pi-package",
+			"reason": "Selftest expectations for the install confirmation and the manual fallback text, which quote the package name the user sees."
+		}
+	]
+}
