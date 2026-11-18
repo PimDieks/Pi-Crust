@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld("crust", {
 		onSetup: on("claude:setup"),
 	},
 	app: {
+		selftestRun: ipcRenderer.sendSync("app:isSelftestRun") === true, // fixed by the main process; a test step cannot switch it off
 		isFocused: () => ipcRenderer.invoke("app:isFocused"),
 		badge: (n) => ipcRenderer.invoke("app:badge", n),
 		show: () => ipcRenderer.invoke("app:show"),

@@ -1728,6 +1728,7 @@ function renderAsk() {
 	if (!ask) {
 		box.hidden = true;
 		box.replaceChildren();
+		box.classList.remove("perm", "risky");
 		box.dataset.askId = "";
 		return;
 	}

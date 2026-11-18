@@ -29,8 +29,8 @@
 			if (!isFocused) {
 				c.unread = true;
 				try {
-					const n = new Notification(title, { body: label(c) });
-					n.onclick = () => openChat(c);
+					const n = crustNative.notify(title, { body: label(c) });
+					if (n) n.onclick = () => openChat(c);
 				} catch {}
 				crust.app.bounce();
 				renderTabs();

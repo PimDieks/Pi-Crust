@@ -295,7 +295,7 @@ select option { background: var(--panel-2); color: var(--text); }
 #ask .ask-more { color: var(--muted); font-weight: normal; font-size: var(--fs-sm); }
 #ask p { margin: 0 0 10px; color: var(--muted); white-space: pre-wrap; }
 /* A permission prompt keeps its answers on screen: the text box takes whatever height is left and scrolls. */
-#ask.perm { display: flex; flex-direction: column; overflow: hidden; }
+#ask.perm:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; }
 #ask.perm > * { flex: none; }
 #ask.perm > .ask-detail { flex: 0 1 auto; }
 #ask.perm > .ask-detail.long { min-height: 4.5em; }

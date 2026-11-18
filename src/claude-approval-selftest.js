@@ -52,6 +52,18 @@ selftestSteps.push(async ({ snap, wait }) => {
 		setTheme(was);
 		await wait(200);
 	};
+	// Nothing of a question is left: the box has no layout (hidden and display none), no class of its own, no height between the conversation and the
+	// message box, and the message box sits where it sat before the question.
+	let baseTop = null;
+	const noLeftover = (label) => {
+		const b = box();
+		const cs = getComputedStyle(b);
+		const top = $("#input").getBoundingClientRect().top;
+		check(b.getClientRects().length === 0 && cs.display === "none" && b.offsetHeight === 0, `${label}: an empty question box is left (display ${cs.display}, height ${b.offsetHeight}, hidden ${b.hidden}, class "${b.className}")`);
+		check(!b.hidden || (!b.classList.contains("perm") && !b.classList.contains("risky")), `${label}: the hidden question box keeps its class "${b.className}"`);
+		check(!b.childElementCount, `${label}: the hidden question box keeps ${b.childElementCount} children`);
+		if (baseTop !== null) check(Math.abs(top - baseTop) <= 1, `${label}: the message box moved from ${baseTop} to ${top}`);
+	};
 	const press = (key) => {
 		const t = document.activeElement;
 		const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
@@ -97,12 +109,24 @@ selftestSteps.push(async ({ snap, wait }) => {
 			b?.click();
 		}
 		check(await until(() => !promptUp(), 4000), `${label}: the prompt did not close after the answer`);
+		noLeftover(`${label} after the answer`); // at once: the next prompt of the same turn may already be coming
 	};
 	const turn = async (c, n, text, prompts, name) => {
+		baseTop = $("#input").getBoundingClientRect().top;
 		await send(c, text);
 		for (let i = 0; i < prompts.length; i++) await answerPrompt(prompts[i], `${name} prompt ${i + 1}`);
 		check(await until(() => settled(c, n), 15000), `${name}: the turn did not finish`);
 		check(!promptUp() && !(c.asks || []).length, `${name}: a prompt is still open or queued (${(c.asks || []).length})`);
+		if (name === "ask-commands") {
+			const was = themeSetting();
+			for (const th of ["light", "dark"]) {
+				setTheme(th);
+				await wait(350);
+				noLeftover(`${name} ${th} after the turn`);
+				await snap(`claude-approval-after-answer-${th}`); // the chat right after the answered questions: no bar above the message box
+			}
+			setTheme(was);
+		}
 	};
 	const setModeTo = async (m) => {
 		await setMode(m);
@@ -110,6 +134,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 	};
 	const wasSelftest = info.selftest;
 	info.selftest = false; // renderAsk would answer a question by itself after 1.5 s: here a user (this step) answers
+	check(crust.app.selftestRun === true && crustNative.notify("Claude Agent asks", { body: "selftest" }) === null, "a native notification can be created in a selftest run (the page flag is off here, the main process flag must hold)");
 	let made = null;
 	try {
 		await crust.health.stubSet({});
@@ -149,6 +174,21 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(await setModeTo("trusted"), "no switch to Trusted");
 		await turn(made, 3, "And in Trusted.", [], "trusted");
 
+		// 3b. The question box is shared with Pi chats: a plain Pi question and a Pi permission question (same records) leave nothing either, and a
+		//     second question after the first shows and leaves the same way. (Closed with dismiss(): nothing is sent to a process.)
+		baseTop = $("#input").getBoundingClientRect().top;
+		for (const [kind, spec] of [["plain", { method: "select", title: "Pick one", options: ["A", "B"] }], ["permission", { method: "select", title: "Allow this command?\nnpm run x", options: TWO }]]) {
+			for (const n of [1, 2]) {
+				askInChat(made, { id: `selftest-${kind}-${n}`, ...spec });
+				check(await until(() => vis(box()), 3000), `shared ${kind} ${n}: the question did not show`);
+				check(box().classList.contains("perm") === (kind === "permission"), `shared ${kind} ${n}: class "${box().className}"`);
+				await wait(100);
+				made.asks[0]?.dismiss();
+				await wait(100);
+				noLeftover(`shared ${kind} question ${n} after it closed`);
+			}
+		}
+
 		// 4. A prompt that is open when the chat is closed leaves the screen and the call is denied (the runner reads the gate log).
 		check(await setModeTo("ask-commands"), "no switch back to Ask before commands");
 		await send(made, "One more command, then I close the chat.");
@@ -159,6 +199,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		await closing;
 		check(await until(() => !chats.has(made.id), 5000), "the chat did not close");
 		check(!promptUp(), "the prompt stayed on screen after its chat closed");
+		noLeftover("closing: after the chat closed");
 		made = null;
 		await wait(800); // the gate's deny reaches the stand-in's log
 		if (info.selftestClaudeBreak) check(false, "negative control: this expectation is wrong on purpose");

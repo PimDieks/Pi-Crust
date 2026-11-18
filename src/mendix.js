@@ -132,7 +132,7 @@
 			toast(`Mendix app running on :${s.port}. Admin: ${s.adminUser}`, "info", { label: "Copy password", onClick: copyAdmin });
 			if (!info.selftest && !(await crust.app.isFocused())) {
 				try {
-					new Notification("Mendix app is running", { body: s.url });
+					crustNative.notify("Mendix app is running", { body: s.url });
 				} catch {}
 			}
 		} else if (s.state === "error" && opened) {
