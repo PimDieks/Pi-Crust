@@ -314,11 +314,15 @@ select option { background: var(--panel-2); color: var(--text); }
 #ask .ask-long { margin: 0 0 10px; color: var(--text-minor); font-size: var(--fs-sm); font-weight: 600; }
 #ask .options { display: flex; flex-direction: column; gap: 6px; }
 #ask .options button { text-align: left; background: var(--hover); border: 1px solid transparent; border-radius: var(--radius-sm); padding: 8px var(--space-sm); cursor: pointer; }
-#ask .options button:hover, #ask .options button:focus { background: var(--selected); border-color: var(--accent); outline: none; }
+#ask .options button:hover { border-color: var(--border); }
+#ask .options button:focus { outline: none; }
 #ask .options button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Answers: "Allow once" is the one filled choice; "Allow for this chat" and "Deny" are plain, equal weight (Deny is not red, not loud). */
-#ask .options button.ask-allow { background: color-mix(in srgb, var(--accent) 16%, var(--hover)); border-color: color-mix(in srgb, var(--accent) 55%, transparent); font-weight: 600; }
-#ask .options button.ask-allow:hover { background: color-mix(in srgb, var(--accent) 26%, var(--hover)); border-color: var(--accent); }
+/* Other questions: the focused answer is filled. */
+#ask:not(.perm) .options button:focus { background: var(--selected); border-color: var(--accent); }
+/* A permission prompt: exactly one row is filled, the one with the focus (:focus), which is what Enter answers.
+   The others are plain and equal ("Allow for this chat" stays plain). Deny is never red; it is filled only when it holds the focus,
+   which is where the risky prompts (the ones with a warning line) open. */
+#ask.perm .options button:focus { background: color-mix(in srgb, var(--accent) 18%, var(--hover)); border-color: var(--accent); font-weight: 600; }
 #ask textarea, #ask input { width: 100%; padding: 8px; }
 #ask textarea { min-height: 120px; font-family: var(--mono); font-size: var(--fs-sm); }
 #ask .modal-actions { margin-top: 10px; }

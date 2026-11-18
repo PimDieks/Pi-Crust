@@ -362,6 +362,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 	const box = $("#ask");
 	const was = themeSetting();
 	const problems = [];
+	await crust.selftest.focusEmulation(true); // the offscreen window has no focus: let the page draw focus rings anyway
 	const reach = (what) => {
 		// Every button of the prompt must be what is on top at its centre (nothing covers an answer).
 		const btns = [...box.querySelectorAll("button")];
@@ -392,16 +393,58 @@ selftestSteps.push(async ({ snap, wait }) => {
 			await wait(250);
 			await snap(`perm-prompt-${theme}-${name}`);
 			if (theme !== "dark") continue;
-			// Answers: only the options, in order, no Cancel; Deny is focused; Enter on open denies; Esc denies.
+			// Answers: only the options, in order, no Cancel.
 			const labels = [...box.querySelectorAll("button")].map((b) => b.textContent);
 			if (labels.join("|") !== options.join("|")) problems.push(`${name}: buttons are [${labels}], want [${options}]`);
-			if (document.activeElement?.textContent !== "Deny") problems.push(`${name}: focus is on "${document.activeElement?.textContent || document.activeElement?.tagName}", want Deny`);
+			// Focus and highlight sit on the same answer: "Allow once" for an ordinary prompt, "Deny" for the risky ones.
+			const risky = name === "outside" || name === "protected" || name.startsWith("long");
+			const want = risky ? "Deny" : "Allow once";
+			const cur = [...box.querySelectorAll(".options button:focus")];
+			if (document.activeElement?.textContent !== want) problems.push(`${name}: focus is on "${document.activeElement?.textContent || document.activeElement?.tagName}", want ${want}`);
+			if (cur.length !== 1 || cur[0].textContent !== want) problems.push(`${name}: highlighted [${cur.map((b) => b.textContent)}], want only ${want}`);
+			const bg = (b) => getComputedStyle(b).backgroundColor;
+			const others = [...box.querySelectorAll(".options button:not(:focus)")];
+			if (cur[0] && others.some((b) => bg(b) === bg(cur[0]))) problems.push(`${name}: a second row looks filled like the highlighted one`);
+			if (!document.activeElement?.matches(":focus-visible")) problems.push(`${name}: the focused answer shows no focus ring`);
+			// Esc denies (also from a different answer than the default).
 			document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 			if (answers.length !== 1 || answers[0].value !== "Deny") problems.push(`${name}: Esc answered ${JSON.stringify(answers)}, want Deny`);
+			// Keys: nothing for the first 500 ms (Enter, Space, arrows); then Enter answers what is highlighted.
+			const press = (key) => {
+				const t = document.activeElement;
+				const ev = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+				t.dispatchEvent(ev);
+				if (!ev.defaultPrevented && (key === "Enter" || key === " ") && t.tagName === "BUTTON") t.click(); // the browser's own default action
+				t.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
+			};
 			const second = show(title, options);
-			document.activeElement.click(); // what Enter or Space does on the focused button
-			if (second.length !== 1 || second[0].value !== "Deny") problems.push(`${name}: the focused button answered ${JSON.stringify(second)}, want Deny`);
+			press("Enter");
+			press(" ");
+			press("ArrowDown");
+			if (second.length) problems.push(`${name}: a key within 500 ms answered ${JSON.stringify(second)}`);
+			if (document.activeElement?.textContent !== want) problems.push(`${name}: an arrow within 500 ms moved the focus`);
+			await wait(600);
+			press("Enter");
+			if (second.length !== 1 || second[0].value !== want) problems.push(`${name}: Enter after 500 ms answered ${JSON.stringify(second)}, want ${want}`);
+			// Arrows move the focus and the highlight together, and the mouse is never delayed.
 			show(title, options);
+			await wait(600);
+			press(risky ? "ArrowUp" : "ArrowDown");
+			await wait(80);
+			const moved = risky ? options[options.length - 2] : options[1];
+			if (document.activeElement?.textContent !== moved || box.querySelector(".options button:focus")?.textContent !== moved) problems.push(`${name}: the arrow did not move focus and highlight to ${moved} (focus ${document.activeElement?.textContent}, highlight ${box.querySelector(".options button:focus")?.textContent})`);
+			const mouse = show(title, options);
+			box.querySelector(".ask-deny").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })); // a real click: no delay
+			if (mouse.length !== 1 || mouse[0].value !== "Deny") problems.push(`${name}: a mouse click right after opening answered ${JSON.stringify(mouse)}`);
+			// Text typed in the message box survives the prompt opening.
+			const input = $("#input");
+			input.value = "half a message";
+			input.focus();
+			show(title, options);
+			if (input.value !== "half a message") problems.push(`${name}: the typed text was lost`);
+			if (document.activeElement === input) problems.push(`${name}: focus stayed in the message box`);
+			show(title, options);
+			input.value = "";
 			// Tab order: the long text's box (when long), then the answers in order, Deny last.
 			const order = [...box.querySelectorAll("[tabindex='0'], button")].map((n) => n.textContent.slice(0, 12));
 			if (order[order.length - 1] !== "Deny") problems.push(`${name}: tab order ends with ${order[order.length - 1]}`);
@@ -458,7 +501,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 	await setMode("plan"); // nothing enforced: refuses without asking Pi
 	if (sel.value !== "") problems.push("selector moved to " + sel.value + " without a status");
 	$("#toasts").replaceChildren();
-	show(cases[3][1], cases[3][2]);
+	show(cases[3][1].replace(/\n?Mode: .*$/, ""), cases[3][2]); // no mode line: nothing is enforced, so there is no mode to name
 	await wait(200);
 	await snap("perm-prompt-dark-not-enforced");
 	syncModeFromStatus("Mode: Ask before commands");
@@ -467,8 +510,9 @@ selftestSteps.push(async ({ snap, wait }) => {
 	if (sel.value !== "" || !sel.disabled) problems.push("selector shows a mode for an unknown status");
 	syncModeFromStatus(undefined);
 	setTheme(was);
+	await crust.selftest.focusEmulation(false);
 	box.hidden = true;
 	box.replaceChildren();
 	box.dataset.askId = "";
-	console.error(`SELFTEST perm-prompt: ${cases.length * 2} prompts drawn (dark and light), answers/focus/Esc/tab order/long text/overlap/selector checked${problems.length ? " -> MISMATCH: " + problems.join("; ") : " -> OK"}`);
+	console.error(`SELFTEST perm-prompt: ${cases.length * 2} prompts drawn (dark and light), answers/focus+highlight/500 ms key guard/Esc/arrows/typed text/tab order/long text/overlap/selector checked${problems.length ? " -> MISMATCH: " + problems.join("; ") : " -> OK"}`);
 }, "perm-prompt");

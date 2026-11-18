@@ -1223,6 +1223,8 @@
 		const optLabels = (req.options || []).map((o) => (typeof o === "string" ? o : o.label || o.value || String(o)));
 		const perm = req.method === "select" && typeof req.title === "string" && optLabels.includes("Allow once") && optLabels.includes("Deny");
 		box.classList.toggle("perm", perm);
+		let risky = false;
+		const openedAt = performance.now();
 		if (perm) {
 			const lines = req.title.split("\n");
 			const question = lines.shift();
@@ -1240,6 +1242,8 @@
 			};
 			while (lines.length && (reasonRe.test(lines[0]) || longRe.test(lines[0]))) peel(false);
 			while (lines.length > 1 && (reasonRe.test(lines[lines.length - 1]) || longRe.test(lines[lines.length - 1]))) peel(true);
+			// Risky (a warning line, outside the project folder, long text, no "for this chat"): "Deny" is the filled, focused answer.
+			risky = reasons.length > 0 || !!longKind || /OUTSIDE/.test(question || "") || !optLabels.includes("Allow for this chat");
 			box.append(el("div", "q", question || "Pi asks"));
 			if (reasons.length) box.append(el("div", "m ask-reason", reasons.join("\n")));
 			const detail = el("div", `ask-detail${longKind ? " long" : ""}`);
@@ -1268,13 +1272,25 @@
 			for (const o of req.options || []) {
 				const label = typeof o === "string" ? o : o.label || o.value || String(o);
 				const value = typeof o === "string" ? o : o.value ?? label;
-				const b = mk(label, perm ? (label === "Allow once" ? "primary" : label === "Deny" ? "ask-deny" : "") : "", () => respond({ value }, btns));
+				const b = mk(label, perm ? (label === (risky ? "Deny" : "Allow once") ? "primary" : label === "Deny" ? "ask-deny" : "") : "", () => respond({ value }, btns));
 				if (perm && label === "Deny") deny = b;
 				opts.append(b);
 			}
 			if (!perm) opts.append(cancel());
 			box.append(opts);
-			if (deny) deny.focus({ preventScroll: true }); // the safe default: Enter on open can only deny
+			// The filled answer is the focused one (an attached keyboard's Enter does what the screen suggests); keys are ignored for the first 500 ms.
+			const first = perm ? (risky ? deny : opts.querySelector("button.primary")) : null;
+			if (first) {
+				first.focus({ preventScroll: true });
+				const guard = (e) => {
+					if (performance.now() - openedAt < 500 && (e.key === "Enter" || e.key === " " || e.key.startsWith("Arrow"))) {
+						e.preventDefault();
+						e.stopPropagation();
+					}
+				};
+				box.addEventListener("keydown", guard, true);
+				box.addEventListener("keyup", guard, true);
+			}
 		} else if (req.method === "confirm") {
 			const opts = el("div", "opts inline");
 			opts.append(mk("Yes", "primary", () => respond({ confirmed: true }, btns)), mk("No", "", () => respond({ confirmed: false }, btns)));

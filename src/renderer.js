@@ -1476,6 +1476,7 @@ function showDialog(spec) {
 // A permission prompt's title: question, reason lines, the exact text, "Mode: ...". The text is plain text, never HTML.
 const PERM_REASON = /^(This file can |This is a network path|The project folder is |Pi Crust could not read |The computer may send |Resolves to )/;
 const PERM_LONG = /^This (command|path|tool call) is [\d,.]+ characters long/;
+const PERM_KEY_GUARD_MS = 500;
 function parsePermTitle(title) {
 	const lines = title.split("\n");
 	const question = lines.shift();
@@ -1512,10 +1513,17 @@ function markedText(text) {
 // Fills `box` with the controls for one dialog spec; `finish(response)` answers it.
 function fillDialog(box, r, finish) {
 	// A permission prompt ("Allow once" ...): the question, the exact thing to approve in a scrollable monospace block, the mode below.
-	// It offers only its own answers (no Cancel): Esc, closing and a timeout all count as Deny. Keyboard focus starts on Deny.
+	// It offers only its own answers (no Cancel): Esc, closing and a timeout all count as Deny.
+	// The highlighted answer is always the focused one (so Enter does what the screen suggests). An ordinary prompt opens on "Allow once";
+	// a risky one (protected file, outside the project folder, long text: the ones with a warning line) opens on "Deny".
+	// For the first PERM_KEY_GUARD_MS, Enter, Space and the arrows do nothing, so a key meant for the message box can't answer it.
 	const perm = r.method === "select" && Array.isArray(r.options) && r.options.includes("Allow once") && r.options.includes("Deny") && typeof r.title === "string";
 	const parts = perm ? parsePermTitle(r.title) : null;
+	const risky = !!parts && (parts.reasons.length > 0 || !!parts.longKind || /OUTSIDE/.test(parts.question) || !r.options.includes("Allow for this chat"));
+	const openedAt = performance.now();
+	const guarded = () => perm && performance.now() - openedAt < PERM_KEY_GUARD_MS;
 	box.classList.toggle("perm", !!parts);
+	box.classList.toggle("risky", risky);
 	if (parts && (parts.detail || parts.reasons.length || parts.longKind)) {
 		box.replaceChildren(el("h2", "", parts.question));
 		if (parts.reasons.length) box.append(el("p", "ask-reason", parts.reasons.join("\n")));
@@ -1545,7 +1553,11 @@ function fillDialog(box, r, finish) {
 		for (const opt of r.options || []) {
 			const b = el("button", perm ? (opt === "Allow once" ? "ask-allow" : opt === "Deny" ? "ask-deny" : "ask-alt") : "", opt);
 			b.type = "button";
-			b.onclick = () => finish({ value: opt });
+			// A click from the keyboard has no pointer (detail 0): inside the guard it is ignored. Mouse clicks are never delayed.
+			b.onclick = (e) => {
+				if (e.detail === 0 && guarded()) return;
+				finish({ value: opt });
+			};
 			list.append(b);
 		}
 		box.append(list);
@@ -1577,14 +1589,36 @@ function fillDialog(box, r, finish) {
 		actions.append(cancel, ok);
 	}
 	if (actions.children.length) box.append(actions);
+	if (perm) {
+		const guardKey = (e) => {
+			if (guarded() && (e.key === "Enter" || e.key === " " || e.key.startsWith("Arrow"))) {
+				e.preventDefault();
+				e.stopPropagation();
+				return true;
+			}
+			return false;
+		};
+		box.onkeyup = guardKey;
+		if (box._guardKey) box.removeEventListener("keydown", box._guardKey, true);
+		box.addEventListener("keydown", (box._guardKey = guardKey), true);
+	}
 	box.onkeydown = (e) => {
+		if (perm && /^Arrow(Up|Down|Left|Right)$/.test(e.key) && e.target.closest?.(".options")) {
+			// The arrows move between the answers, like Tab does.
+			const btns = [...box.querySelectorAll(".options button")];
+			const at = btns.indexOf(e.target);
+			if (at >= 0) {
+				e.preventDefault();
+				btns[Math.max(0, Math.min(btns.length - 1, at + (e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 1)))].focus();
+			}
+		}
 		if (e.key === "Escape") {
 			e.stopPropagation();
 			finish(perm ? { value: "Deny" } : { cancelled: true });
 		}
 	};
-	// A permission prompt starts on Deny, so Enter or Space right after it opens can never allow anything.
-	((perm && box.querySelector(".ask-deny")) || box.querySelector(".options button, .history-item, input, textarea, .modal-actions button:last-child") || box).focus();
+	const first = (perm && box.querySelector(risky ? ".ask-deny" : ".ask-allow")) || box.querySelector(".options button, .history-item, input, textarea, .modal-actions button:last-child") || box;
+	first.focus();
 }
 
 function pumpDialogs() {
