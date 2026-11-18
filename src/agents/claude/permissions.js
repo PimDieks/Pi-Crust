@@ -102,13 +102,21 @@ function judgedInput(toolName, input) {
 	return out;
 }
 
-// Reading a process environment (/proc/<pid>/environ) would show the API key to the agent: it always asks, and Plan blocks it.
-const ENVIRON_RE = /\/proc\b[^\n]*environ/i;
+// Reading a process environment (/proc/<pid>/environ) would show the API key to the agent. Strings are judged one by one, but a path and a
+// pattern or glob can be split over fields or hidden by quotes, so ANY touch of /proc asks (after dropping quotes and folding slashes);
+// Plan blocks it.
+const PROC_RE = /\/proc(?![\w-])/i;
+const foldText = (t) => t.replace(/\\/g, "/").replace(/["'`]/g, "").replace(/\/{2,}/g, "/");
+function stringsOf(v, out = [], depth = 0) {
+	if (typeof v === "string") out.push(v);
+	else if (v && typeof v === "object" && depth < 6) for (const x of Object.values(v)) stringsOf(x, out, depth + 1);
+	return out;
+}
 function readsEnviron(kind, judged) {
 	const texts = [];
 	if (kind === "shell" && judged && typeof judged.command === "string") texts.push(judged.command);
-	if (kind === "safe" && judged && typeof judged === "object") for (const v of Object.values(judged)) if (typeof v === "string") texts.push(v);
-	return texts.some((t) => ENVIRON_RE.test(t.replace(/\\/g, "/")));
+	if (kind === "safe" && judged && typeof judged === "object") stringsOf(judged, texts);
+	return texts.some((t) => PROC_RE.test(foldText(t)));
 }
 const ENVIRON_ASK = {
 	action: "ask",
@@ -132,6 +140,17 @@ function psGrants(grants) {
 		},
 		keys,
 	};
+}
+
+// What the user reads: the plain tool name (not our internal "claude:WebFetch"), and for a subagent only what is known: starting it is what is
+// approved; whether its own tool calls reach this gate is not proven, so the text does not claim they are checked.
+const SUBAGENT_LINE = "Its own tools are not controlled by the permission mode.";
+function plainPrompt(d, toolName, lname, kind) {
+	if (!d.prompt || typeof d.prompt.title !== "string") return d;
+	let title = d.prompt.title;
+	if (lname !== toolName && typeof toolName === "string" && toolName) title = title.split(lname).join(toolName);
+	if (kind === "subagent") title = title.split(SUBAGENT_LINE).join("You approve starting the subagent. What its own tools do is not covered by this answer.");
+	return title === d.prompt.title ? d : { ...d, prompt: { ...d.prompt, title } };
 }
 
 const deny = (message) => ({ behavior: "deny", message: String(message || "The call was denied.") });
@@ -161,6 +180,7 @@ function makeCanUseTool({ getMode, ask, grants = logic.createGrants(), cwd, shel
 				d = ENVIRON_ASK;
 			}
 			if (d.action === "block") return deny(d.reason);
+			if (d.action === "ask") d = plainPrompt(d, toolName, lname, kind);
 			let verdict = d;
 			if (d.action === "ask") {
 				if (typeof ask !== "function") return deny(NO_ANSWER);
@@ -187,6 +207,8 @@ function makeCanUseTool({ getMode, ask, grants = logic.createGrants(), cwd, shel
 			// A subagent never gets a looser mode than this chat; a shell command never leaves the sandbox on the model's say-so.
 			if (kind === "subagent") delete updatedInput.mode;
 			if (kind === "shell") delete updatedInput.dangerouslyDisableSandbox;
+			// allowedPrompts could become standing approvals in the SDK that skip canUseTool.
+			if (toolName === "ExitPlanMode") delete updatedInput.allowedPrompts;
 			return { behavior: "allow", updatedInput };
 		} catch {
 			return deny(FAILED);

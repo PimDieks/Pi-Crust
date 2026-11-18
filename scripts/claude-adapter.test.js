@@ -23,7 +23,7 @@ const keystore = (key = KEY) => ({
 	clear: async () => ({ ok: true }),
 });
 
-async function rig({ key = KEY, killTree, loadSdk, projectFiles = {}, settings = {}, env = {} } = {}) {
+async function rig({ key = KEY, killTree, loadSdk, projectFiles = {}, settings = {}, env = {}, configDir = path.join(tmp, "claude-config"), fsImpl } = {}) {
 	const sdk = await standIn();
 	sdk.reset();
 	const cwd = fs.mkdtempSync(path.join(tmp, "proj-"));
@@ -37,7 +37,7 @@ async function rig({ key = KEY, killTree, loadSdk, projectFiles = {}, settings =
 			return { ...m, query: (q) => m.query({ ...q, options: { ...q.options, leak: q.options.env.ANTHROPIC_API_KEY } }) };
 		};
 	}
-	const adapter = createClaudeAdapter({ keystore: keystore(key), configDir: path.join(tmp, "claude-config"), isPackaged: () => false, loadSdk: realLoad, killTree: killTree || ((p, f) => kills.push([p, f])), getSettings: () => settings, env });
+	const adapter = createClaudeAdapter({ keystore: keystore(key), configDir, ...(fsImpl ? { fs: fsImpl } : {}), isPackaged: () => false, loadSdk: realLoad, killTree: killTree || ((p, f) => kills.push([p, f])), getSettings: () => settings, env });
 	const events = { ready: [], records: [], exit: [], stderr: [] };
 	const sink = { isCurrent: () => true, ready: (h, d) => events.ready.push(d), record: (h, r) => events.records.push(r), stderr: (h, t) => events.stderr.push(t), exit: (h, i) => events.exit.push(i) };
 	const until = async (f, ms = 3000) => {
@@ -130,6 +130,7 @@ test("auth.check makes one tiny request with the key in env only", async () => {
 	assert.ok(!JSON.stringify(o).includes(KEY));
 	assert.strictEqual(o.maxTurns, 1);
 	assert.deepStrictEqual(o.tools, []);
+	assert.ok(!("systemPrompt" in o), "check() sends no system prompt");
 	assert.strictEqual((await t.adapter.auth.check("")).ok, false);
 });
 
@@ -181,7 +182,7 @@ test("CLAUDE.md is appended to the preset; over the cap it is skipped", async ()
 
 test("PI_CRUST_CLAUDE_SDK is honoured only when unpackaged; locate reads a reason, not a crash, without an engine", async () => {
 	const seen = [];
-	const mk = (packaged) => createClaudeAdapter({ isPackaged: () => packaged, env: { PI_CRUST_CLAUDE_SDK: STAND_IN }, keystore: keystore(), loadSdk: async (spec) => (seen.push(spec), standIn()) });
+	const mk = (packaged) => createClaudeAdapter({ configDir: path.join(tmp, "cfg"), isPackaged: () => packaged, env: { PI_CRUST_CLAUDE_SDK: STAND_IN }, keystore: keystore(), loadSdk: async (spec) => (seen.push(spec), standIn()) });
 	const dev = mk(false);
 	assert.strictEqual(dev.locate().command, STAND_IN);
 	const prod = mk(true);
@@ -218,4 +219,66 @@ test("start: the engine is told to scrub credentials from the tool subprocesses 
 	t.adapter.start({ cwd: t.cwd, env: { PATH: "p", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0" }, mode: "plan" }, t.sink);
 	await t.until(() => t.events.ready.length === 1);
 	assert.strictEqual(t.sdk.calls[0].options.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
+});
+
+test("no config folder: nothing starts, with a readable error, and check fails too", async () => {
+	const t = await rig({ configDir: null });
+	t.adapter.start({ cwd: t.cwd }, t.sink);
+	await t.until(() => t.events.exit.length === 1);
+	assert.strictEqual(t.events.exit[0].kind, "error");
+	assert.match(t.events.exit[0].error, /config folder/);
+	assert.strictEqual(t.sdk.calls.length, 0);
+	const c = await t.adapter.auth.check(KEY);
+	assert.strictEqual(c.ok, false);
+	assert.strictEqual(t.sdk.calls.length, 0);
+});
+
+test("start: inherited ANTHROPIC_* and CLAUDE_CODE_* variables and CLAUDE_CONFIG_DIR are dropped; proxy variables stay", async () => {
+	const t = await rig({});
+	const env = { PATH: "p", HTTPS_PROXY: "http://proxy:1", NO_PROXY: "x", ANTHROPIC_BASE_URL: "http://evil", ANTHROPIC_MODEL: "m", CLAUDE_CODE_USE_BEDROCK: "1", claude_code_extra: "1", CLAUDE_CONFIG_DIR: "C:\\users\\me\\.claude" };
+	t.adapter.start({ cwd: t.cwd, env, mode: "plan" }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	const o = t.sdk.calls[0].options.env;
+	for (const n of ["ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "CLAUDE_CODE_USE_BEDROCK", "claude_code_extra"]) assert.ok(!o.names.includes(n), n);
+	for (const n of ["PATH", "HTTPS_PROXY", "NO_PROXY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"]) assert.ok(o.names.includes(n), n);
+	assert.strictEqual(o.CLAUDE_CONFIG_DIR, path.join(tmp, "claude-config"));
+});
+
+test("CLAUDE.md: a link to a file outside the project is refused (injected fs, then a real link when the machine allows)", async () => {
+	const proj = path.join(tmp, "fake-proj");
+	const mkFs = (over) => ({
+		lstatSync: () => ({ isSymbolicLink: () => false, isFile: () => true, size: 5 }),
+		realpathSync: (p) => p,
+		readFileSync: () => "SECRET",
+		...over,
+	});
+	const read = async (fsImpl) => {
+		const t = await rig({ fsImpl });
+		t.adapter.start({ cwd: proj }, t.sink);
+		await t.until(() => t.events.ready.length === 1);
+		return t.sdk.calls[0].options.systemPrompt;
+	};
+	assert.strictEqual((await read(mkFs())).append, "SECRET", "control: a plain file is read");
+	assert.ok(!("append" in (await read(mkFs({ lstatSync: () => ({ isSymbolicLink: () => true, isFile: () => true, size: 5 }) })))), "symlink refused");
+	assert.ok(!("append" in (await read(mkFs({ realpathSync: (p) => (p.endsWith("CLAUDE.md") ? path.join(tmp, "elsewhere", "x.md") : p) })))), "real path outside refused");
+	const t = await rig({});
+	const target = path.join(tmp, "secret-" + path.basename(t.cwd) + ".md");
+	fs.writeFileSync(target, "OUTSIDE");
+	try {
+		fs.symlinkSync(target, path.join(t.cwd, "CLAUDE.md"));
+	} catch {
+		return; // no symlink right on this machine: the injected cases above cover it
+	}
+	t.adapter.start({ cwd: t.cwd }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	assert.ok(!("append" in t.sdk.calls[0].options.systemPrompt));
+});
+
+test("scrub removes the exact key and any sk-ant- shaped token, each on its own", () => {
+	const { scrub } = require("../src/agents/claude");
+	assert.strictEqual(scrub("bad my-plain-secret-123 here", "my-plain-secret-123"), "bad [key] here");
+	assert.strictEqual(scrub("a sk-ant-abcdefgh1234 b"), "a [key] b");
+	assert.strictEqual(scrub("a sk-ant-abcdefgh1234 b", "other-key"), "a [key] b");
+	assert.strictEqual(scrub(null), "");
+	assert.strictEqual(scrub("plain", 5), "plain");
 });

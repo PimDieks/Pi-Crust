@@ -395,3 +395,71 @@ test("reading /proc/<anything>/environ asks (once only) and is denied in Plan, t
 	assert.equal((await ok.can("Bash", { command: "cat /etc/hostname" })).behavior, "allow");
 	assert.equal((await ok.can("Read", { file_path: inP("src/environment.js") })).behavior, "allow");
 });
+
+// --- second review round ---------------------------------------------------------------------------------
+test("ExitPlanMode: allowedPrompts is removed from updatedInput on every allow path (asked and trusted)", async () => {
+	const input = { plan: "p", allowedPrompts: [{ tool: "Bash", prompt: "run tests" }] };
+	for (const mode of ["ask-edits", "ask-commands", "trusted"]) {
+		const r = await rig(mode, "Allow once").can("ExitPlanMode", input);
+		assert.equal(r.behavior, "allow", mode);
+		assert.equal("allowedPrompts" in r.updatedInput, false, mode);
+		assert.equal(r.updatedInput.plan, "p");
+	}
+	assert.ok(input.allowedPrompts, "the caller's input is not changed");
+});
+
+test("anything that touches /proc asks, and Plan denies it, however the text is split or quoted", async () => {
+	const cases = [
+		["Grep", { pattern: "sk-ant", path: "/proc/self" }],
+		["Grep", { path: "/proc/self", glob: "environ" }],
+		["Grep", { pattern: "x", path: "\\proc\\self" }],
+		["Read", { file_path: "\\proc\\self\\cmdline" }],
+		["Bash", { command: "grep -r ANTHROPIC /proc/self/" }],
+		["Bash", { command: 'cat /proc/self/e""nviron' }],
+		["Bash", { command: "cat /pr'oc'/self/environ" }],
+		["Bash", { command: "cat //proc//self/environ" }],
+	];
+	for (const [tool, input] of cases) {
+		const a = rig("ask-commands", "Deny");
+		assert.equal((await a.can(tool, input)).behavior, "deny", JSON.stringify(input));
+		assert.equal(a.asked.length, 1, "asks: " + JSON.stringify(input));
+		const p = rig("plan", "Allow once");
+		assert.equal((await p.can(tool, input)).behavior, "deny", "plan " + JSON.stringify(input));
+		assert.equal(p.asked.length, 0);
+	}
+	const ok = rig("ask-commands", "undefined");
+	assert.equal((await ok.can("Read", { file_path: inP("src/process.js") })).behavior, "allow");
+	assert.equal((await ok.can("Grep", { pattern: "proc", path: inP("src") })).behavior, "allow");
+});
+
+test("every part of EXTRA_PATH_KEY is judged: path, file, dir, in any case", async () => {
+	for (const key of ["notebook_path", "other_file", "target_dir", "TARGET_DIR", "Notebook_Path", "OtherFile"]) {
+		const a = rig("ask-commands", "undefined");
+		const r = await a.can("Write", { file_path: inP("src/a.js"), content: "x", [key]: outP("x.txt") });
+		assert.equal(r.behavior, "deny", key);
+		assert.equal(a.asked.length, 1, key + " outside the project asks");
+	}
+});
+
+test("too many path fields to judge: denied, not waved through", async () => {
+	const a = rig("ask-commands", "Allow once");
+	const full = { path: inP("a"), file_path: inP("b"), filePath: inP("c"), file: inP("d"), filename: inP("e"), content: "x" };
+	assert.equal((await a.can("Write", { ...full, extra_dir: outP("x") })).behavior, "deny");
+	assert.equal(a.asked.length, 0);
+	assert.equal((await a.can("Write", full)).behavior, "allow", "the same call without the extra field is fine");
+});
+
+test("ask prompts show the plain tool name and make no claim about the subagent's own tools", async () => {
+	const w = rig("ask-commands", "Deny");
+	await w.can("WebFetch", { url: "https://example.com" });
+	assert.match(w.asked[0].prompt.title, /WebFetch/);
+	assert.doesNotMatch(w.asked[0].prompt.title, /claude:/);
+	for (const tool of ["Agent", "Task"]) {
+		const s = rig("ask-commands", "Deny");
+		await s.can(tool, { description: "d", prompt: "do it" });
+		const t = s.asked[0].prompt.title;
+		assert.doesNotMatch(t, /not controlled by the permission mode|are checked|are controlled/i, tool);
+		assert.match(t, /starting the subagent/i, tool);
+		assert.deepEqual(s.asked[0].prompt.options.slice(-1), ["Deny"]);
+	}
+});

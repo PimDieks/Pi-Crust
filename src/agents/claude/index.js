@@ -16,6 +16,7 @@ const DEFAULT_MAX_BUDGET_USD = 5;
 const DEFAULT_MAX_TURNS = 100;
 const CLAUDE_MD_CAP_BYTES = 32 * 1024;
 const NO_KEY = "No Anthropic API key is set. Add one in the Claude Agent key panel, or set ANTHROPIC_API_KEY.";
+const NO_CONFIG_DIR = "Claude Agent has no app config folder, so it was not started (it would otherwise use another Claude sign-in).";
 const NO_ENGINE = "The Claude Agent engine is not installed yet.";
 
 // Capability values for Claude, as data (plan section 2). A false flag hides or disables the control with a reason.
@@ -76,6 +77,7 @@ function createClaudeAdapter(deps = {}) {
 		killTree: deps.killTree || killTree,
 		enginePath: deps.enginePath || enginePath,
 		env: deps.env || process.env,
+		fs: deps.fs || fs,
 	};
 	const num = (v, d) => (v !== null && v !== "" && v !== undefined && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
 
@@ -98,21 +100,29 @@ function createClaudeAdapter(deps = {}) {
 	// The project's root CLAUDE.md, when present and not over the cap; instructions yes, project settings no.
 	function readClaudeMd(cwd) {
 		try {
+			const f = cfg.fs;
 			const file = path.join(cwd, "CLAUDE.md");
-			const st = fs.statSync(file);
-			if (!st.isFile() || st.size > CLAUDE_MD_CAP_BYTES) return null;
-			const text = fs.readFileSync(file, "utf8");
+			const lst = f.lstatSync(file);
+			if (lst.isSymbolicLink() || !lst.isFile() || lst.size > CLAUDE_MD_CAP_BYTES) return null;
+			// A link in a parent folder can still lead out: the real path must lie inside the real project folder.
+			const rel = path.relative(f.realpathSync(cwd), f.realpathSync(file));
+			if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+			const text = f.readFileSync(file, "utf8");
 			return text.trim() ? text : null;
 		} catch {
 			return null;
 		}
 	}
 
+	// Fails closed: without the app's own config folder the engine would use an inherited CLAUDE_CONFIG_DIR or the user's own Claude folder.
 	function buildEnv(base, key) {
-		const env = { ...(base || process.env), ANTHROPIC_API_KEY: key };
-		delete env.ANTHROPIC_AUTH_TOKEN;
-		delete env.CLAUDE_CODE_OAUTH_TOKEN;
-		if (cfg.configDir) env.CLAUDE_CONFIG_DIR = cfg.configDir;
+		if (!cfg.configDir) throw new Error(NO_CONFIG_DIR);
+		const env = { ...(base || process.env) };
+		// Every ANTHROPIC_* and CLAUDE_CODE_* variable (base URL, tokens, flags) and CLAUDE_CONFIG_DIR is dropped; only the ones set below
+		// survive. Proxy variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY ...) are deliberately kept, so a company proxy keeps working.
+		for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_)/i.test(k) || /^CLAUDE_CONFIG_DIR$/i.test(k)) delete env[k];
+		env.ANTHROPIC_API_KEY = key;
+		env.CLAUDE_CONFIG_DIR = cfg.configDir;
 		// Documented (code.claude.com/docs/en/env-vars): strips credentials such as ANTHROPIC_API_KEY from the environments of Bash
 		// commands, hooks and stdio MCP servers; on Linux Bash also gets its own PID namespace, out of reach of the engine's /proc.
 		env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
@@ -199,6 +209,7 @@ function createClaudeAdapter(deps = {}) {
 		(async () => {
 			let key = null;
 			try {
+				if (!cfg.configDir) return finish({ kind: "error", error: NO_CONFIG_DIR, errorCode: "NO_CONFIG_DIR" });
 				const k = cfg.keystore ? await cfg.keystore.read() : { key: null };
 				key = k && k.key;
 				if (!key) return finish({ kind: "error", error: (k && k.reason) || NO_KEY, errorCode: "NO_KEY" });
