@@ -154,7 +154,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		setTheme(t);
 		await openRepoPicker();
 		await wait(300);
-		const pending = chooseRepo("Z:\stub-other-repo"); // anyWorking() is true: asks first, never reaches crust.repos.open
+		const pending = chooseRepo("Z:/stub-other-repo"); // anyWorking() is true: asks first, never reaches crust.repos.open
 		await wait(300);
 		const modal = $("#modal");
 		const shown = !$("#modal-backdrop").hidden && /still working/.test(modal.textContent);
