@@ -107,31 +107,9 @@ function send(channel, payload) {
 // ---------------------------------------------------------------------------
 // Pi over RPC (strict JSONL: split on LF only, never readline).
 // ---------------------------------------------------------------------------
-// Pi answers nothing until asked, and runs extension session_start hooks before reading stdin, so readiness is the
-// correlated reply to a repeated cheap probe (get_state), not the first byte of output.
-const PROBE_ID = "__ready_probe__";
-const PROBE_INTERVAL_MS = 750;
-const READY_TIMEOUT_MS = 120_000;
-
-function killPi(proc) {
-	if (!proc || proc.exitCode !== null) return;
-	try {
-		proc.stdin.end(); // orderly shutdown request
-	} catch {}
-	const group = () => {
-		try {
-			killTree(proc); // the whole group: subagents and running commands too
-		} catch {}
-	};
-	setTimeout(() => proc.exitCode === null && group(), 1500);
-	setTimeout(() => {
-		if (proc.exitCode === null) {
-			try {
-				killTree(proc, true);
-			} catch {}
-		}
-	}, 4500);
-}
+// The process itself (spawn, framing, readiness probe, kill) lives in agents/pi/process.js.
+const piProcess = require("./agents/pi/process");
+const killPi = (proc) => piProcess.stop(proc);
 
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
 // `wt` (from resolveWt) is null for the repo itself, { cwd, branch } for a chat in its own worktree (see worktree-main.js), or
@@ -171,18 +149,41 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 		send("pi:exit", { chatId, error: "Pi is not installed", errorCode: "ENOENT", notInstalled: true });
 		return null;
 	}
-	// crust-context.ts reports the context breakdown and models used (see context-panel.js).
-	// crust-guard.ts asks to continue after every N tool calls (settings.json toolCallCheckIn, default 40, 0 = off).
-	// advisor.ts adds Anthropic's advisor tool (pairs in ~/.pi/agent/advisor.json, /advisor command).
-	const args = ["--mode", "rpc", ...["crust-context.ts", "crust-guard.ts", "advisor.ts", "permission-modes.ts"].flatMap((f) => ["-e", path.join(__dirname, "pi-extension", f)])];
-	if (sessionFile) args.push("--session", sessionFile);
 	// An old user copy of permission-modes in ~/.pi/agent/extensions would also load: two prompt layers. The app talks to
 	// OUR extension through /crust-mode (no clash with a second /mode), and the user is told once. The folder is only read.
 	const oldCopy = permissionOldCopy();
 	if (oldCopy) hint = { ...hint, oldPermissionCopy: oldCopy };
-	const [cmd, cmdArgs] = [pi.command, [...pi.args, ...args]];
-	// Windows: no process groups, and detached would open a console window.
-	const proc = spawn(cmd, cmdArgs, { cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });
+	// What the Pi driver reports (agents/pi/process.js); each call carries the handle, and a replaced one is dropped there.
+	const sink = {
+		isCurrent: (p) => chats.get(chatId)?.proc === p, // false once replaced, closed or the repo changed
+		ready: (p, data) => {
+			setChatFile(chatId, data.sessionFile);
+			send("pi:ready", { chatId, ...data });
+		},
+		record: (p, record) => {
+			if (record.type === "agent_end") prLookup.invalidatePrefix(); // the agent may have pushed or opened a PR
+			if (record.type === "response" && settleMainRequest(record)) return; // answers to requests main itself sent
+			send("pi:record", { chatId, record });
+		},
+		stderr: (p, data) => send("pi:stderr", { chatId, data }),
+		exit: (p, info) => {
+			failMainRequests(p, "Pi stopped"); // before the current check: killed processes are not current any more
+			if (info.kind === "timeout") {
+				send("pi:exit", { chatId, error: info.error });
+				chats.delete(chatId);
+			} else if (info.kind === "error") {
+				// notInstalled: the program wasn't found (not a vanished folder, which gives the same ENOENT): the UI says "Pi isn't installed yet" and offers setup.
+				if (sink.isCurrent(p)) send("pi:exit", { chatId, error: info.error, errorCode: info.errorCode, notInstalled: info.errorCode === "ENOENT" && fs.existsSync(cwd || REPO) });
+			} else {
+				if (!sink.isCurrent(p)) return; // a replaced process
+				send("pi:exit", { chatId, code: info.code, signal: info.signal });
+				chats.delete(chatId); // the UI keeps the tab and offers a restart
+			}
+		},
+	};
+	// The driver injects crust-context.ts (context breakdown and models used, see context-panel.js), crust-guard.ts (asks to continue after
+	// every N tool calls: settings.json toolCallCheckIn, default 40, 0 = off) and advisor.ts (Anthropic's advisor tool, /advisor command).
+	const proc = piProcess.start({ pi, cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, sessionRef: sessionFile }, sink);
 	const chat = { id: chatId, proc, cwd };
 	chats.set(chatId, chat);
 	if (!openList.some((e) => e.id === chatId)) {
@@ -191,69 +192,6 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	} else if (sessionFile) setChatFile(chatId, sessionFile);
 	if (cwd) watchWorktree(cwd);
 	answeredUi.delete(chatId); // a new process means new request ids
-	const current = () => chats.get(chatId)?.proc === proc; // false once replaced, closed or the repo changed
-	let ready = false;
-	const started = Date.now();
-	const probe = setInterval(() => {
-		if (ready || !current()) return clearInterval(probe);
-		if (Date.now() - started > READY_TIMEOUT_MS) {
-			clearInterval(probe);
-			failMainRequests(proc, "Pi stopped");
-			send("pi:exit", { chatId, error: `Pi did not answer within ${READY_TIMEOUT_MS / 1000}s` });
-			chats.delete(chatId);
-			killPi(proc);
-			return;
-		}
-		if (proc.stdin.writable) proc.stdin.write(JSON.stringify({ id: PROBE_ID, type: "get_state" }) + "\n");
-	}, PROBE_INTERVAL_MS);
-	let buf = "";
-	proc.stdout.setEncoding("utf8");
-	proc.stdout.on("data", (chunk) => {
-		if (!current()) return; // a replaced process
-		buf += chunk;
-		let nl;
-		while ((nl = buf.indexOf("\n")) >= 0) {
-			let line = buf.slice(0, nl);
-			buf = buf.slice(nl + 1);
-			if (line.endsWith("\r")) line = line.slice(0, -1);
-			if (!line.trim()) continue;
-			try {
-				const record = JSON.parse(line);
-				if (record.id === PROBE_ID) {
-					if (!ready) {
-						ready = true;
-						clearInterval(probe);
-						setChatFile(chatId, record.data?.sessionFile);
-						send("pi:ready", { chatId, ...(record.data || {}) });
-					}
-					continue;
-				}
-				if (record.type === "agent_end") prLookup.invalidatePrefix(); // the agent may have pushed or opened a PR
-				if (record.type === "response" && settleMainRequest(record)) continue; // answers to requests main itself sent
-				send("pi:record", { chatId, record });
-			} catch (e) {
-				send("pi:stderr", { chatId, data: `Unparseable record: ${line.slice(0, 200)}` });
-			}
-		}
-	});
-	proc.stderr.setEncoding("utf8");
-	proc.stderr.on("data", (d) => {
-		if (!current()) return; // a replaced process
-		send("pi:stderr", { chatId, data: d });
-	});
-	proc.on("error", (e) => {
-		clearInterval(probe);
-		failMainRequests(proc, "Pi stopped"); // before current(): killed processes are not current any more
-		// notInstalled: the program wasn't found (not a vanished folder, which gives the same ENOENT): the UI says "Pi isn't installed yet" and offers setup.
-		if (current()) send("pi:exit", { chatId, error: e.message, errorCode: e.code, notInstalled: e.code === "ENOENT" && fs.existsSync(cwd || REPO) });
-	});
-	proc.on("exit", (code, signal) => {
-		clearInterval(probe);
-		failMainRequests(proc, "Pi stopped");
-		if (!current()) return; // a replaced process
-		send("pi:exit", { chatId, code, signal });
-		chats.delete(chatId); // the UI keeps the tab and offers a restart
-	});
 	send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, ...hint });
 	return chat;
 }
