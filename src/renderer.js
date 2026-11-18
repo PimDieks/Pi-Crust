@@ -498,6 +498,7 @@ function makeChat(id, opts = {}) {
 		modes: undefined, // permission-mode status text
 		models: [],
 		sessionFile: opts.sessionFile || null,
+		agent: opts.agent || null, // { id, label, capabilities } from pi:started; nothing gates on it yet
 		cwd: opts.cwd || null, // a git worktree of the repo (worktree.js), null = the repo itself
 		branch: opts.branch || null,
 		resume: !!opts.sessionFile, // replay the stored messages once Pi is ready
@@ -2287,11 +2288,12 @@ function settlePiWaiters(c, msg) {
 	for (const w of list) msg ? w.fail(msg) : w.ok();
 }
 
-crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, oldPermissionCopy }) => {
+crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, agent, oldPermissionCopy }) => {
 	if (oldPermissionCopy) toast(`Pi Crust brings its own permission modes. Your older "${oldPermissionCopy}" in ~/.pi/agent/extensions loads too and asks as well. Remove or rename it to avoid double prompts.`, "info");
 	let c = chats.get(chatId);
 	const fresh = !c;
-	if (!c) c = makeChat(chatId, { sessionFile, cwd: worktree?.cwd, branch: worktree?.branch });
+	if (!c) c = makeChat(chatId, { sessionFile, cwd: worktree?.cwd, branch: worktree?.branch, agent });
+	c.agent = agent || c.agent;
 	if (worktree) {
 		c.cwd = worktree.cwd;
 		c.branch = worktree.branch || c.branch;

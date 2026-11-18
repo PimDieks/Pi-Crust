@@ -35,6 +35,15 @@ test("buildCapture: helper processes are a sorted set, agent processes keep thei
 	const z = buildCapture({ events: [], procs: [chat(2), chat(1)] }, []);
 	assert.notStrictEqual(buildCapture({ events: [], procs: [chat(1), chat(2)] }, []), z);
 });
+test("buildCapture: the additive agent field of pi:started is left out, nothing else is", () => {
+	const started = (extra) => ({ src: "main", channel: "pi:started", payload: { chatId: "c", cwd: "/r", ...extra } });
+	const a = buildCapture({ events: [started({})], procs: [] }, []);
+	const b = buildCapture({ events: [started({ agent: { id: "pi", label: "Pi", capabilities: {} } })], procs: [] }, []);
+	assert.strictEqual(a, b);
+	assert.notStrictEqual(a, buildCapture({ events: [started({ other: 1 })], procs: [] }, [])); // any other new field still shows
+	const rec = (p) => ({ src: "main", channel: "pi:record", payload: p });
+	assert.notStrictEqual(buildCapture({ events: [rec({ agent: 1 })], procs: [] }, []), buildCapture({ events: [rec({})], procs: [] }, [])); // only pi:started
+});
 test("buildCapture: stderr events are their own sequence, so cross-pipe order does not matter", () => {
 	const ev = (channel, n) => ({ src: "main", channel, payload: { n } });
 	const a = buildCapture({ events: [ev("pi:record", 1), ev("pi:stderr", 2), ev("pi:exit", 3)], procs: [] }, []);

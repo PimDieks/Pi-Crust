@@ -36,7 +36,7 @@ let browserView;
 let browserBounds = { x: 0, y: 0, width: 0, height: 0 };
 let lastRealBounds = { x: 0, y: 0, width: 0, height: 0 }; // last non-empty bounds
 let browserHidden = new Set(); // reasons: "tab", "modal"
-const chats = new Map(); // chatId -> { id, proc }
+const chats = new Map(); // chatId -> { id, agent, handle, cwd }: the agent adapter and its (opaque) process handle
 let chatSeq = 0;
 
 // ---------------------------------------------------------------------------
@@ -108,10 +108,9 @@ function send(channel, payload) {
 // Pi over RPC (strict JSONL: split on LF only, never readline).
 // ---------------------------------------------------------------------------
 // The process itself (spawn, framing, readiness probe, kill) lives in agents/pi/process.js.
-const piProcess = require("./agents/pi/process");
 const agents = require("./agents/registry").createRegistry();
-const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6; the main-side texts below come from piAgent.strings
-const killPi = (proc) => piProcess.stop(proc);
+const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6
+const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: a.capabilities }); // what the renderer is told about a chat's agent
 
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
 // `wt` (from resolveWt) is null for the repo itself, { cwd, branch } for a chat in its own worktree (see worktree-main.js), or
@@ -127,14 +126,16 @@ function permissionOldCopy() {
 		return null;
 	}
 }
-function startPi(chatId, sessionFile, hint = {}, wt = null) {
+function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefined) {
+	const agent = agents.get(agentId); // undefined = the default agent (Pi)
+	if (!agent) throw new Error(`unknown agent "${agentId}"`);
 	if (wt && wt.missing) {
 		if (!openList.some((e) => e.id === chatId)) {
 			openList.push({ id: chatId, file: sessionFile || null, cwd: wt.cwd });
 			saveOpenChats();
 		}
 		const error = `Worktree ${wt.cwd} no longer exists`;
-		send("pi:started", { chatId, cwd: REPO, worktree: null, missingWorktree: wt.cwd, sessionFile: sessionFile || null, ...hint });
+		send("pi:started", { chatId, cwd: REPO, worktree: null, missingWorktree: wt.cwd, sessionFile: sessionFile || null, agent: agentInfo(agent), ...hint });
 		send("pi:exit", { chatId, error, missingWorktree: wt.cwd });
 		return null;
 	}
@@ -147,8 +148,8 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 			openList.push({ id: chatId, file: sessionFile || null, cwd });
 			saveOpenChats();
 		}
-		send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, ...hint });
-		send("pi:exit", { chatId, error: piAgent.strings.notInstalled, errorCode: "ENOENT", notInstalled: true });
+		send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, agent: agentInfo(agent), ...hint });
+		send("pi:exit", { chatId, error: agent.strings.notInstalled, errorCode: "ENOENT", notInstalled: true });
 		return null;
 	}
 	// An old user copy of permission-modes in ~/.pi/agent/extensions would also load: two prompt layers. The app talks to
@@ -157,7 +158,7 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	if (oldCopy) hint = { ...hint, oldPermissionCopy: oldCopy };
 	// What the Pi driver reports (agents/pi/process.js); each call carries the handle, and a replaced one is dropped there.
 	const sink = {
-		isCurrent: (p) => chats.get(chatId)?.proc === p, // false once replaced, closed or the repo changed
+		isCurrent: (p) => chats.get(chatId)?.handle === p, // false once replaced, closed or the repo changed
 		ready: (p, data) => {
 			setChatFile(chatId, data.sessionFile);
 			send("pi:ready", { chatId, ...data });
@@ -169,7 +170,7 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 		},
 		stderr: (p, data) => send("pi:stderr", { chatId, data }),
 		exit: (p, info) => {
-			failMainRequests(p, piAgent.strings.stopped); // before the current check: killed processes are not current any more
+			failMainRequests(p, agent.strings.stopped); // before the current check: killed processes are not current any more
 			if (info.kind === "timeout") {
 				send("pi:exit", { chatId, error: info.error });
 				chats.delete(chatId);
@@ -185,8 +186,8 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	};
 	// The driver injects crust-context.ts (context breakdown and models used, see context-panel.js), crust-guard.ts (asks to continue after
 	// every N tool calls: settings.json toolCallCheckIn, default 40, 0 = off) and advisor.ts (Anthropic's advisor tool, /advisor command).
-	const proc = piProcess.start({ pi, cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, sessionRef: sessionFile }, sink);
-	const chat = { id: chatId, proc, cwd };
+	const handle = agent.start({ pi, cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, sessionRef: sessionFile }, sink);
+	const chat = { id: chatId, agent, handle, cwd };
 	chats.set(chatId, chat);
 	if (!openList.some((e) => e.id === chatId)) {
 		openList.push({ id: chatId, file: sessionFile || null, cwd });
@@ -194,7 +195,7 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	} else if (sessionFile) setChatFile(chatId, sessionFile);
 	if (cwd) watchWorktree(cwd);
 	answeredUi.delete(chatId); // a new process means new request ids
-	send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, ...hint });
+	send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, agent: agentInfo(agent), ...hint });
 	return chat;
 }
 
@@ -237,25 +238,27 @@ function killAllChats() {
 	chats.clear();
 	for (const c of old) {
 		held.clear(c.id);
-		killPi(c.proc);
+		c.agent.stop(c.handle);
 	}
 }
 
 function piSend(chatId, record) {
-	return piAgent.send(chats.get(chatId)?.proc, record);
+	const c = chats.get(chatId);
+	return c ? c.agent.send(c.handle, record) : false;
 }
 
 // Requests main itself sends to Pi (Remote): their responses never go to the renderer.
 const MAIN_ID = "crust-main-";
-const mainPending = new Map(); // id -> { id, proc, settle }
+const mainPending = new Map(); // id -> { id, handle, agent, settle }
 let mainSeq = 0;
 // Resolves { success, data | error }, never rejects. id and type can't be overridden by `extra`.
 // atSettle() runs synchronously when the answer is read from Pi's stdout, before any later line is handled; its value
 // comes back as `mark`: the exact cut between what the answer covers and the events that follow it.
 function piRequest(chatId, type, extra = {}, timeoutMs = 60_000, atSettle = null) {
 	return new Promise((resolve) => {
-		const proc = chats.get(chatId)?.proc;
-		if (!piAgent.canSend(proc)) return resolve({ success: false, error: piAgent.strings.notRunning });
+		const c = chats.get(chatId);
+		const handle = c?.handle;
+		if (!c || !c.agent.canSend(handle)) return resolve({ success: false, error: (c ? c.agent : piAgent).strings.notRunning });
 		const id = `${MAIN_ID}${++mainSeq}`;
 		let timer = null;
 		const settle = (result) => {
@@ -268,20 +271,20 @@ function piRequest(chatId, type, extra = {}, timeoutMs = 60_000, atSettle = null
 			}
 			resolve(result);
 		};
-		timer = setTimeout(() => settle({ success: false, error: piAgent.strings.noAnswer }), timeoutMs);
-		mainPending.set(id, { id, proc, settle });
-		piAgent.send(proc, { ...extra, id, type });
+		timer = setTimeout(() => settle({ success: false, error: c.agent.strings.noAnswer }), timeoutMs);
+		mainPending.set(id, { id, handle, agent: c.agent, settle });
+		c.agent.send(handle, { ...extra, id, type });
 	});
 }
 // True when the response is the answer to one of ours (and has been delivered).
 function settleMainRequest(record) {
 	const p = typeof record.id === "string" ? mainPending.get(record.id) : null;
 	if (!p) return false;
-	p.settle(record.success === false ? { success: false, error: record.error || piAgent.strings.refused } : { success: true, data: record.data });
+	p.settle(record.success === false ? { success: false, error: record.error || p.agent.strings.refused } : { success: true, data: record.data });
 	return true;
 }
-function failMainRequests(proc, error) {
-	for (const p of [...mainPending.values()]) if (p.proc === proc) p.settle({ success: false, error });
+function failMainRequests(handle, error) {
+	for (const p of [...mainPending.values()]) if (p.handle === handle) p.settle({ success: false, error });
 }
 
 // Messages paused by Stop, shared by the desktop and the phone (held-queue.js).
@@ -319,7 +322,7 @@ async function newChat(sessionFile, opts) {
 		if (!wt || wt.missing) return null; // not a worktree of this repo: don't fall back to the main checkout silently
 	}
 	const id = newChatId();
-	startPi(id, sessionArg(sessionFile), {}, wt);
+	startAgent(id, sessionArg(sessionFile), {}, wt);
 	return id;
 }
 ipcMain.handle("pi:newChat", (_e, f, o) => newChat(f, o));
@@ -329,7 +332,7 @@ ipcMain.handle("pi:openInMain", (_e, chatId) => {
 	if (!entry || chats.has(chatId)) return false;
 	entry.cwd = null;
 	saveOpenChats();
-	startPi(chatId, entry.file || undefined, {}, null);
+	startAgent(chatId, entry.file || undefined, {}, null);
 	return true;
 });
 ipcMain.handle("pi:sessionFile", (_e, chatId, file) => setChatFile(chatId, file));
@@ -345,16 +348,19 @@ ipcMain.handle("pi:closeChat", async (_e, chatId) => {
 	held.clear(chatId);
 	const c = chats.get(chatId);
 	chats.delete(chatId);
-	killPi(c?.proc);
+	c?.agent.stop(c.handle);
 	// A worktree chat's folder may be removed next: wait for its Pi to be gone, then kill what is left of its tree
 	// (POSIX: SIGKILL to the process group; Windows: taskkill /T /F, only while Pi itself still runs, see kill-tree.js).
-	if (entry?.cwd && c?.proc) {
-		const exited = () => c.proc.exitCode !== null || c.proc.signalCode !== null;
-		if (!exited()) await new Promise((r) => (c.proc.once("exit", r), setTimeout(r, 6000)));
+	if (entry?.cwd && c?.handle) {
+		const exited = () => {
+			const st = c.agent.state(c.handle);
+			return st.exitCode !== null || st.signalCode !== null;
+		};
+		if (!exited()) await new Promise((r) => (c.agent.onceExit(c.handle, r), setTimeout(r, 6000)));
 		try {
-			killTree(c.proc, true); // stragglers (subagents, commands) too; ESRCH when nothing is left
+			c.agent.killRemains(c.handle); // stragglers (subagents, commands) too; ESRCH when nothing is left
 		} catch {}
-		if (!exited()) await new Promise((r) => (c.proc.once("exit", r), setTimeout(r, 2000)));
+		if (!exited()) await new Promise((r) => (c.agent.onceExit(c.handle, r), setTimeout(r, 2000)));
 	}
 	if (entry?.cwd) unwatchWorktreeIfUnused(entry.cwd);
 	return true;
@@ -366,17 +372,18 @@ function refreshPi() {
 }
 async function restartChat(chatId, sessionFile) {
 	refreshPi();
-	const old = chats.get(chatId)?.proc;
+	const oldChat = chats.get(chatId);
+	const old = oldChat?.handle;
 	const cwd = openList.find((e) => e.id === chatId)?.cwd || null;
 	chats.delete(chatId);
-	killPi(old);
+	oldChat?.agent.stop(old);
 	const file = sessionArg(sessionFile);
 	// Resuming a session file: let the old process release it first.
-	if (file) await new Promise((r) => (!old || old.exitCode !== null ? r() : (old.once("exit", r), setTimeout(r, 5000))));
+	if (file) await new Promise((r) => (!old || oldChat.agent.state(old).exitCode !== null ? r() : (oldChat.agent.onceExit(old, r), setTimeout(r, 5000))));
 	const wt = await resolveWt(cwd);
 	// Closed while we waited: don't bring a Pi back for a chat that is gone.
 	if (!openList.some((e) => e.id === chatId)) return false;
-	startPi(chatId, file, {}, wt);
+	startAgent(chatId, file, {}, wt);
 	return true;
 }
 ipcMain.handle("pi:restart", (_e, chatId, sessionFile) => restartChat(chatId, sessionFile));
@@ -890,7 +897,7 @@ function openRepo(p) {
 	openList = files.map((file) => ({ id: newChatId(), file, cwd: typeof saved.cwds?.[file] === "string" ? saved.cwds[file] : null }));
 	activeChatId = (openList.find((e) => e.file === saved.active) || openList[0])?.id || null;
 	const list = [...openList];
-	if (!openList.length) startPi(newChatId());
+	if (!openList.length) startAgent(newChatId());
 	// A worktree chat is checked (async, cached) before its Pi starts; a vanished worktree is reported, not replaced by the repo.
 	const mine = REPO;
 	const active = activeChatId;
@@ -898,7 +905,7 @@ function openRepo(p) {
 		for (const e of list) {
 			const wt = await resolveWt(e.cwd);
 			if (REPO !== mine || !openList.includes(e)) return;
-			startPi(e.id, e.file, { restore: true, active: e.id === active }, wt);
+			startAgent(e.id, e.file, { restore: true, active: e.id === active }, wt);
 		}
 	})();
 	return { ok: true, repo: REPO };
@@ -1488,7 +1495,7 @@ const ctx = {
 	// { cwd, pid } of a running chat (self-test).
 	chatInfo: (id) => {
 		const c = chats.get(id);
-		return c ? { cwd: openList.find((e) => e.id === id)?.cwd || null, pid: c.proc.pid } : null;
+		return c ? { cwd: openList.find((e) => e.id === id)?.cwd || null, pid: c.agent.state(c.handle).pid } : null;
 	},
 };
 // Feature modules register here, one line each: require("./x-main").register(ctx);

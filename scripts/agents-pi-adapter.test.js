@@ -46,6 +46,18 @@ test("mcpConfigPath is the home folder's Pi file, not PI_CODING_AGENT_DIR (as th
 	}
 });
 
+test("state, onceExit and killRemains read a process without exposing more", async () => {
+	const { spawn } = require("node:child_process");
+	const p = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60)"], { stdio: "ignore" });
+	const st = pi.state(p);
+	assert.deepStrictEqual(Object.keys(st).sort(), ["exitCode", "pid", "signalCode"]);
+	assert.strictEqual(st.pid, p.pid);
+	assert.strictEqual(st.exitCode, null);
+	await new Promise((r) => pi.onceExit(p, r));
+	assert.strictEqual(pi.state(p).exitCode, 0);
+	assert.doesNotThrow(() => { try { pi.killRemains(p); } catch (e) { if (e.code !== "ESRCH") throw e; } });
+});
+
 test("send and canSend: false without a process or with a closed stdin, one JSON line otherwise", () => {
 	assert.strictEqual(pi.canSend(undefined), false);
 	assert.strictEqual(pi.send(undefined, { a: 1 }), false);

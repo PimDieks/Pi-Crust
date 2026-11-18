@@ -27,6 +27,9 @@ module.exports = A.assertAdapter({
 	canSend: proc.canSend,
 	send: proc.send,
 	stop: proc.stop,
+	state: proc.state,
+	onceExit: proc.onceExit,
+	killRemains: proc.killRemains,
 	listSessions: sessions.listSessions,
 	// Pi's sign-in runs through the IPC handlers of subscriptions-main.js (register(ctx)); a facade of plain functions is for
 	// the second agent's phase, nothing needs it now.

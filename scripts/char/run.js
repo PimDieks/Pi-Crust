@@ -60,7 +60,10 @@ function buildCapture({ events, procs }, tokens) {
 	// stderr and stdout are separate pipes: the app gets no guaranteed order between them, so pi:stderr events are
 	// compared as their own sequence (S lines) and not against the other events.
 	const isErr = (e) => e.channel === "pi:stderr";
-	for (const e of events.filter((x) => !isErr(x))) lines.push(`E ${JSON.stringify(normalizeValue(e, tokens))}`);
+	// pi:started carries { agent: { id, label, capabilities } } since phase 6 step S7 (additive, nothing displays it). It is left out of the
+	// comparison so the golden files taken before S7 stay valid; scripts/char.test.js pins this one exception.
+	const plain = (e) => (e.channel === "pi:started" && e.payload && "agent" in e.payload ? { ...e, payload: Object.fromEntries(Object.entries(e.payload).filter(([k]) => k !== "agent")) } : e);
+	for (const e of events.filter((x) => !isErr(x)).map(plain)) lines.push(`E ${JSON.stringify(normalizeValue(e, tokens))}`);
 	for (const e of events.filter(isErr)) lines.push(`S ${JSON.stringify(normalizeValue(e, tokens))}`);
 	// Agent processes (started with --mode rpc) are numbered in start order (P lines). Helper processes the app starts on its own
 	// (the health check: `--version`, `auth check --provider X`) run in parallel, so their start order is not defined: they are

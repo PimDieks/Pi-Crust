@@ -116,6 +116,18 @@ function start(opts, sink) {
 function canSend(proc) {
 	return !!proc && proc.stdin.writable;
 }
+// What the core may read of a handle: its pid (the worktree check) and whether it has ended.
+function state(proc) {
+	return { pid: proc.pid, exitCode: proc.exitCode, signalCode: proc.signalCode };
+}
+// Calls back once when the process ends.
+function onceExit(proc, cb) {
+	proc.once("exit", cb);
+}
+// What is left of the process tree (subagents, commands) after the process itself ended or is ending.
+function killRemains(proc) {
+	killTree(proc, true);
+}
 // One JSON record to Pi; false when not writable.
 function send(proc, record) {
 	if (!canSend(proc)) return false;
@@ -123,4 +135,4 @@ function send(proc, record) {
 	return true;
 }
 
-module.exports = { start, stop, send, canSend, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };
+module.exports = { start, stop, send, canSend, state, onceExit, killRemains, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };
