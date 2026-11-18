@@ -1,0 +1,60 @@
+E {"src":"main","channel":"pi:started","payload":{"chatId":"chat-1","cwd":"<REPO>","worktree":null,"sessionFile":null}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-1","command":"get_state","success":true,"data":{"model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}}}
+E {"src":"main","channel":"pi:ready","payload":{"chatId":"chat-1","model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-2","command":"get_state","success":true,"data":{"model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-3","command":"get_available_models","success":true,"data":{"models":[{"provider":"char","id":"char-1","name":"Char One"}]}}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-4","command":"get_available_thinking_levels","success":true,"data":null}}}
+E {"src":"drive","i":0,"do":"settle"}
+E {"src":"drive","i":1,"do":"git","status":0}
+E {"src":"main","channel":"pi:started","payload":{"chatId":"chat-2","cwd":"<TMP>/wt","worktree":{"cwd":"<TMP>/wt","branch":"char-wt"},"sessionFile":null}}
+E {"src":"drive","i":2,"do":"ipc","result":"chat-2"}
+E {"src":"main","channel":"pi:ready","payload":{"chatId":"chat-2","model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}
+E {"src":"drive","i":3,"do":"waitEmit","matched":true}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-2","record":{"type":"response","id":"ui-5","command":"get_state","success":true,"data":{"model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-2","record":{"type":"response","id":"ui-6","command":"get_available_models","success":true,"data":{"models":[{"provider":"char","id":"char-1","name":"Char One"}]}}}}
+E {"src":"drive","i":4,"do":"settle"}
+E {"src":"drive","i":5,"do":"pid","hadPid":true}
+E {"src":"drive","i":6,"do":"pid","hadPid":true}
+E {"src":"main","channel":"pi:started","payload":{"chatId":"chat-3","cwd":"<TMP>/repo2","worktree":null,"sessionFile":null}}
+E {"src":"drive","i":7,"do":"ipc","result":{"ok":true,"repo":"<TMP>/repo2"}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-3","record":{"type":"response","id":"ui-7","command":"get_state","success":true,"data":{"model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}}}
+E {"src":"drive","i":8,"do":"waitGone","gone":true}
+E {"src":"drive","i":9,"do":"waitGone","gone":true}
+E {"src":"main","channel":"pi:ready","payload":{"chatId":"chat-3","model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}
+E {"src":"drive","i":10,"do":"waitEmit","matched":true}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-3","record":{"type":"response","id":"ui-8","command":"get_state","success":true,"data":{"model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-3","record":{"type":"response","id":"ui-9","command":"get_available_models","success":true,"data":{"models":[{"provider":"char","id":"char-1","name":"Char One"}]}}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-3","record":{"type":"response","id":"ui-10","command":"get_available_thinking_levels","success":true,"data":null}}}
+E {"src":"drive","i":11,"do":"settle"}
+P1 {"seq":1,"dir":"meta","argv":["--mode","rpc","-e","<APP>/src/pi-extension/crust-context.ts","-e","<APP>/src/pi-extension/crust-guard.ts","-e","<APP>/src/pi-extension/advisor.ts","-e","<APP>/src/pi-extension/permission-modes.ts"],"cwd":"<REPO>","env":{"PI_CRUST_TOOL_CHECKIN":"40","PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+P1 {"seq":2,"dir":"in","data":{"id":"ui-1","type":"get_state"}}
+P1 {"seq":3,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-1\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P1 {"seq":4,"dir":"in","data":{"id":"__ready_probe__","type":"get_state"}}
+P1 {"seq":5,"dir":"out","data":"{\"type\":\"response\",\"id\":\"__ready_probe__\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P1 {"seq":6,"dir":"in","data":{"id":"ui-2","type":"get_state"}}
+P1 {"seq":7,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-2\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P1 {"seq":8,"dir":"in","data":{"id":"ui-3","type":"get_available_models"}}
+P1 {"seq":9,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-3\",\"command\":\"get_available_models\",\"success\":true,\"data\":{\"models\":[{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"}]}}\n"}
+P1 {"seq":10,"dir":"in","data":{"id":"ui-4","type":"get_available_thinking_levels"}}
+P1 {"seq":11,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-4\",\"command\":\"get_available_thinking_levels\",\"success\":true,\"data\":null}\n"}
+P1 {"seq":12,"dir":"meta","stdinClosed":true}
+P2 {"seq":1,"dir":"meta","argv":["--mode","rpc","-e","<APP>/src/pi-extension/crust-context.ts","-e","<APP>/src/pi-extension/crust-guard.ts","-e","<APP>/src/pi-extension/advisor.ts","-e","<APP>/src/pi-extension/permission-modes.ts"],"cwd":"<TMP>/wt","env":{"PI_CRUST_TOOL_CHECKIN":"40","PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+P2 {"seq":2,"dir":"in","data":{"id":"__ready_probe__","type":"get_state"}}
+P2 {"seq":3,"dir":"out","data":"{\"type\":\"response\",\"id\":\"__ready_probe__\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P2 {"seq":4,"dir":"in","data":{"id":"ui-5","type":"get_state"}}
+P2 {"seq":5,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-5\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P2 {"seq":6,"dir":"in","data":{"id":"ui-6","type":"get_available_models"}}
+P2 {"seq":7,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-6\",\"command\":\"get_available_models\",\"success\":true,\"data\":{\"models\":[{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"}]}}\n"}
+P2 {"seq":8,"dir":"meta","stdinClosed":true}
+P3 {"seq":1,"dir":"meta","argv":["--mode","rpc","-e","<APP>/src/pi-extension/crust-context.ts","-e","<APP>/src/pi-extension/crust-guard.ts","-e","<APP>/src/pi-extension/advisor.ts","-e","<APP>/src/pi-extension/permission-modes.ts"],"cwd":"<TMP>/repo2","env":{"PI_CRUST_TOOL_CHECKIN":"40","PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+P3 {"seq":2,"dir":"in","data":{"id":"ui-7","type":"get_state"}}
+P3 {"seq":3,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-7\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P3 {"seq":4,"dir":"in","data":{"id":"__ready_probe__","type":"get_state"}}
+P3 {"seq":5,"dir":"out","data":"{\"type\":\"response\",\"id\":\"__ready_probe__\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P3 {"seq":6,"dir":"in","data":{"id":"ui-8","type":"get_state"}}
+P3 {"seq":7,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-8\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P3 {"seq":8,"dir":"in","data":{"id":"ui-9","type":"get_available_models"}}
+P3 {"seq":9,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-9\",\"command\":\"get_available_models\",\"success\":true,\"data\":{\"models\":[{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"}]}}\n"}
+P3 {"seq":10,"dir":"in","data":{"id":"ui-10","type":"get_available_thinking_levels"}}
+P3 {"seq":11,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-10\",\"command\":\"get_available_thinking_levels\",\"success\":true,\"data\":null}\n"}
+P3 {"seq":12,"dir":"meta","stdinClosed":true}

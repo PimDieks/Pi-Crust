@@ -1,0 +1,9 @@
+E {"src":"main","channel":"pi:started","payload":{"chatId":"chat-1","cwd":"<REPO>","worktree":null,"sessionFile":null}}
+E {"src":"main","channel":"pi:exit","payload":{"chatId":"chat-1","error":"Pi is not installed","errorCode":"ENOENT","notInstalled":true}}
+E {"src":"drive","i":0,"do":"settle"}
+E {"src":"drive","i":1,"do":"writeFile","wrote":true}
+E {"src":"drive","i":2,"do":"unsetEnv","unset":"PI_CRUST_SELFTEST_NO_PI"}
+E {"src":"drive","i":3,"do":"restart","restartThrew":"spawn UNKNOWN"}
+E {"src":"drive","i":4,"do":"settle"}
+E {"src":"drive","i":5,"do":"send","sent":false}
+E {"src":"drive","i":6,"do":"request","result":{"success":false,"error":"Pi is not running"}}

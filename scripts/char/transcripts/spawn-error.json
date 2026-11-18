@@ -1,0 +1,63 @@
+{
+	"name": "spawn-error",
+	"description": "A live spawn failure that throws at once: Pi is found (a file named like a program that cannot run) but starting it errors. The app reports pi:exit with the error and its errorCode, and notInstalled follows the code. Windows: spawn fails with UNKNOWN for a file that is not a program.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"env": {
+		"PI_CRUST_SELFTEST_NO_PI": "1",
+		"PI_CRUST_PI": "<TMP>/pi-bad.exe"
+	},
+	"waitFor": "pi:exit",
+	"rules": [],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 400
+		},
+		{
+			"do": "writeFile",
+			"path": "<TMP>/pi-bad.exe",
+			"content": "not a program"
+		},
+		{
+			"do": "unsetEnv",
+			"name": "PI_CRUST_SELFTEST_NO_PI"
+		},
+		{
+			"do": "restart"
+		},
+		{
+			"do": "settle",
+			"ms": 400
+		},
+		{
+			"do": "send",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "hello"
+			}
+		},
+		{
+			"do": "request",
+			"type": "get_state"
+		}
+	]
+}

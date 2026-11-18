@@ -1,0 +1,49 @@
+{
+	"name": "permission-old-copy",
+	"description": "An older permission-modes extension in the agent folder: pi:started carries oldPermissionCopy (the file name) at the first start and at a restart; the folder is only read.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"fixtures": [
+		{
+			"path": "agent/extensions/permission-modes.ts",
+			"content": "// an old copy\n"
+		}
+	],
+	"rules": [],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "restart"
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:ready"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 400
+		}
+	]
+}

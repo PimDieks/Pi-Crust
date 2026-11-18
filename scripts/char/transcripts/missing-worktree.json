@@ -1,0 +1,128 @@
+{
+	"name": "missing-worktree",
+	"description": "A chat in a worktree whose process ended and whose folder was then removed: a restart reports the missing worktree (pi:started with missingWorktree, then pi:exit with the error) and spawns nothing.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "prompt"
+			},
+			"emit": [
+				{
+					"type": "agent_start"
+				},
+				{
+					"exit": 0
+				}
+			]
+		}
+	],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "git",
+			"args": [
+				"worktree",
+				"add",
+				"<TMP>/wt",
+				"-b",
+				"char-wt"
+			]
+		},
+		{
+			"do": "ipc",
+			"channel": "pi:newChat",
+			"args": [
+				null,
+				{
+					"cwd": "<TMP>/wt"
+				}
+			]
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:ready",
+				"payload.chatId": "chat-2"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 600
+		},
+		{
+			"do": "send",
+			"chat": "chat-2",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "end"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:exit",
+				"payload.chatId": "chat-2"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 500
+		},
+		{
+			"do": "git",
+			"args": [
+				"worktree",
+				"remove",
+				"--force",
+				"<TMP>/wt"
+			]
+		},
+		{
+			"do": "rm",
+			"path": "<TMP>/wt"
+		},
+		{
+			"do": "restart",
+			"chat": "chat-2"
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:exit",
+				"payload.missingWorktree": "<TMP>/wt"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "request",
+			"chat": "chat-2",
+			"type": "get_state"
+		}
+	]
+}

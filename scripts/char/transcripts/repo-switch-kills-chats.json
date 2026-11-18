@@ -1,0 +1,103 @@
+{
+	"name": "repo-switch-kills-chats",
+	"description": "Switching repos calls killAllChats: every open chat's process (the repo chat and a worktree chat) ends, the new repo gets a fresh chat, and the old chats send no pi:exit.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"fixtures": [
+		{
+			"path": "repo2/README.md",
+			"content": "# second repo\n"
+		}
+	],
+	"rules": [],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "git",
+			"args": [
+				"worktree",
+				"add",
+				"<TMP>/wt",
+				"-b",
+				"char-wt"
+			]
+		},
+		{
+			"do": "ipc",
+			"channel": "pi:newChat",
+			"args": [
+				null,
+				{
+					"cwd": "<TMP>/wt"
+				}
+			]
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:ready",
+				"payload.chatId": "chat-2"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 500
+		},
+		{
+			"do": "pid",
+			"chat": "chat-1",
+			"as": "one"
+		},
+		{
+			"do": "pid",
+			"chat": "chat-2",
+			"as": "two"
+		},
+		{
+			"do": "ipc",
+			"channel": "repos:open",
+			"args": [
+				"<TMP>/repo2"
+			]
+		},
+		{
+			"do": "waitGone",
+			"as": "one"
+		},
+		{
+			"do": "waitGone",
+			"as": "two"
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:ready",
+				"payload.chatId": "chat-3"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 400
+		}
+	]
+}

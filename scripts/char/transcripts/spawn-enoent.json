@@ -1,0 +1,114 @@
+{
+	"name": "spawn-enoent",
+	"description": "A live spawn error that arrives as an event: a worktree chat's process ended and its folder was deleted without telling git, so starting Pi again fails with ENOENT. The app reports pi:exit with the error and errorCode, notInstalled false (the folder is missing, not Pi).",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "prompt"
+			},
+			"emit": [
+				{
+					"type": "agent_start"
+				},
+				{
+					"exit": 0
+				}
+			]
+		}
+	],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "git",
+			"args": [
+				"worktree",
+				"add",
+				"<TMP>/wt",
+				"-b",
+				"char-wt"
+			]
+		},
+		{
+			"do": "ipc",
+			"channel": "pi:newChat",
+			"args": [
+				null,
+				{
+					"cwd": "<TMP>/wt"
+				}
+			]
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:ready",
+				"payload.chatId": "chat-2"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 600
+		},
+		{
+			"do": "send",
+			"chat": "chat-2",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "end"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:exit",
+				"payload.chatId": "chat-2"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 500
+		},
+		{
+			"do": "rm",
+			"path": "<TMP>/wt"
+		},
+		{
+			"do": "restart",
+			"chat": "chat-2"
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:exit",
+				"payload.errorCode": "ENOENT"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 300
+		}
+	]
+}

@@ -1,0 +1,104 @@
+{
+	"name": "sessions-list",
+	"description": "The session list glue (sessions:list): the repo's own sessions plus those of its existing worktrees, newest first; a worktree whose folder is gone and a session folder of an unrelated path are left out. Fixture session files in a temporary home folder.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"fixtures": [
+		{
+			"path": "home/.pi/agent/sessions/<ENC:repo>/a.jsonl",
+			"content": "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"session_info\",\"name\":\"Named repo chat\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"repo first prompt\"}}\n",
+			"mtimeAgoSec": 600
+		},
+		{
+			"path": "home/.pi/agent/sessions/<ENC:repo>/b.jsonl",
+			"content": "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"repo second prompt\"}}\n",
+			"mtimeAgoSec": 100
+		},
+		{
+			"path": "home/.pi/agent/sessions/<ENC:repo>/empty.jsonl",
+			"content": "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"\"}}\n",
+			"mtimeAgoSec": 50
+		},
+		{
+			"path": "home/.pi/agent/sessions/<ENC:wt>/c.jsonl",
+			"content": "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"session_info\",\"name\":\"Worktree chat\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"worktree prompt\"}}\n",
+			"mtimeAgoSec": 300
+		},
+		{
+			"path": "home/.pi/agent/sessions/<ENC:wtgone>/d.jsonl",
+			"content": "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"gone worktree prompt\"}}\n",
+			"mtimeAgoSec": 200
+		},
+		{
+			"path": "home/.pi/agent/sessions/<ENC:unrelated>/e.jsonl",
+			"content": "{\"type\":\"session\",\"id\":\"s\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"unrelated prompt\"}}\n",
+			"mtimeAgoSec": 10
+		}
+	],
+	"rules": [],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "setEnv",
+			"name": "USERPROFILE",
+			"value": "<TMP>/home"
+		},
+		{
+			"do": "setEnv",
+			"name": "HOME",
+			"value": "<TMP>/home"
+		},
+		{
+			"do": "git",
+			"args": [
+				"worktree",
+				"add",
+				"<TMP>/wt",
+				"-b",
+				"char-wt"
+			]
+		},
+		{
+			"do": "git",
+			"args": [
+				"worktree",
+				"add",
+				"<TMP>/wtgone",
+				"-b",
+				"char-wtgone"
+			]
+		},
+		{
+			"do": "rm",
+			"path": "<TMP>/wtgone"
+		},
+		{
+			"do": "ipc",
+			"channel": "sessions:list",
+			"summary": "sessions"
+		},
+		{
+			"do": "restoreEnv"
+		}
+	]
+}
