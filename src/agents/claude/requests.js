@@ -48,6 +48,8 @@ async function loadModels(ctx) {
 function currentEntry(models, st) {
 	return models.find((m) => m.id === st.modelId) || models.find((m) => m.resolvedModel && m.resolvedModel === st.modelId) || null;
 }
+// The engine names its model only in the first message's init record; until then the chat is on the "default" alias (seen with the real SDK).
+const levelEntry = (models, st) => currentEntry(models, st) || (st.modelId ? null : models.find((m) => m.id === "default") || null);
 
 async function answer(req, ctx) {
 	if (!req || typeof req.type !== "string") return null;
@@ -80,11 +82,11 @@ async function answer(req, ctx) {
 			}
 			case "get_available_thinking_levels": {
 				// Claude calls it effort and cannot switch it off: the list is the model's own, "off" never appears.
-				const entry = currentEntry(await loadModels(ctx), st);
+				const entry = levelEntry(await loadModels(ctx), st);
 				return ok(req, { levels: entry ? entry.effortLevels : DEFAULT_LEVELS });
 			}
 			case "set_thinking_level": {
-				const entry = currentEntry(await loadModels(ctx), st);
+				const entry = levelEntry(await loadModels(ctx), st);
 				const levels = entry ? entry.effortLevels : DEFAULT_LEVELS;
 				if (!levels.includes(req.level)) return fail(req, `"${String(req.level).slice(0, 40)}" is not an effort level of this model (${levels.join(", ") || "none"}).`);
 				if (typeof ctx.query.applyFlagSettings !== "function") return unsupported(req, "This Claude Agent engine cannot change the effort level.");

@@ -153,6 +153,15 @@ test("get_state, get_available_models, set_model", async () => {
 	t.stop();
 });
 
+test("effort levels before the first message: the default model's list (no model is named until then; real SDK smoke run)", async () => {
+	const t = await rig();
+	const lv = await t.ask("get_available_thinking_levels");
+	assert.deepEqual(lv.data.levels, ["low", "medium", "high", "xhigh", "max"]);
+	const ok = await t.ask("set_thinking_level", { level: "high" });
+	assert.equal(ok.success, true);
+	t.stop();
+});
+
 test("effort levels: the model's own list, no off; set_thinking_level goes through applyFlagSettings", async () => {
 	const t = await rig();
 	t.sdk.setFixture(path.join(DIR, "read.jsonl"));
