@@ -54,8 +54,8 @@
 		const foot = el("div", "an-foot");
 		const note = el("textarea");
 		note.rows = 2;
-		note.placeholder = "Note for Pi (optional)";
-		note.setAttribute("aria-label", "Note for Pi");
+		note.placeholder = `Note for ${agentLabel()} (optional)`;
+		note.setAttribute("aria-label", `Note for ${agentLabel()}`);
 		const cancel = el("button", "btn secondary", "Cancel");
 		cancel.type = "button";
 		const add = el("button", "btn", "Add to chat");

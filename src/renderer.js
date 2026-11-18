@@ -432,6 +432,9 @@ document.addEventListener("visibilitychange", () => treeDirty && refreshTree());
 // ===========================================================================
 const chats = new Map(); // chatId -> chat
 let active = null;
+// The name of the agent a chat runs on ("Pi", "Claude Agent"): every text that names the chat's agent uses it. Pi chats read "Pi".
+const AGENT_LABELS = { pi: "Pi", claude: "Claude Agent" }; // until pi:started brings the adapter's own label
+const agentLabel = (c = active) => (c && c.agent && (c.agent.label && c.agent.label !== c.agent.id ? c.agent.label : AGENT_LABELS[c.agent.id] || c.agent.label)) || "Pi";
 let view = null;
 // Placeholders until the first chat exists.
 let state = { streaming: false, ready: false, model: null, statuses: new Map(), widgets: new Map(), queue: { steering: [], followUp: [] }, held: [] };
@@ -608,7 +611,7 @@ function activate(c) {
 	c.el.scrollTop = c.atBottom ? c.el.scrollHeight : c.scrollTop;
 	$("#stop").hidden = !state.streaming;
 	$("#send").textContent = state.streaming ? "Queue" : "Send";
-	$("#send").title = state.streaming ? keyLabel("Queue: Pi reads it when the run is done (⌥Enter steers right away)") : "";
+	$("#send").title = state.streaming ? keyLabel(`Queue: ${agentLabel(c)} reads it when the run is done (⌥Enter steers right away)`) : "";
 	window.agentUi?.sync(c); // chip, placeholder, mode list, gated controls: before the mode status is read
 	syncModeFromStatus(c.modes);
 	renderAsk();
@@ -682,7 +685,7 @@ async function newChat(sessionFile, label, opts = {}) {
 	const id = await crust.pi.newChat(file, opts.cwd ? { cwd: opts.cwd } : undefined, opts.agent || undefined); // opts.agent: an agent id (undefined = Pi)
 	if (!id && opts.agent) return toast("Couldn't start that chat (no repo open, or that agent isn't available)", "error");
 	if (!id) return toast(opts.cwd ? "Couldn't start a chat in that worktree" : "Couldn't start a new chat (no repo open)", "error");
-	const c = chats.get(id) || makeChat(id, { sessionFile: file, label: typeof label === "string" ? label : "", cwd: opts.cwd, branch: opts.branch, agent: opts.agent ? { id: opts.agent, label: opts.agent, capabilities: {} } : undefined }); // pi:started brings the real agent record
+	const c = chats.get(id) || makeChat(id, { sessionFile: file, label: typeof label === "string" ? label : "", cwd: opts.cwd, branch: opts.branch, agent: opts.agent ? { id: opts.agent, label: AGENT_LABELS[opts.agent] || opts.agent, capabilities: {} } : undefined }); // pi:started brings the real agent record
 	if (opts.cwd) {
 		c.cwd = opts.cwd;
 		c.branch = opts.branch || c.branch;
@@ -711,7 +714,7 @@ function rpcTo(c, type, extra = {}) {
 	if (!c) return Promise.resolve({ success: false, error: "No chat" });
 	const id = `ui-${++seq}`;
 	return new Promise((resolve) => {
-		const timer = setTimeout(() => settle({ success: false, error: `No answer from Pi to ${type}` }), RPC_TIMEOUT_MS);
+		const timer = setTimeout(() => settle({ success: false, error: `No answer from ${agentLabel(c)} to ${type}` }), RPC_TIMEOUT_MS);
 		const settle = (r) => {
 			clearTimeout(timer);
 			c.pending.delete(id);
@@ -719,7 +722,7 @@ function rpcTo(c, type, extra = {}) {
 		};
 		c.pending.set(id, settle);
 		crust.pi.send(c.id, { id, type, ...extra }).then((ok) => {
-			if (!ok) settle({ success: false, error: "Pi is not running" });
+			if (!ok) settle({ success: false, error: `${agentLabel(c)} is not running` });
 		});
 	});
 }
@@ -748,7 +751,7 @@ function openSetup(source, chatId) {
 // A message was typed while Pi isn't ready: "starting" for a real start, "open setup" when Pi isn't installed.
 function notReadyToast() {
 	if (active?.piMissing) toast("Pi isn't running. Open setup.", "warning", { label: "Open setup", onClick: () => openSetup("toast", active.id) });
-	else toast("Pi is still starting…", "warning");
+	else toast(`${agentLabel()} is still starting…`, "warning");
 }
 
 // `action` ({ label, onClick }) adds a small button to the toast.
@@ -1031,7 +1034,7 @@ function setWorking(on) {
 	if (view === active) {
 		$("#stop").hidden = !on;
 		$("#send").textContent = on ? "Queue" : "Send";
-		$("#send").title = on ? keyLabel("Queue: Pi reads it when the run is done (⌥Enter steers right away)") : "";
+		$("#send").title = on ? keyLabel(`Queue: ${agentLabel(active)} reads it when the run is done (⌥Enter steers right away)`) : "";
 	}
 	renderTabs();
 	if (on && !working) {
@@ -1120,7 +1123,7 @@ function keepWorkingLast() {
 function renderStatus() {
 	if (!view || view !== active) return;
 	const parts = [];
-	if (!state.ready) parts.push("Starting Pi…");
+	if (!state.ready) parts.push(`Starting ${agentLabel()}…`);
 	for (const [k, v] of state.statuses) if (v && !["permission-mode", "crust-context", "copilot-usage"].includes(k)) parts.push(v.replace(/\x1b\[[0-9;]*m/g, ""));
 	$("#status-line").replaceChildren(...parts.map((p) => el("span", "", p)));
 	$("#widgets").textContent = [...state.widgets.values()].map((l) => l.join("\n")).join("\n");
@@ -1558,7 +1561,7 @@ function fillDialog(box, r, finish) {
 		box.append(detail);
 		if (parts.mode) box.append(el("div", "ask-mode", parts.mode));
 		if (parts.longKind) box.append(el("div", "ask-long", `Long ${parts.longKind}: scroll to read all of it.`));
-	} else box.replaceChildren(el("h2", "", r.title || "Pi asks"));
+	} else box.replaceChildren(el("h2", "", r.title || `${agentLabel()} asks`));
 	if (r.message) box.append(el("p", "", r.message));
 	const actions = el("div", "modal-actions");
 	const cancel = el("button", "secondary", r.cancelLabel || "Cancel");
@@ -2084,7 +2087,7 @@ async function sendPrompt(text, images = [], { steer = false } = {}) {
 		...(state.streaming ? { streamingBehavior: steer ? "steer" : "followUp" } : {}),
 	});
 	if (!res.success) {
-		toast(res.error || "Pi rejected the prompt", "error");
+		toast(res.error || `${agentLabel()} rejected the prompt`, "error");
 		return false;
 	}
 	return true;
@@ -2142,9 +2145,9 @@ async function heldSend(i) {
 		return;
 	}
 	// The user switched chats: send to the original one, and keep the text in its draft if Pi refuses.
-	const r = c.state.ready ? await rpcTo(c, "prompt", { message: text, ...(c.state.streaming ? { streamingBehavior: "followUp" } : {}) }) : { success: false, error: "Pi is still starting…" };
+	const r = c.state.ready ? await rpcTo(c, "prompt", { message: text, ...(c.state.streaming ? { streamingBehavior: "followUp" } : {}) }) : { success: false, error: `${agentLabel(c)} is still starting…` };
 	if (!r.success) {
-		toast(r.error || "Pi rejected the prompt", "error");
+		toast(r.error || `${agentLabel(c)} rejected the prompt`, "error");
 		c.draft = c.draft ? `${text}\n${c.draft}` : text;
 	}
 }
@@ -2178,7 +2181,7 @@ function renderQueue() {
 		if (kind === "held") {
 			const send = el("button", "secondary-btn", "Send");
 			send.type = "button";
-			send.title = "Send it now (queued after the current run while Pi works)";
+			send.title = `Send it now (queued after the current run while ${agentLabel()} works)`;
 			send.addEventListener("click", () => heldSend(i));
 			r.append(
 				send,
@@ -2190,7 +2193,7 @@ function renderQueue() {
 		if (kind === "followUp") {
 			const steer = el("button", "secondary-btn q-steer", "Steer");
 			steer.type = "button";
-			steer.title = "Move forward: Pi reads it after the current step instead of when the run is done";
+			steer.title = `Move forward: ${agentLabel()} reads it after the current step instead of when the run is done`;
 			steer.addEventListener("click", () => queueSteer(i));
 			window.agentUi?.gate(steer, "steering", active); // an agent that cannot steer: disabled, with the reason
 			r.append(steer);
@@ -2299,7 +2302,7 @@ function waitForPi(timeoutMs, c = view) {
 		};
 		w.timer = setTimeout(() => {
 			c.waiters = c.waiters.filter((x) => x !== w);
-			reject(new Error("Pi didn't come back in time"));
+			reject(new Error(`${agentLabel(c)} didn't come back in time`));
 		}, timeoutMs);
 		c.waiters.push(w);
 	});
@@ -2340,7 +2343,7 @@ crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, ag
 		});
 	}
 	dropAsks(c);
-	failPending(c, "Pi restarted");
+	failPending(c, `${agentLabel(c)} restarted`);
 	if (fresh && (restore ? wanted : !active)) activate(c); // the first chat of a repo, or the restored active one
 	renderTabs();
 	renderStatus();
@@ -2374,9 +2377,9 @@ crust.pi.onExit((e) => {
 	withChat(c, () => {
 		state.ready = false;
 		c.dead = true;
-		settlePiWaiters(c, "Pi stopped");
+		settlePiWaiters(c, `${agentLabel(c)} stopped`);
 		dropAsks(c);
-		failPending(c, "Pi stopped");
+		failPending(c, `${agentLabel(c)} stopped`);
 		finishTurn(c);
 		c.turn = null;
 		setWorking(false);
@@ -2392,12 +2395,12 @@ crust.pi.onExit((e) => {
 		} else if (e.notInstalled) {
 			// The program wasn't found (ENOENT): say what to do instead of showing Node's "spawn pi ENOENT".
 			c.piMissing = true;
-			box.append("Pi isn't installed yet. Open setup to install it. ");
+			box.append(agentLabel(c) === "Pi" ? "Pi isn't installed yet. Open setup to install it. " : `${agentLabel(c)} isn't installed yet. Open setup to install it. `);
 			btn = el("button", "", "Open setup");
 			btn.onclick = () => openSetup("pi-missing", c.id);
 		} else {
-			box.append(`Pi stopped (${why}). `);
-			btn = el("button", "", "Restart Pi");
+			box.append(`${agentLabel(c)} stopped (${why}). `);
+			btn = el("button", "", `Restart ${agentLabel(c)}`);
 			btn.onclick = () => crust.pi.restart(c.id);
 		}
 		box.append(btn);

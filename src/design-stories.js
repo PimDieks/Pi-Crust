@@ -227,7 +227,7 @@
 			const li = el("li", "st-nostory-row");
 			const name = el("span", "st-name", c.setName || c.name);
 			name.title = c.description || c.setName || c.name;
-			const b = el("button", "btn", "Ask Pi to write a story");
+			const b = el("button", "btn", `Ask ${agentLabel()} to write a story`);
 			b.type = "button";
 			b.title = "Add the component's details to the chat input (nothing is sent)";
 			b.onclick = () => askForStory(c);
@@ -530,7 +530,7 @@
 		kids.push(btn("Stories file", files.storyFile || "The stories file wasn't found", () => openFile(files.storyFile), !files.storyFile));
 		if (/^https:\/\//i.test(files.figmaUrl)) kids.push(btn("Figma", files.figmaUrl, () => window.open(files.figmaUrl, "_blank", "noopener")));
 		kids.push(btn("Storybook UI", "Open the story in Storybook's own UI", () => crust.browser.navigate(uiUrl(base, story))));
-		const pi = btn("Work on with Pi", "Add the story's thumbnail and details to the chat input", () => askPi(story, base));
+		const pi = btn(`Work on with ${agentLabel()}`, "Add the story's thumbnail and details to the chat input", () => askPi(story, base));
 		pi.classList.add("primary");
 		kids.push(pi);
 		const x = el("button", "icon sb-close", "×");

@@ -1335,8 +1335,8 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .split-btn > button.icon { border-radius: 0; }
 .split-btn > button.icon:first-child { border-radius: var(--radius-full) 0 0 var(--radius-full); padding-right: 3px; }
 .split-btn > button.icon:last-child { border-radius: 0 var(--radius-full) var(--radius-full) 0; padding-left: 2px; padding-right: 4px; }
-.chat-tab .ct-agent { display: inline-flex; flex: none; width: 10px; height: 10px; color: var(--text-action-on-surface); }
-.chat-tab .ct-agent svg { width: 10px; height: 10px; }
+.chat-tab .ct-agent { display: inline-flex; flex: none; align-items: center; align-self: center; width: 8px; height: 8px; margin-right: 1px; color: var(--muted); }
+.chat-tab .ct-agent svg { display: block; width: 8px; height: 8px; }
 .is-disabled { opacity: 0.45; cursor: default; }
 button.is-disabled:hover { background: none; color: inherit; }
 .pal-item.is-disabled.active { background: var(--hover); }

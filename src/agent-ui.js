@@ -65,15 +65,55 @@
 		);
 		return node;
 	}
-	// The reason of a focused disabled control, in the flow under the chat (it never covers anything).
-	function showReason(text) {
+	// The reason of a disabled control, in the flow under the chat (it never covers anything). It shows only while the control is hovered or
+	// has focus, and only while that control still exists: one that is replaced or removed (the steer button when the queue empties) takes it along.
+	let hovered = null;
+	const live = (n) => (n && n.isConnected && n.closest?.("[data-reason]") ? n.closest("[data-reason]") : null);
+	function showReason() {
+		const n = live(document.activeElement) || live(hovered);
+		const text = n ? n.dataset.reason : "";
 		line.textContent = text || "";
 		line.hidden = !text;
 	}
-	document.addEventListener("focusin", (e) => showReason(e.target?.closest?.("[data-reason]")?.dataset.reason));
-	document.addEventListener("focusout", () => showReason(""));
+	document.addEventListener("focusin", showReason);
+	document.addEventListener("focusout", () => setTimeout(showReason, 0));
+	document.addEventListener("mouseover", (e) => {
+		hovered = e.target?.closest?.("[data-reason]") || null;
+		showReason();
+	});
+	document.addEventListener("mouseout", () => {
+		hovered = null;
+		showReason();
+	});
+	new MutationObserver(showReason).observe($("#queue"), { childList: true, subtree: true });
 
-	const modeNotActive = (c = active) => (c && c.agent && c.agent.id && c.agent.id !== DEFAULT_AGENT ? `${labelOf(c)} has not reported its permission mode yet, so nothing is shown as enforced` : "");
+	const isDefault = (c = active) => !(c && c.agent && c.agent.id && c.agent.id !== DEFAULT_AGENT);
+	// A chat of another agent that has not started (no key or engine yet): nothing can run, so no mode is enforced for a true reason.
+	const notStarted = (c = active) => !isDefault(c) && !(c.state && c.state.ready);
+	const modeNotActive = (c = active) => (isDefault(c) ? "" : notStarted(c) ? `Nothing can run yet: ${labelOf(c)} has not started (it needs its key and engine first)` : `${labelOf(c)} has not reported its permission mode yet, so nothing is shown as enforced`);
+	const MODE_PLACEHOLDER = modeSel.options[0].textContent; // "Not enforced"
+	// The selector's own "no mode" text and its reason, for the active chat. Uses the disabled-with-reason pattern (title, description, reason line).
+	function syncModePlaceholder(c = active) {
+		modeSel.options[0].textContent = notStarted(c) ? "Can't run yet" : MODE_PLACEHOLDER;
+		if (modeSel.disabled && !modeSel.dataset.mode) {
+			const why = modeNotActive(c);
+			if (why) {
+				modeSel.title = why;
+				modeSel.dataset.reason = why;
+				describe(modeSel, why);
+			} else delete modeSel.dataset.reason;
+		} else delete modeSel.dataset.reason;
+	}
+	// Pi's commands (the TUI-only ones, /reload, extensions) do not exist for another agent; each chat keeps the command list its own agent reported.
+	const cmdStash = new Map();
+	let cmdOwner = null;
+	function syncCommands(c) {
+		if (!c || (cmdOwner && cmdOwner.id === c.id)) return;
+		if (cmdOwner) cmdStash.set(cmdOwner.id, commandList);
+		const sameKind = !cmdOwner || isDefault(cmdOwner) === isDefault(c);
+		commandList = cmdStash.get(c.id) || (sameKind ? commandList : []);
+		cmdOwner = c;
+	}
 
 	// The mode list comes from the agent. An agent that gives none keeps the standard four (Pi's own list).
 	function syncModes(c) {
@@ -92,7 +132,10 @@
 		chip.title = `This chat runs on ${labelOf(c)}`;
 		input.placeholder = c.agent && c.agent.id && c.agent.id !== DEFAULT_AGENT ? placeholder0.replace(/^Ask Pi/, `Ask ${labelOf(c)}`) : placeholder0;
 		syncModes(c);
-		showReason("");
+		syncCommands(c);
+		$("#ask").setAttribute("aria-label", `${labelOf(c)} asks`);
+		syncModePlaceholder(c);
+		showReason();
 	}
 
 	function tabMark(c) {
@@ -101,11 +144,11 @@
 		m.setAttribute("role", "img");
 		m.setAttribute("aria-label", c.agent.label);
 		m.title = c.agent.label;
-		m.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true" fill="currentColor"><path d="M6 0.8l1.1 3.6 3.6 1.1-3.6 1.1L6 10.2 4.9 6.6 1.3 5.5l3.6-1.1z"/></svg>';
+		m.innerHTML = '<svg viewBox="0 0 8 8" aria-hidden="true" fill="currentColor"><path d="M4 0.6L7.4 4 4 7.4 0.6 4z"/></svg>'; // a small filled diamond, drawn (no font glyph)
 		return m;
 	}
 
-	window.agentUi = { can, reason, slashReason, blocked, gate, describe, modeNotActive, sync, tabMark };
+	window.agentUi = { isDefault, syncModePlaceholder, label: labelOf, can, reason, slashReason, blocked, gate, describe, modeNotActive, sync, tabMark };
 
 	// --- self-test: the agents step --------------------------------------------------------------------------------------------------
 	// A Pi chat's header and controls, a Claude Agent chat's chip, tab mark and disabled controls with their reasons, and the open
@@ -115,7 +158,7 @@
 		const problems = [];
 		const check = (ok, what) => ok || problems.push(what);
 		const vis = (n) => !!n && n.isConnected && !n.hidden && n.getClientRects().length > 0;
-		const slashNames = () => [...$("#slash-menu").querySelectorAll(".pal-item")].map((r) => ({ name: r.querySelector(".slash-name")?.textContent, off: r.getAttribute("aria-disabled") === "true", title: r.title, desc: r.querySelector(".desc")?.textContent }));
+		const slashNames = () => [...$("#slash-menu").querySelectorAll(".pal-item")].map((r) => ({ name: r.querySelector(".slash-name")?.textContent, off: r.getAttribute("aria-disabled") === "true", title: r.title, desc: r.querySelector(".desc")?.textContent, badge: r.querySelector(".slash-badge")?.textContent }));
 		const typeInto = (t) => {
 			input.focus();
 			input.value = t;
@@ -127,12 +170,26 @@
 			for (const th of ["light", "dark"]) {
 				setTheme(th);
 				await wait(350);
-				await snap(`agents-${name}-${th}`);
+				await snap(`agents-${name}-${th}-v2`);
 			}
 			setTheme(was);
 			await wait(200);
 		};
 		const piChat = active;
+			const tabsRow = async (name) => {
+				// the tab row alone, at 2x, in both themes
+				const was = themeSetting();
+				for (const th of ["light", "dark"]) {
+					setTheme(th);
+					await wait(350);
+					const r = $("#chat-tabs").getBoundingClientRect();
+					await crust.selftest.capture(`agents-${name}-${th}-v2`, { x: r.left, y: r.top - 2, width: r.width, height: r.height + 4, scale: 2 });
+				}
+				setTheme(was);
+				await wait(200);
+			};
+			const piModeText = modeSel.options[0].textContent;
+			const piPlaceholder = input.placeholder;
 		const REASON_OF = { steering: "Claude Agent runs your message after the current step." };
 		let made = null;
 		try {
@@ -143,11 +200,18 @@
 			check(!document.querySelector(".chat-tab .ct-agent"), "a Pi tab has an agent mark");
 			check([...modeSel.options].filter((o) => o.value).map((o) => o.value).join() === "plan,ask-edits,ask-commands,trusted", "Pi mode list is not the four modes");
 			check(!document.querySelector("[aria-disabled=true]"), "a Pi chat has a disabled control");
+			check(agentLabel(piChat) === "Pi" && input.placeholder === "Ask Pi…  (Enter to send, Shift+Enter for a new line)" && $("#ask").getAttribute("aria-label") === "Pi asks", "a Pi chat's texts changed");
+			check(piModeText === "Not enforced", `Pi mode placeholder "${piModeText}"`);
+			check(vis(line) === false, "the reason line shows in a Pi chat");
+			// stand-ins for commands a Pi chat has: Pi extensions must not follow the user into a Claude Agent chat
+			commandList = [{ name: "advisor", description: "Advisor tool", source: "extension" }, { name: "crust-mode", description: "Set the permission mode", source: "extension" }];
 			typeInto("/");
 			await wait(250);
 			const piSlash = slashNames();
 			check(["fork", "clone", "export", "compact"].every((n) => piSlash.find((r) => r.name === `/${n}`) && !piSlash.find((r) => r.name === `/${n}`).off), "a slash command is disabled in a Pi chat");
+			check(piSlash.some((r) => r.name === "/bug" && /terminal Pi only/.test(r.desc || "")), "a Pi chat lost its terminal-only commands");
 			typeInto("");
+			check(!document.querySelector("#queue .q-steer"), "a steer control exists with nothing queued");
 			piChat.state.queue = { steering: [], followUp: ["queued note"] };
 			renderQueue();
 			const piSteer = document.querySelector("#queue .q-steer");
@@ -166,12 +230,42 @@
 			renderTabs();
 			check(chip.textContent === "Claude Agent" && vis(chip), `Claude chip reads "${chip.textContent}"`);
 			check(!/claude code/i.test(document.body.innerText), "the words Claude Code are on screen");
+				// 2. every text that names this chat's agent uses its label
+				check(agentLabel({ agent: { id: "claude", label: "claude" } }) === "Claude Agent", "an unstarted Claude chat's label is the raw id");
+				check(/Starting Claude Agent…/.test($("#status-line").textContent) && !/Pi/.test($("#status-line").textContent), `status line: "${$("#status-line").textContent}"`);
+				check($("#ask").getAttribute("aria-label") === "Claude Agent asks", "the ask region still says Pi");
+				const paneText = $("#chat-pane").innerText + " " + [...$("#chat-pane").querySelectorAll("[title],[aria-label],[placeholder]")].map((n) => [n.title, n.getAttribute("aria-label"), n.getAttribute("placeholder")].join(" ")).join(" ");
+				const piWords = (paneText.match(/.{0,20}Pi.{0,20}/g) || []).filter((t) => !/Pi Crust/.test(t));
+				check(piWords.length === 0, `"Pi" in a Claude Agent chat: ${piWords.join(" | ")}`);
+				check(!/Pi/.test(String(window.agentUi.modeNotActive(made))), "the mode reason says Pi");
+				// 1. the tab mark: a small drawn diamond before the title, quiet, centred on the title's text
+				const mk = document.querySelector(".chat-tab .ct-agent");
+				if (mk) {
+					const lab = mk.parentElement.querySelector(".ct-label");
+					const mr = mk.getBoundingClientRect();
+					const lr = lab.getBoundingClientRect();
+					const range = document.createRange();
+					range.selectNodeContents(lab);
+					const tr = range.getBoundingClientRect(); // the text itself, not the label box
+					check(mk.textContent === "" && mk.querySelector("svg path") && !mk.querySelector("text"), "the tab mark is not a drawn shape");
+					check(mr.width > 0 && mr.width <= 8 && mr.height <= 8 && Math.abs(mr.width - mr.height) < 0.5, `tab mark size ${mr.width}x${mr.height}`);
+					check(mk.compareDocumentPosition(lab) & Node.DOCUMENT_POSITION_FOLLOWING && mr.right <= lr.left + 0.5, "the tab mark is not before the title");
+					check(Math.abs((mr.top + mr.bottom) / 2 - (tr.top + tr.bottom) / 2) <= 1.5, `tab mark centre ${(mr.top + mr.bottom) / 2} vs text centre ${(tr.top + tr.bottom) / 2}`);
+					check(getComputedStyle(mk).color !== getComputedStyle(chip).color && getComputedStyle(mk).color === getComputedStyle(document.querySelector(".chat-tab:not([aria-selected=true])") || mk).color, "the tab mark is not the quiet colour");
+					const box = mk.getBoundingClientRect();
+					check(!document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2).some((n) => n.matches?.(".toast,.wt-menu")), "something covers the tab mark");
+				}
+				check(!vis(line), "the reason line shows in an idle, empty Claude Agent chat");
+				check(!document.querySelector("#queue .q-steer"), "a steer control exists with nothing queued");
+				await tabsRow("tab-row");
 			const marks = [...document.querySelectorAll(".chat-tab .ct-agent")];
 			check(marks.length === 1 && marks[0].getAttribute("aria-label") === "Claude Agent" && marks[0].closest(".chat-tab")?.getAttribute("aria-selected") === "true", `tab marks: ${marks.length}`);
 			check(input.placeholder.startsWith("Ask Claude Agent"), "the placeholder still says Pi");
+			check(!made.state.ready, "the Claude chat is ready: the not-started checks below do not apply");
 			const modes = [...modeSel.options].filter((o) => o.value).map((o) => o.value).join();
 			check(modes === "plan,ask-edits,ask-commands,trusted", `Claude mode list: ${modes}`);
-			check(modeSel.disabled && modeSel.title.startsWith("Claude Agent"), `mode selector reason: ${modeSel.title}`);
+			check(modeSel.disabled && modeSel.title.startsWith("Nothing can run yet") && modeSel.dataset.reason === modeSel.title && modeSel.getAttribute("aria-description") === modeSel.title, `mode selector reason: ${modeSel.title}`);
+			check(modeSel.selectedOptions[0].textContent === "Can't run yet" && !/Not enforced/.test(modeSel.selectedOptions[0].textContent), `mode selector shows "${modeSel.selectedOptions[0].textContent}"`);
 			// the disabled controls and their reasons
 			made.state.queue = { steering: [], followUp: ["queued note"] };
 			renderQueue();
@@ -181,7 +275,22 @@
 			steer?.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); // an offscreen window is never the focused one, so the browser may not send it
 			await wait(100);
 			check(vis(line) && line.textContent === REASON_OF.steering, "focus on Steer shows no reason");
+			// 3. a reason shows only while its control is hovered or focused, and goes with the control
+			steer?.blur();
+			steer?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); // as above: an offscreen window may not send it
+			await wait(60);
+			check(!vis(line), "the reason stays after focus left Steer");
+			steer?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+			check(vis(line) && line.textContent === REASON_OF.steering, "hovering Steer shows no reason");
+			await shots("hover-reason");
+			steer?.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+			check(!vis(line), "the reason stays after the pointer left Steer");
+			steer?.focus();
+			steer?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+			check(vis(line), "focus on Steer shows no reason (again)");
 			steer?.click();
+			// 4. the commands this chat's agent reported (what get_commands answers once it runs), next to the app's own
+			commandList = [{ name: "review", description: "Review the changes", source: "claude" }];
 			typeInto("/");
 			await wait(250);
 			const rows = slashNames();
@@ -191,6 +300,14 @@
 				check(r && r.off && r.title === why && r.desc === why, `${n}: ${r ? `${r.off} ${r.title}` : "missing"}`);
 			}
 			check(rows.filter((r) => r.off).length === Object.keys(want).length, `disabled slash rows: ${rows.filter((r) => r.off).map((r) => r.name)}`);
+			const names = rows.map((r) => r.name);
+			const piOnly = ["/advisor", "/crust-mode", "/bug", "/changelog", "/hotkeys", "/reload", "/settings", "/login", "/logout", "/tree", "/share", "/trust"];
+			check(!piOnly.some((n) => names.includes(n)), `Pi-only commands in a Claude Agent chat: ${piOnly.filter((n) => names.includes(n))}`);
+			check(!rows.some((r) => /terminal Pi only|extension/i.test(r.desc || "") || r.badge === "extension"), "a Pi command or extension row is listed");
+			check(rows.every((r) => r.badge === "crust" || r.badge === "claude"), `slash badges: ${[...new Set(rows.map((r) => r.badge))]}`);
+			const review = rows.find((r) => r.name === "/review");
+			check(review && !review.off && review.badge === "claude", "the command the adapter reported is not listed");
+			check(["/model", "/copy", "/new", "/setup"].every((n) => names.includes(n)), "an app command that works for Claude Agent is missing");
 			const enabled = rows.find((r) => r.name === "/model");
 			check(enabled && !enabled.off, "/model is disabled");
 			console.error(`SELFTEST agents disabled: ${[...Object.entries(want), ["Steer (queue)", REASON_OF.steering], ["Mode selector until the agent reports", modeSel.title]].map(([k, v]) => `${k} = ${v}`).join(" | ")}`);
@@ -204,9 +321,13 @@
 			typeInto("/");
 			await wait(250);
 			await shots("claude-chat");
+			await shots("slash-menu");
 			typeInto("");
+			steer?.focus();
 			made.state.queue = { steering: [], followUp: [] };
 			renderQueue();
+			await wait(60);
+			check(!document.querySelector("#queue .q-steer") && !vis(line), "the reason is still shown after the message left the queue");
 
 			// 3. the new-chat menu
 			const btn = $("#new-chat-menu");

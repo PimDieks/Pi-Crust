@@ -43,7 +43,7 @@ async function reloadPi() {
 	const st = await rpc("get_state");
 	const file = st.success ? st.data?.sessionFile : undefined;
 	if (!file) return toast("No session file to reload", "error");
-	if (st.data.isCompacting) return toast("Pi is compacting; try again in a moment", "warning");
+	if (st.data.isCompacting) return toast(`${agentLabel()} is compacting; try again in a moment`, "warning");
 	if (!(await confirmStopIfWorking("reload Pi"))) return;
 	const c = view;
 	c.state.ready = false;
@@ -189,7 +189,7 @@ async function copyLast() {
 }
 
 const BUILTIN_COMMANDS = [
-	{ name: "reload", description: "Restart Pi (keeps this chat) to reload extensions, skills and templates", run: reloadPi },
+	{ name: "reload", piOnly: true, description: "Restart Pi (keeps this chat) to reload extensions, skills and templates", run: reloadPi },
 	{ name: "new", description: "Open a new chat in a new tab", run: () => newChat() },
 	{ name: "resume", description: "Open a saved session in a tab", run: () => openHistory() },
 	{
@@ -213,7 +213,7 @@ const BUILTIN_COMMANDS = [
 	{ name: "setup", description: "Open the setup checklist (Pi, model provider, Git, project)", always: true, run: () => openSetup("slash", view?.id) },
 	{ name: "remote", description: "Control your chats from your phone (Remote access)", run: () => window.crustRemote?.open() },
 	{ name: "quit", description: "Close Pi Crust", run: () => window.close() },
-	...Object.entries(TERMINAL_ONLY).map(([name, description]) => ({ name, description: `${description} (terminal Pi only)`, run: () => terminalOnly(name) })),
+	...Object.entries(TERMINAL_ONLY).map(([name, description]) => ({ name, description: `${description} (terminal Pi only)`, piOnly: true, run: () => terminalOnly(name) })),
 ];
 
 // Extension commands, prompt templates and skills defined by Pi win over a built-in of the same name.
@@ -224,6 +224,10 @@ function isShadowed(name) {
 // Built-ins plus machine-local ones: src/local/*.js push { name, description, paletteLabel?, run } onto this registry.
 window.crustLocalCommands ||= [];
 const allBuiltinCommands = () => [...BUILTIN_COMMANDS, ...window.crustLocalCommands];
+// What the menus list for this chat: Pi's own commands (the terminal-only ones, /reload) and Pi extensions exist only in a Pi chat. A typed
+// /bug in another agent's chat still gets the "only in terminal Pi" answer from handleBuiltinCommand.
+const listedBuiltinCommands = () => (window.agentUi?.isDefault() === false ? allBuiltinCommands().filter((c) => !c.piOnly) : allBuiltinCommands());
+const listedAgentCommands = () => (window.agentUi?.isDefault() === false ? commandList.filter((c) => c.source !== "extension") : commandList);
 
 // Returns true when `text` was a built-in command and has been handled here.
 // Commands that need no running Pi (/setup).

@@ -128,7 +128,7 @@ function modelParts() {
 	head.append(el("span", "ctx-title", "Model"));
 	const parts = [head];
 	if (!models.length) {
-		const empty = el("div", "ctx-empty", !active?.state.ready ? "Starting Pi…" : all.length ? "No models from this subscription in this chat." : "No models available.");
+		const empty = el("div", "ctx-empty", !active?.state.ready ? `Starting ${agentLabel()}…` : all.length ? "No models from this subscription in this chat." : "No models available.");
 		if (active?.state.ready && !all.length) {
 			const link = el("button", "ob-link", "Open setup");
 			link.type = "button";
@@ -233,12 +233,12 @@ function contextParts(d) {
 
 	const rows = el("div", "ctx-rows");
 	const titles = {
-		messages: d.estimated ? "Estimated: Pi has no exact count right after a compaction" : "Conversation: your prompts, replies, tool calls and results",
+		messages: d.estimated ? `Estimated: ${agentLabel()} has no exact count right after a compaction` : "Conversation: your prompts, replies, tool calls and results",
 		tools: `${d.toolCount} tool declarations sent to the model`,
 		skills: `${d.skillCount} skills listed in the system prompt`,
 		system: "Base prompt, rules, docs and other prompt sections",
 		memory: d.memoryFiles.map((f) => f.path).join("\n") || "AGENTS.md / CLAUDE.md files",
-		reserve: "Kept free; Pi compacts the conversation when the context reaches it",
+		reserve: `Kept free; ${agentLabel()} compacts the conversation when the context reaches it`,
 	};
 	for (const cat of CTX_CATEGORIES) {
 		const v = c[cat.key];

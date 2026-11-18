@@ -223,7 +223,7 @@ contextBridge.exposeInMainWorld("crust", {
 	selftest: {
 		onPrompt: on("selftest:prompt"),
 		done: () => ipcRenderer.send("selftest:done"),
-		capture: (name) => ipcRenderer.invoke("selftest:capture", name),
+		capture: (name, crop) => ipcRenderer.invoke("selftest:capture", name, crop),
 		zoom: (level) => ipcRenderer.invoke("selftest:zoom", level),
 		resize: (w, h) => ipcRenderer.invoke("selftest:resize", w, h),
 		bounds: () => ipcRenderer.invoke("selftest:bounds"),

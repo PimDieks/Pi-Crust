@@ -37,6 +37,7 @@ function resetModeSelect() {
 	sel.disabled = true;
 	sel.title = window.agentUi?.modeNotActive() || MODE_NOT_ACTIVE;
 	window.agentUi?.describe(sel, sel.title); // the reason also reaches a screen reader
+	window.agentUi?.syncModePlaceholder(); // an agent that has not started: "Can't run yet" and what is true
 }
 // "/crust-mode" is an extension command (unlike "/mode" it cannot clash with another extension's /mode), so Pi runs it
 // right away, also while it is working. The selector NEVER moves on our request: it keeps showing the enforced mode
@@ -59,14 +60,14 @@ async function setMode(mode) {
 	if (mode === previous) return back();
 	setModeSelect(previous); // not the requested one: that is shown only when the extension confirms it
 	sel.disabled = true;
-	sel.title = `Switching to ${MODE_LABELS[mode] || mode}: waiting for Pi to confirm`;
+	sel.title = `Switching to ${MODE_LABELS[mode] || mode}: waiting for ${agentLabel()} to confirm`;
 	if (modeWaiting) clearTimeout(modeWaiting.timer);
-	const mine = (modeWaiting = { timer: setTimeout(() => back("Pi did not confirm the mode switch, so the mode is unchanged"), 5000) }); // the status clears it
+	const mine = (modeWaiting = { timer: setTimeout(() => back(`${agentLabel()} did not confirm the mode switch, so the mode is unchanged`), 5000) }); // the status clears it
 	const res = await rpc("prompt", { message: `/crust-mode ${mode}` });
 	if (modeWaiting !== mine) return; // the status already arrived (or another switch started)
 	if (!res.success) return back(res.error || "Couldn't switch mode");
 	const how = res.data && res.data.disposition;
-	if (how && how !== "handled") return back("Pi did not take the mode switch, so the mode is unchanged");
+	if (how && how !== "handled") return back(`${agentLabel()} did not take the mode switch, so the mode is unchanged`);
 }
 
 // ---------------------------------------------------------------------------
@@ -155,8 +156,8 @@ function actions() {
 			if (!r.success) toast(r.error || "Compaction failed", "error");
 		}),
 		a("Copilot usage", "/copilot-usage", () => rpc("prompt", { message: "/copilot-usage" })),
-		a("Stop Pi", "Esc", stop),
-		a("Restart Pi", "", () => crust.pi.restart(view.id)),
+		a(`Stop ${agentLabel()}`, "Esc", stop),
+		a(`Restart ${agentLabel()}`, "", () => crust.pi.restart(view.id)),
 		a("Refresh file tree", "", refreshTree),
 		...(window.crustPaletteActions?.() || []).map((x) => a(x.label, x.desc || "", x.run)),
 		...THEME_ORDER.map((t) => a(`Theme: ${THEME_LABELS[t]}`, t === themeSetting() ? "current" : "", () => setTheme(t))),
@@ -190,12 +191,12 @@ function search(query) {
 		if (m) out.push({ ...item, score: m.score + bonus, hits: m.hits, text });
 	};
 	for (const a of actions()) add(a, a.label, 6);
-	for (const c of allBuiltinCommands()) {
+	for (const c of listedBuiltinCommands()) {
 		if (isShadowed(c.name)) continue;
 		const desc = c.args ? `${c.args} · ${c.description}` : c.description;
 		add({ kind: "command", label: `/${c.name}`, desc, run: () => (c.args ? insertCommand(c.name) : handleBuiltinCommand(`/${c.name}`)) }, `/${c.name}`, 4);
 	}
-	for (const c of commandList) {
+	for (const c of listedAgentCommands()) {
 		const kind = c.source === "skill" ? "skill" : c.source === "prompt" ? "prompt" : "command";
 		add({ kind, label: `/${c.name}`, desc: c.description || "", run: () => insertCommand(c.name) }, `/${c.name}`, 4);
 	}

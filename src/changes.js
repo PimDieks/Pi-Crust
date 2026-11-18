@@ -455,7 +455,7 @@ async function refreshGitBar() {
 	$("#btn-commit-push").disabled = gitBusy || !hasChanges;
 	$("#btn-push").disabled = gitBusy || !gi.branch || (gi.hasUpstream && !gi.ahead);
 	const pr = gi.pr && gi.pr.state === "OPEN" ? gi.pr : null;
-	$("#btn-pr").textContent = pr ? `Open PR #${pr.number}` : "Create PR with Pi";
+	$("#btn-pr").textContent = pr ? `Open PR #${pr.number}` : `Create PR with ${agentLabel()}`;
 	$("#btn-pr").disabled = gitBusy || !gi.branch;
 }
 

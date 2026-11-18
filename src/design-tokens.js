@@ -374,7 +374,7 @@
 		const readBtn = mk("btn secondary", "Read tokens from page", "Read the tokens of the page in the Viewer tab", () => read(false));
 		const compareBtn = mk("btn secondary", "Compare with Figma variables", "Compare with the variables used by the frame selected in Figma desktop", compareWithFigma);
 		compareBtn.disabled = true;
-		const exportBtn = mk("btn", "Ask Pi to export tokens JSON", "Put a request for a design-tokens.json export in the chat input", askExport);
+		const exportBtn = mk("btn", `Ask ${agentLabel()} to export tokens JSON`, "Put a request for a design-tokens.json export in the chat input", askExport);
 		bar.append(readBtn, compareBtn, el("span", "spacer"), exportBtn);
 		const search = el("input", "dt-search");
 		search.type = "search";

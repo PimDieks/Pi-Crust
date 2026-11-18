@@ -42,9 +42,9 @@
 	}
 
 	onCrust("turn:settled", (c, { aborted }) => {
-		if (!aborted) notify(c, "Pi finished");
+		if (!aborted) notify(c, `${agentLabel(c)} finished`);
 	});
-	onCrust("ask:added", (c) => notify(c, "Pi asks"));
+	onCrust("ask:added", (c) => notify(c, `${agentLabel(c)} asks`));
 	onCrust("chat:activated", updateBadge);
 	onCrust("chat:closed", () => setTimeout(updateBadge));
 	crust.app.onFocus((f) => {

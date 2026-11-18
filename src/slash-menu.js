@@ -20,14 +20,14 @@
 	let blurTimer = 0;
 
 	function allCommands() {
-		const out = commandList.map((c) => ({
+		const out = listedAgentCommands().map((c) => ({
 			name: c.name,
 			args: "",
 			description: c.description || "",
 			source: c.source || "command",
 			builtin: false,
 		}));
-		for (const c of allBuiltinCommands()) {
+		for (const c of listedBuiltinCommands()) {
 			if (isShadowed(c.name)) continue;
 			out.push({ name: c.name, args: c.args || "", description: c.description, source: "crust", builtin: true, disabledWhy: window.agentUi?.slashReason(c.name) || "" });
 		}

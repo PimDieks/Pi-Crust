@@ -240,7 +240,7 @@
 		const add = el("button", "btn secondary", "Add to composer");
 		add.type = "button";
 		add.onclick = () => send(false);
-		const apply = el("button", "btn", "Apply with Pi");
+		const apply = el("button", "btn", `Apply with ${agentLabel()}`);
 		apply.type = "button";
 		apply.onclick = () => send(true);
 		foot.append(add, apply);
@@ -332,7 +332,7 @@
 			const ok = await sendPrompt(`${t.block}\n\n${text}`);
 			if (!ok) return;
 			t.applied = true; // the preview stays until the files change
-			toast("Sent to Pi. The preview stays until the files change.", "info");
+			toast(`Sent to ${agentLabel()}. The preview stays until the files change.`, "info");
 			return;
 		}
 		addPicks([t.block]);

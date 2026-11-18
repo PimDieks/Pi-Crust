@@ -1312,11 +1312,17 @@ async function runSelftest() {
 	}, Number(process.env.PI_CRUST_SELFTEST_TIMEOUT || 240000));
 }
 
-async function capture(name) {
+// crop: { x, y, width, height, scale } in CSS pixels: a part of the window, enlarged (selftest screenshots of small details)
+async function capture(name, crop) {
 	try {
 		if (typeof name !== "string" || !/^[\w-]+$/.test(name)) throw new Error("invalid capture name");
 		const file = path.join(SELFTEST_DIR, `${SELFTEST_RUN}-${name}.png`);
-		fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG());
+		let img = crop ? await win.webContents.capturePage({ x: Math.round(crop.x), y: Math.round(crop.y), width: Math.round(crop.width), height: Math.round(crop.height) }) : await win.webContents.capturePage();
+		if (crop && crop.scale > 1) {
+			const s = img.getSize();
+			img = img.resize({ width: Math.round(s.width * crop.scale), height: Math.round(s.height * crop.scale), quality: "best" });
+		}
+		fs.writeFileSync(file, img.toPNG());
 		console.log(`SELFTEST screenshot: ${file}`);
 		return file;
 	} catch (e) {
@@ -1324,7 +1330,7 @@ async function capture(name) {
 	}
 }
 if (SELFTEST) {
-	ipcMain.handle("selftest:capture", (_e, name) => capture(name));
+	ipcMain.handle("selftest:capture", (_e, name, crop) => capture(name, crop));
 	ipcMain.handle("selftest:zoom", (_e, level) => setZoom(level));
 	ipcMain.handle("selftest:resize", (_e, w, h) => (win.setSize(Math.max(1, Math.round(w)), Math.max(1, Math.round(h))), win.getSize()));
 	ipcMain.handle("selftest:bounds", () => ({ view: browserView.getBounds(), z: zoomFactor(), visible: browserView.getVisible(), hidden: [...browserHidden] }));

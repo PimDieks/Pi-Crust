@@ -82,7 +82,7 @@
 		const nodes = userNodes(c);
 		const k = nodes.length - 1 - nodes.indexOf(node);
 		const f = list[list.length - 1 - k];
-		if (!f || norm(f.text) !== norm(node._raw)) return { error: "Couldn't match this message to Pi's history" };
+		if (!f || norm(f.text) !== norm(node._raw)) return { error: `Couldn't match this message to ${agentLabel()}'s history` };
 		return { entryId: f.entryId };
 	}
 
@@ -204,7 +204,7 @@
 		if (!(await confirmStopIfWorking(mode === "edit" ? "edit this message" : "rewind"))) return;
 		// stop() only asks Pi to abort: wait until the run really ended before touching files or the session.
 		for (let i = 0; i < 150 && c.state.streaming; i++) await new Promise((r) => setTimeout(r, 100));
-		if (c.state.streaming) return toast("Pi didn't stop in time; try again in a moment", "error");
+		if (c.state.streaming) return toast(`${agentLabel(c)} didn't stop in time; try again in a moment`, "error");
 		let undoId = null;
 		let n = 0;
 		if (code && entry) {
