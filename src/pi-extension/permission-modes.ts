@@ -10,6 +10,8 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // @ts-ignore plain CommonJS module
 import * as logic from "../permission-logic.js";
+// @ts-ignore plain CommonJS module
+import * as permGit from "../permission-git.js";
 
 type Block = { block: true; reason: string };
 
@@ -40,12 +42,72 @@ function deepFreeze(v: any, seen = new Set<any>()) {
 	Object.freeze(v);
 	for (const k of Object.keys(v)) deepFreeze(v[k], seen);
 }
+// Makes the fields a decision read read-only, and keeps them that way (H4). A field that was absent stays absent to
+// Object.keys and JSON, but can't be added later. Every other field stays writable for well-behaved later extensions.
+function pin(input: any, keys: string[] | "all") {
+	if (keys === "all") return deepFreeze(input);
+	for (const k of keys) {
+		const has = Object.prototype.hasOwnProperty.call(input, k);
+		const value = input[k];
+		deepFreeze(value);
+		const desc: any = has ? Object.getOwnPropertyDescriptor(input, k) : null;
+		Object.defineProperty(input, k, { value, writable: false, configurable: false, enumerable: desc ? !!desc.enumerable : false });
+	}
+}
+
+// Which shell the bash tool really runs. Pi uses settings.shellPath when it is set (global or project settings),
+// otherwise bash (Git Bash on Windows). Anything else, or settings that can't be read: unknown (strictest rules).
+function bashToolShell(cwd: string): string {
+	const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+	for (const f of [path.join(agentDir, "settings.json"), path.join(cwd || ".", ".pi", "settings.json")]) {
+		let text: string;
+		try {
+			text = fs.readFileSync(f, "utf8");
+		} catch (e: any) {
+			if (e && e.code === "ENOENT") continue;
+			return "unknown";
+		}
+		try {
+			const sp = JSON.parse(text).shellPath;
+			if (sp === undefined || sp === null || sp === "") continue;
+			if (typeof sp !== "string" || !/^bash(\.exe)?$/i.test(path.basename(sp.trim()))) return "unknown";
+		} catch {
+			return "unknown";
+		}
+	}
+	return "bash";
+}
 
 export default function (pi: ExtensionAPI) {
 	if (typeof (pi as any).on !== "function" || typeof (pi as any).registerCommand !== "function") return; // old Pi: stay inactive, the app shows why
 
 	let mode: string = logic.DEFAULT_MODE; // strict until session_start says otherwise
 	const grants = logic.createGrants();
+
+	// What git runs or loads for this project (permission-git.js), and which shell the bash tool uses. Read at session
+	// start, on a mode change, and after any call that needed approval finished (it may have changed git's settings).
+	// Until a fresh read: { ok: false }, so every edit asks and git commands are not auto-allowed (fail closed).
+	let protect: any = null;
+	let protectCwd = "";
+	let shell = "unknown";
+	const stale = new Set<string>(); // approved calls whose result may change git's settings
+	function refresh(cwd: string) {
+		protectCwd = cwd;
+		try {
+			protect = permGit.readGitProtection(cwd);
+		} catch (e: any) {
+			protect = { ok: false, files: [], dirs: [], error: String((e && e.message) || e) };
+		}
+		try {
+			shell = bashToolShell(cwd);
+		} catch {
+			shell = "unknown";
+		}
+	}
+	const current = (ctx: any) => {
+		if (!protect || protectCwd !== ctx.cwd) refresh(ctx.cwd);
+		return protect;
+	};
 
 	const show = (ctx: any) => {
 		try {
@@ -55,24 +117,11 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
-	pi.on("session_start", async (_event: any, ctx: any) => {
-		try {
-			const saved = logic.restoreMode(ctx.sessionManager.getBranch());
-			mode = saved ?? readLastMode();
-		} catch {
-			mode = logic.DEFAULT_MODE; // never Trusted when the state can't be read
-		}
-		logic.clearGrants(grants);
-		show(ctx);
-	});
-
-	// Open approval dialogs. A mode change cancels them (they count as denied) and bumps the generation,
-	// so an answer that arrives late can neither allow a call nor leave a grant in the new mode.
+	// Open approval dialogs. A mode change (or a new session) cancels them (they count as denied) and bumps the
+	// generation, so an answer that arrives late can neither allow a call nor leave a grant in the new mode.
 	let generation = 0;
 	const pending = new Set<AbortController>();
-
-	function setMode(next: string, ctx: any) {
-		mode = next;
+	function cancelPending() {
 		generation++;
 		for (const c of pending) {
 			try {
@@ -82,7 +131,26 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		pending.clear();
+	}
+
+	pi.on("session_start", async (_event: any, ctx: any) => {
+		try {
+			const saved = logic.restoreMode(ctx.sessionManager.getBranch());
+			mode = saved ?? readLastMode();
+		} catch {
+			mode = logic.DEFAULT_MODE; // never Trusted when the state can't be read
+		}
+		cancelPending();
+		logic.clearGrants(grants);
+		refresh(ctx.cwd);
+		show(ctx);
+	});
+
+	function setMode(next: string, ctx: any) {
+		mode = next;
+		cancelPending();
 		logic.clearGrants(grants); // "Allow for this chat" is forgotten when the mode changes
+		refresh(ctx.cwd);
 		try {
 			pi.appendEntry(logic.ENTRY_TYPE, { mode: next });
 		} catch {
@@ -126,9 +194,11 @@ export default function (pi: ExtensionAPI) {
 	// "Allow for this chat" answer covers the calls queued behind it.
 	let queue: Promise<unknown> = Promise.resolve();
 
+	const judge = (event: any, ctx: any) => logic.decide({ mode, toolName: event.toolName, input: event.input, cwd: ctx.cwd, grants, protect: current(ctx), shell });
+
 	async function review(event: any, ctx: any): Promise<Block | undefined> {
-		const d = logic.decide({ mode, toolName: event.toolName, input: event.input, cwd: ctx.cwd, grants });
-		if (d.action === "allow") return undefined;
+		const d = judge(event, ctx);
+		if (d.action === "allow") return sealed(event, d);
 		if (d.action === "block") return { block: true, reason: d.reason };
 		if (!ctx.hasUI) return { block: true, reason: "This needs the user's approval, but there is no way to ask here. Nothing was run." };
 		const gen = generation;
@@ -142,15 +212,26 @@ export default function (pi: ExtensionAPI) {
 		}
 		if (gen !== generation) return { block: true, reason: "The permission mode changed while this was waiting for approval, so the call was cancelled. Nothing was run. Try again." };
 		const r = logic.applyAnswer(d, answer, grants);
-		return r.action === "allow" ? undefined : { block: true, reason: r.reason };
+		if (r.action !== "allow") return { block: true, reason: r.reason };
+		// An approved call may change what git runs (a protected file, a command): until it has finished and git's
+		// settings were read again, every edit asks and git is not auto-allowed.
+		// (An ordinary edit, one that could get "Allow for this chat", is not a git settings file: no re-read needed.)
+		if (!(logic.classify(event.toolName) === "edit" && d.grant)) {
+			protect = { ok: false, files: [], dirs: [], error: "an approved call is running" };
+			if (typeof event.toolCallId === "string") stale.add(event.toolCallId);
+			else protect = null; // no id to wait for: read again on the next call
+		}
+		return sealed(event, { action: "allow" });
 	}
 
 	// Pi runs the call with the SAME input object, and extensions loaded after this one (user and project extensions
-	// come after the app's -e list) still see it. Freezing it after the decision makes a later change throw, which
-	// blocks the call, so what was approved is what runs.
-	function sealed(event: any, result?: Block): Block | undefined {
-		if (result) return result;
-		deepFreeze(event.input);
+	// come after the app's -e list) still see it. Outside Trusted, the fields the decision read are made read-only, so
+	// what was approved is what runs (a later change throws, which blocks the call). Other fields stay writable, so a
+	// well-behaved extension can still add a timeout. In Trusted nothing is pinned or rewritten. (H4)
+	function sealed(event: any, d: any): Block | undefined {
+		if (mode === "trusted") return undefined;
+		if (d && typeof d.rewrite === "string") event.input.command = d.rewrite; // read-only git, hardened (git-harden.js)
+		pin(event.input, logic.pinKeys(event.toolName));
 		return undefined;
 	}
 
@@ -158,14 +239,33 @@ export default function (pi: ExtensionAPI) {
 		const fail: Block = { block: true, reason: "The permission check failed, so the call was blocked. Ask the user to try again or to switch the permission mode." };
 		try {
 			// Calls that need no question skip the queue.
-			const first = logic.decide({ mode, toolName: event.toolName, input: event.input, cwd: ctx.cwd, grants });
+			const first = judge(event, ctx);
 			if (first.action === "block") return { block: true, reason: first.reason };
-			if (first.action === "allow") return sealed(event);
+			if (first.action === "allow") return sealed(event, first);
 			const run = queue.then(() => review(event, ctx));
 			queue = run.catch(() => undefined);
-			return sealed(event, await run);
+			return await run;
 		} catch {
-			return fail; // any error, including a dialog that cannot be shown
+			return fail; // any error, including a dialog that cannot be shown, or input that can't be pinned
 		}
 	});
+
+	// An approved call finished: read git's settings again before the next decision.
+	const reread = (_event: any, ctx: any) => {
+		try {
+			if (_event && typeof _event.toolCallId === "string" && stale.has(_event.toolCallId)) {
+				stale.delete(_event.toolCallId);
+				if (!stale.size) refresh(ctx.cwd);
+			} else if (!_event || typeof _event.toolCallId !== "string") {
+				if (stale.size) {
+					stale.clear();
+					refresh(ctx.cwd);
+				}
+			}
+		} catch {
+			protect = null; // read again on the next call
+		}
+	};
+	pi.on("tool_result", reread);
+	pi.on("turn_end", (_e: any, ctx: any) => reread(null, ctx)); // a call that never reported a result
 }

@@ -7,6 +7,7 @@
 const fs = require("fs");
 const os = require("os");
 const nodePath = require("path");
+const { hardenGitCommand } = require("./git-harden");
 
 // ---------------------------------------------------------------------------
 // Modes (ids and labels must match src/palette.js and src/remote-state.js)
@@ -84,13 +85,50 @@ function classify(toolName) {
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const PATH_KEYS = ["path", "file_path", "filePath", "file", "filename"];
 
-// Names whose contents decide what git or Pi will RUN (hooks, fsmonitor, diff drivers, session dir, extensions ...).
-// Judged on every component of the resolved path, with NTFS tricks removed (trailing dots/spaces, :streams, 8.3 short names).
+// ONE canonical form for every name the protected list compares, so a name can't be checked one way and written another.
+// It folds every spelling Windows may treat as the same file: an NTFS stream ("HEAD::$DATA", "x:stream" -> the part
+// before the first ":"), trailing dots and spaces ("HEAD. "), and ASCII case. Only ASCII is folded: NTFS does not fold
+// the Kelvin sign or a dotless i (tested), and JS toLowerCase would. 8.3 short names (GIT~1) of existing files are
+// resolved by the real path; a new file has no short name. Over-folding only ever protects more.
+const asciiLower = (s) => String(s).replace(/[A-Z]/g, (c) => c.toLowerCase());
+function canonName(comp) {
+	return asciiLower(String(comp).split(":")[0].replace(/[. ]+$/, ""));
+}
+// A path as [root, ...canonical components] (separators and the drive letter's case don't matter).
+function canonParts(p, P) {
+	const root = P.parse(p).root;
+	return [asciiLower(root.replace(/[\\/]+/g, "/")), ...p.slice(root.length).split(/[\\/]+/).filter(Boolean).map(canonName)];
+}
+const underParts = (child, parent) => child.length >= parent.length && parent.every((c, i) => child[i] === c);
+
+// Names whose contents decide what git or Pi will RUN (hooks, fsmonitor, diff drivers, session dir, extensions ...),
+// anywhere in the path. More come from git's own configuration (permission-git.js), passed in as opts.protect.
+const PROTECTED_NAMES = new Set([".git", ".pi", ".gitattributes", ".gitmodules", ".husky", ".githooks"]);
 function protectedName(comp) {
-	const c = String(comp).split(":")[0].replace(/[. ]+$/, "").toLowerCase();
-	return c === ".git" || c === ".pi" || c === ".gitattributes" || c === ".gitmodules" || /^git\w*~\d+$/.test(c);
+	const c = canonName(comp);
+	return PROTECTED_NAMES.has(c) || /^git\w*~\d+$/.test(c);
 }
 const PROTECTED_WHY = "This file can change what git or Pi runs.";
+const PROGRAM_WHY = "This file can change which program a command runs.";
+const UNKNOWN_GIT_WHY = "Pi Crust could not read git's settings for this project, so every edit asks.";
+
+// Programs a command line or the app starts by name. A file with one of these names (plus an executable extension)
+// in a folder the shell searches would run instead of the real program. Windows also searches the current folder
+// (where.exe, CreateProcess), so the project folder itself counts there.
+const SHADOW_EXTRA = ["git", "bash", "sh", "powershell", "pwsh", "cmd", "node", "npm", "npx", "where", "conhost"];
+const EXEC_EXT = /\.(exe|com|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|msc)$/;
+function shadowName(comp) {
+	const base = canonName(comp).replace(EXEC_EXT, "");
+	return SHADOW_EXTRA.includes(base) || Object.prototype.hasOwnProperty.call(READ_ONLY_COMMANDS, base);
+}
+// Folders a shell searches for programs: PATH, PowerShell's module path, and the home bin folders that Git Bash and
+// most login shells put on PATH.
+function searchDirs(env, home, P, win) {
+	const out = [];
+	for (const k of Object.keys(env || {})) if (/^(path|psmodulepath)$/i.test(k)) for (const d of String(env[k] || "").split(win ? ";" : ":")) out.push(d.trim().replace(/^"(.*)"$/, "$1"));
+	out.push(P.join(home, "bin"), P.join(home, ".local", "bin"));
+	return out;
+}
 
 // Pi's own rewrite of /c/x, /mnt/c/x and /cygdrive/c/x to C:\x (win32 only).
 function shellDrivePath(p) {
@@ -106,7 +144,7 @@ function shellDrivePath(p) {
 // project folder must not be the home folder, one of its parents or a drive root.
 // Every way Pi may read the text is tried (as is, trimmed, Unicode spaces, leading @ dropped): the worst one counts.
 function checkPath(rawPath, cwd, opts = {}) {
-	if (typeof rawPath !== "string") return { inside: false, resolved: String(rawPath), unc: false, protected: false };
+	if (typeof rawPath !== "string") return { inside: false, resolved: String(rawPath), unc: false, protected: false, why: [] };
 	const variants = new Set([rawPath, rawPath.trim(), rawPath.replace(UNICODE_SPACES, " "), rawPath.replace(UNICODE_SPACES, " ").trim()]);
 	for (const v of [...variants]) if (v.trim().startsWith("@")) variants.add(v.trim().slice(1));
 	let out = null;
@@ -121,9 +159,24 @@ function checkPath(rawPath, cwd, opts = {}) {
 			out.unc = out.unc || r.unc;
 			out.protected = out.protected || r.protected;
 			out.broad = out.broad || r.broad;
+			out.why = [...new Set([...(out.why || []), ...(r.why || [])])];
 		}
 	}
 	return out;
+}
+// Real paths of the protected / search folders change rarely: remembered for a few seconds.
+const realMemo = new Map();
+function memoReal(p, real) {
+	const hit = realMemo.get(p);
+	const now = Date.now();
+	if (hit && now - hit.at < 5000) return hit.v;
+	let v = null;
+	try {
+		v = real(p);
+	} catch {}
+	if (realMemo.size > 2000) realMemo.clear();
+	realMemo.set(p, { at: now, v });
+	return v;
 }
 function checkOne(rawPath, cwd, opts) {
 	const platform = opts.platform || process.platform;
@@ -132,7 +185,7 @@ function checkOne(rawPath, cwd, opts) {
 	const realpath = opts.realpath || ((p) => fs.realpathSync.native(p));
 	const home = opts.home || os.homedir();
 	const agentDir = opts.agentDir || process.env.PI_CODING_AGENT_DIR || P.join(home, ".pi", "agent");
-	const res = (o) => ({ inside: false, resolved: String(rawPath), unc: false, protected: false, broad: false, ...o });
+	const res = (o) => ({ inside: false, resolved: String(rawPath), unc: false, protected: false, broad: false, why: [], ...o });
 	try {
 		if (typeof rawPath !== "string" || rawPath === "" || rawPath.includes("\0")) return res({});
 		if (typeof cwd !== "string" || cwd === "" || cwd.includes("\0")) return res({});
@@ -151,7 +204,13 @@ function checkOne(rawPath, cwd, opts) {
 			}
 			raw = p;
 		} else if (/^[a-zA-Z]{2,}:/.test(raw)) {
-			return res({}); // any other scheme (http:, ftp:, FILE: ...) is not a plain path
+			// any other scheme (http:, ftp:, FILE: ...) is not a plain path: outside. On NTFS "HEAD:x" is a stream of HEAD,
+			// so the part before the colon is still judged by the protected list (H1).
+			const first = canonName(raw.split(/[\\/]/)[0]);
+			const why = [];
+			if (protectedName(first) || first === "head") why.push("git");
+			if (shadowName(first)) why.push("program");
+			return res({ why, protected: why.length > 0 });
 		}
 		if (win) {
 			if (/^[\\/]{2}\?[\\/][a-zA-Z]:[\\/]/.test(raw)) raw = raw.slice(4); // \\?\C:\x -> C:\x
@@ -163,7 +222,7 @@ function checkOne(rawPath, cwd, opts) {
 		const base = P.resolve(cwd);
 		const abs = P.resolve(base, raw);
 		if (win && /^[\\/]{2}/.test(abs)) return res({ resolved: abs, unc: true });
-		const key = (p) => (win ? p.toLowerCase() : p);
+		const key = (p) => (win ? asciiLower(p) : p); // NTFS folds ASCII case only (N3)
 		const within = (child, parent) => {
 			const c = key(child);
 			const p = key(parent).replace(/[\\/]+$/, "");
@@ -196,22 +255,62 @@ function checkOne(rawPath, cwd, opts) {
 		} catch {}
 		const broad = key(realBase).replace(/[\\/]+$/, "") === key(root).replace(/[\\/]+$/, "") || within(realHome, realBase) || within(home, base);
 		const inside = !broad && (within(abs, base) || within(abs, realBase)) && within(realAbs, realBase);
-		// Protected list: judged on the lexical and on the real path.
-		let prot = false;
-		for (const [p, b] of [[abs, base], [realAbs, realBase]]) {
-			const rel = within(p, b) ? P.relative(b, p) : null;
-			if (rel !== null && rel !== "") {
-				const comps = rel.split(/[\\/]+/).filter(Boolean);
-				if (comps.some(protectedName)) prot = true;
-				if (comps.length === 1 && key(comps[0]) === key("HEAD")) prot = true; // root-level HEAD (a bare repository)
-			}
-			if (!inside) {
-				if (p.split(/[\\/]+/).filter(Boolean).some(protectedName)) prot = true;
-				if (within(p, agentDir)) prot = true; // Pi's own config, sessions and extensions
-				if (within(p, home) && P.relative(home, p).split(/[\\/]+/).filter(Boolean).length === 1 && P.basename(p).startsWith(".")) prot = true; // ~/.gitconfig, ~/.bashrc ...
-			}
+		// Protected list: judged on the lexical AND the real path, every comparison on canonical parts (canonParts).
+		const why = new Set();
+		const rp = opts.realpath
+			? (p) => {
+					try {
+						return real(p);
+					} catch {
+						return null;
+					}
+				}
+			: (p) => memoReal(p, real);
+		const forms = (p) => {
+			const r = rp(p);
+			return r && r !== p ? [canonParts(p, P), canonParts(r, P)] : [canonParts(p, P)];
+		};
+		const targets = [canonParts(abs, P), canonParts(realAbs, P)];
+		const bases = [canonParts(base, P), canonParts(realBase, P)];
+		const hits = (dirForms) => targets.some((t) => dirForms.some((d) => underParts(t, d)));
+		for (const t of targets) {
+			const b = bases.find((x) => underParts(t, x) && t.length > x.length);
+			const comps = b ? t.slice(b.length) : t.slice(1);
+			if (comps.some(protectedName)) why.add("git");
+			if (b && comps.length === 1 && comps[0] === "head") why.add("git"); // root-level HEAD (a bare repository)
+			if (b && comps.length === 1 && win && shadowName(comps[0])) why.add("program"); // Windows searches the current folder
 		}
-		return { inside, resolved: realAbs, unc: false, protected: prot, broad };
+		// What git's configuration says it runs or loads for this project (permission-git.js).
+		const prot = opts.protect && typeof opts.protect === "object" ? [...(opts.protect.files || []), ...(opts.protect.dirs || [])] : [];
+		for (const f of prot) if (typeof f === "string" && f && hits(forms(P.resolve(base, f)))) why.add("git");
+		// Folders the shell searches for programs. Outside the project: everything in them (programs there load their own
+		// files from below). Inside the project (a relative PATH entry such as "." or node_modules/.bin): a file named like
+		// a command, directly in that folder. A search folder that contains the project: only its direct children count.
+		for (const d of searchDirs(opts.env || process.env, home, P, win)) {
+			let dir;
+			try {
+				dir = P.resolve(base, d || ".");
+			} catch {
+				continue;
+			}
+			const df = forms(dir);
+			if (!hits(df)) continue;
+			const child = targets.some((t) => df.some((x) => t.length === x.length + 1 && underParts(t, x)));
+			const projectDir = df.some((x) => bases.some((b) => underParts(x, b)));
+			const holdsProject = df.some((x) => bases.some((b) => underParts(b, x)));
+			if (projectDir) {
+				if (child && targets.some((t) => shadowName(t[t.length - 1]))) why.add("program");
+			} else if (holdsProject) {
+				if (child) why.add("program");
+			} else why.add("program");
+		}
+		if (!inside) {
+			if (targets.some((t) => t.slice(1).some(protectedName))) why.add("git");
+			if (hits(forms(agentDir))) why.add("pi"); // Pi's own config, sessions and extensions
+			const hp = canonParts(home, P);
+			if (targets.some((t) => t.length === hp.length + 1 && underParts(t, hp) && t[t.length - 1].startsWith("."))) why.add("home"); // ~/.gitconfig, ~/.bashrc ...
+		}
+		return { inside, resolved: realAbs, unc: false, protected: why.size > 0, broad, why: [...why] };
 	} catch {
 		return res({});
 	}
@@ -245,33 +344,44 @@ function readPathsOf(input) {
 // a glob can turn a file name such as "-delete" into an option AFTER this check, so nothing may expand.
 // Also rejected: arguments starting with ~ or #, network paths (\\host, //host, scheme://) and PowerShell providers (Env:, HKCU: ...).
 const FORBIDDEN_CHARS = /[;&|<>`$(){}@^!*?[\x00-\x08\x0a-\x1f\x7f]/;
-const MAX_COMMAND = 2000;
+// Inside quotes, for the search commands under bash only (find . -name "*.ts", rg "a.*b" src): bash neither globs nor
+// expands there. $ and ` still expand inside double quotes, so they stay out; so does every control character.
+// PowerShell is not relaxed: the msys runtime globs a quoted '*' again for Git's programs (review 2, demo/psglob).
+const FORBIDDEN_QUOTED_BASH = /[$`!\x00-\x08\x0a-\x1f\x7f]/;
+const SEARCH_COMMANDS = new Set(["find", "rg", "grep"]);
 
-// Split on spaces/tabs outside quotes. Returns null for unbalanced quotes.
-function tokenize(line) {
+// Split on spaces/tabs outside quotes, remembering for every character whether it was quoted. Returns null when the
+// line's quoting is not plain, because then this split and the shell's split can differ (H7):
+//   unbalanced quotes; a backslash before a quote (\" is a literal quote to bash outside quotes, and an escaped quote
+//   inside double quotes, so an option could hide in what looks like a quoted string: H7); outside bash, a quote
+//   character inside the other kind of quotes (Windows PowerShell 5.1 passes it on unescaped, so the program's own
+//   argument parser may split one argument into several).
+function tokenize(line, shell) {
+	if (/\\["']/.test(line)) return null;
 	const tokens = [];
-	let cur = "";
-	let started = false;
+	let cur = null;
 	let quote = null;
 	for (const ch of line) {
 		if (quote) {
 			if (ch === quote) quote = null;
-			cur += ch;
+			else if ((ch === "'" || ch === '"') && shell !== "bash") return null;
+			cur.raw += ch;
+			if (ch !== quote) cur.quoted.push(ch);
 		} else if (ch === "'" || ch === '"') {
 			quote = ch;
-			started = true;
-			cur += ch;
+			cur = cur || { raw: "", quoted: [], plain: [] };
+			cur.raw += ch;
 		} else if (ch === " " || ch === "\t") {
-			if (started) tokens.push(cur);
-			cur = "";
-			started = false;
+			if (cur) tokens.push(cur);
+			cur = null;
 		} else {
-			cur += ch;
-			started = true;
+			cur = cur || { raw: "", quoted: [], plain: [] };
+			cur.raw += ch;
+			cur.plain.push(ch);
 		}
 	}
 	if (quote) return null;
-	if (started) tokens.push(cur);
+	if (cur) tokens.push(cur);
 	return tokens;
 }
 // What the shell will see after removing quotes and escapes (used for flag checks).
@@ -324,18 +434,25 @@ const READ_ONLY_COMMANDS = {
 };
 const READ_ONLY_NAMES = Object.keys(READ_ONLY_COMMANDS);
 
-function isReadOnlyCommand(command) {
+// shell: "bash" | "powershell" | anything else (unknown: strictest rules). Only the shell the tool call really runs in
+// may relax anything, so the caller passes what it knows and an unknown shell gets no relaxation.
+function isReadOnlyCommand(command, shell) {
 	try {
 		if (typeof command !== "string") return false;
 		const line = command.trim();
-		if (!line || line.length > MAX_COMMAND) return false;
-		if (FORBIDDEN_CHARS.test(line)) return false;
-		const tokens = tokenize(line);
+		if (!line || line.length > MAX_SHOWN || vis(line).length > MAX_SHOWN) return false; // longer: never without a question
+		const tokens = tokenize(line, shell);
 		if (!tokens || !tokens.length) return false;
-		const name = tokens[0].toLowerCase();
+		const name = tokens[0].raw.toLowerCase();
 		if (!Object.prototype.hasOwnProperty.call(READ_ONLY_COMMANDS, name)) return false; // raw token: no quotes, escapes or VAR=x prefix
-		const rest = tokens.slice(1);
+		const relaxed = shell === "bash" && SEARCH_COMMANDS.has(name);
+		for (const t of tokens) {
+			if (FORBIDDEN_CHARS.test(t.plain.join(""))) return false;
+			if ((relaxed ? FORBIDDEN_QUOTED_BASH : FORBIDDEN_CHARS).test(t.quoted.join(""))) return false;
+		}
+		const rest = tokens.slice(1).map((t) => t.raw);
 		if (rest.some(badArg)) return false;
+		if (shell !== "bash" && rest.some((a) => effective(a) === "--%")) return false; // PowerShell: stop-parsing, the rest goes raw
 		return READ_ONLY_COMMANDS[name](rest.map(effective)) === true;
 	} catch {
 		return false;
@@ -347,7 +464,12 @@ function isReadOnlyCommand(command) {
 // ---------------------------------------------------------------------------
 const OPTIONS = ["Allow once", "Allow for this chat", "Deny"];
 const OPTIONS_ONCE = ["Allow once", "Deny"]; // no "for this chat": protected files, network paths, text that is not fully shown
-const MAX_SHOWN = 600; // longest command or path shown in full; longer ones are refused (phones cut titles at 1500)
+// Longest command, path or tool input that may be auto-allowed or get "Allow for this chat". Longer text is never
+// cut: the prompt carries all of it (the dialog scrolls), with "Allow once" / "Deny" only and a line saying how long it
+// is. Text beyond MAX_ASKABLE is refused: nobody reads that much before approving.
+const MAX_SHOWN = 600;
+const MAX_ASKABLE = 20000;
+const longLine = (what, n) => `This ${what} is ${n} characters long. Read all of it before you allow it.`;
 
 // Makes invisible and look-alike characters visible, and long whitespace runs obvious.
 function vis(s) {
@@ -370,7 +492,7 @@ function brief(s, n = 300) {
 	return `${t.slice(0, head)} \u27e8${t.length - n} more characters not shown\u27e9 ${t.slice(t.length - tail)}`;
 }
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const tooLong = (what, n) => `This ${what} is ${n} characters long, too long to show in full for approval, so it was blocked. Use a shorter one, or ask the user to switch to Trusted.`;
+const tooLong = (what, n) => `This ${what} is ${n} characters long, too long for anyone to read before approving it, so it was blocked. Split it up: write long text with the write tool, or a commit message to a file and use git commit -F.`;
 
 function planBlock(what) {
 	return `Plan mode is read-only. ${what} is not allowed. Describe the change as a plan and ask the user to switch to another mode if it should be carried out.`;
@@ -380,7 +502,11 @@ const DENIED = (what) => `The user denied this ${what}. Don't try it again or an
 function askEdit(mode, toolName, shown, resolved, flags) {
 	const head = flags.outside ? "Allow this edit OUTSIDE the project folder?" : "Allow this edit?";
 	const lines = [head];
-	if (flags.protected) lines.push(PROTECTED_WHY);
+	const why = new Set(flags.why || []);
+	if (why.has("git") || why.has("pi") || why.has("home")) lines.push(PROTECTED_WHY);
+	if (why.has("program")) lines.push(PROGRAM_WHY);
+	if (why.has("unknown")) lines.push(UNKNOWN_GIT_WHY);
+	if (flags.long) lines.push(longLine("path", flags.long));
 	if (flags.unc) lines.push("This is a network path.");
 	if (flags.broad) lines.push("The project folder is your home folder or a drive root, so every edit asks.");
 	shown.forEach((s, i) => {
@@ -406,7 +532,10 @@ function decide(args) {
 		if (!isMode(mode)) return block("Permission mode is unreadable, so the call was blocked. Ask the user to pick a mode again.");
 		if (typeof toolName !== "string" || toolName === "") return block("The tool call has no readable tool name, so it was blocked.");
 		const kind = classify(toolName);
-		const pathOpts = args.pathOptions || {};
+		const pathOpts = { ...(args.pathOptions || {}) };
+		if (args.protect !== undefined) pathOpts.protect = args.protect;
+		// git's settings could not be read: nothing it might run can be ruled out (fail closed, H2).
+		const gitUnknown = !!(pathOpts.protect && pathOpts.protect.ok === false);
 		if (kind === "safe") {
 			// Reads of network paths (\\host, //host, file://host) send credentials or names off the machine.
 			if (mode !== "trusted" && READ_TOOLS.has(toolName)) {
@@ -424,14 +553,18 @@ function decide(args) {
 			if (mode === "plan") return block(planBlock("Editing files"));
 			const targets = editPathsOf(input);
 			if (!targets.length) return block("The edit has no readable file path, so it was blocked. Use the path field.");
+			const longest = Math.max(...targets.map((t) => vis(t).length));
+			if (longest > MAX_ASKABLE) return block(tooLong("file path", longest));
 			const wheres = targets.map((t) => checkPath(t, cwd, pathOpts));
-			if (targets.some((t) => vis(t).length > MAX_SHOWN)) return block(tooLong("file path", Math.max(...targets.map((t) => vis(t).length))));
-			const flags = { outside: wheres.some((w) => !w.inside), protected: wheres.some((w) => w.protected), unc: wheres.some((w) => w.unc), broad: wheres.some((w) => w.broad) };
+			const why = [...new Set(wheres.flatMap((w) => w.why || []))];
+			if (gitUnknown) why.push("unknown");
+			const flags = { outside: wheres.some((w) => !w.inside), protected: why.length > 0, unc: wheres.some((w) => w.unc), broad: wheres.some((w) => w.broad), why, long: longest > MAX_SHOWN ? longest : 0 };
 			// Show where the path really goes when it is outside, or spelled in a way that hides it (URL, ~, @, .., Git Bash drive, non-ASCII).
 			const odd = (t) => /^(file:|~|@)|\.\.|^\/(mnt\/|cygdrive\/)?[a-zA-Z](\/|$)|[^\x20-\x7e]/.test(t.trim());
 			const resolved = wheres.map((w, i) => (!w.inside || odd(targets[i]) ? w.resolved : null));
-			// Protected files and network paths always ask, with no "for this chat" and no inside-project shortcut.
-			if (flags.protected || flags.unc) return askOnce(askEdit(mode, toolName, targets, resolved, flags), "edit");
+			// Protected files, network paths and paths too long to take in at a glance always ask, with no "for this chat"
+			// and no inside-project shortcut.
+			if (flags.protected || flags.unc || flags.long) return askOnce(askEdit(mode, toolName, targets, resolved, flags), "edit");
 			if (!flags.outside) {
 				if (mode === "ask-commands" || grants.edits) return allow();
 				return ask(askEdit(mode, toolName, targets, resolved, flags), { type: "edits" }, "edit");
@@ -445,11 +578,20 @@ function decide(args) {
 
 		if (kind === "shell") {
 			const command = input && typeof input === "object" ? input.command : undefined;
-			if (isReadOnlyCommand(command)) return allow();
+			const shell = args.shell === "bash" && toolName === "bash" ? "bash" : toolName === "powershell" ? "powershell" : "unknown";
+			if (isReadOnlyCommand(command, shell)) {
+				const name = command.trim().split(/[ \t]/)[0].toLowerCase();
+				if (name !== "git") return allow();
+				// git reads settings and hooks from the project. Allowed without a question only in its hardened form
+				// (git-harden.js), and only while git's settings for this project are known.
+				const hardened = gitUnknown ? null : hardenGitCommand(command);
+				if (hardened) return { action: "allow", rewrite: hardened };
+			}
 			if (mode === "plan") return block(planBlock("This command") + " Only read-only commands run in Plan mode.");
 			if (typeof command !== "string" || command.trim() === "") return block("The command is empty or unreadable, so it was blocked.");
 			const shown = vis(command.trim());
-			if (shown.length > MAX_SHOWN) return block(tooLong("command", shown.length));
+			if (shown.length > MAX_ASKABLE) return block(tooLong("command", shown.length));
+			if (shown.length > MAX_SHOWN) return askOnce(`Allow this command?\n${longLine("command", shown.length)}\n${shown}\n${statusText(mode)}`, "command");
 			const key = "cmd:" + command;
 			if (grants.keys.has(key)) return allow();
 			return ask(`Allow this command?\n${shown}\n${statusText(mode)}`, { type: "key", key }, "command");
@@ -466,12 +608,12 @@ function decide(args) {
 
 		// unknown tools and MCP tools: treated as commands
 		if (mode === "plan") return block(planBlock(`The tool "${brief(toolName, 80)}"`) + " Unknown and MCP tools count as commands.");
+		const detail = vis(stable(input));
+		if (detail.length > MAX_ASKABLE) return block(tooLong("tool call", detail.length));
+		if (detail.length > MAX_SHOWN) return askOnce(`Allow this tool call?\n${longLine("tool call", detail.length)}\n${brief(toolName, 80)}  ${detail}\n${statusText(mode)}`, "tool call");
 		const key = "tool:" + toolName + ":" + stable(input);
 		if (grants.keys.has(key)) return allow();
-		const detail = vis(stable(input));
-		const full = detail.length <= MAX_SHOWN;
-		const title = `Allow this tool call?\n${brief(toolName, 80)}  ${full ? detail : brief(stable(input), 400)}\n${statusText(mode)}`;
-		return full ? ask(title, { type: "key", key }, "tool call") : askOnce(title, "tool call");
+		return ask(`Allow this tool call?\n${brief(toolName, 80)}  ${detail}\n${statusText(mode)}`, { type: "key", key }, "tool call");
 	} catch {
 		return block("The permission check failed, so the call was blocked.");
 	}
@@ -502,6 +644,18 @@ function applyAnswer(decision, answer, grants) {
 	}
 }
 
+// The input fields a decision read, which must not change before the tool runs (H4). Other fields stay writable, so a
+// later extension may still add a timeout; "all" freezes the whole input (unknown tools and subagents were shown whole).
+const READ_PATH_KEYS = [...PATH_KEYS, "cwd", "dir", "directory"];
+function pinKeys(toolName) {
+	const kind = classify(toolName);
+	if (kind === "shell") return ["command"];
+	if (kind === "edit") return PATH_KEYS.slice();
+	if (READ_TOOLS.has(String(toolName))) return READ_PATH_KEYS.slice();
+	if (kind === "safe") return [];
+	return "all";
+}
+
 // An older copy of this extension in the user's Pi extensions folder (read only, to warn about the clash).
 // Returns the file name found or null.
 function findOldCopy(agentDir) {
@@ -520,7 +674,7 @@ function findOldCopy(agentDir) {
 }
 
 module.exports = {
-	MODE_IDS, MODE_LABELS, DEFAULT_MODE, STATUS_KEY, ENTRY_TYPE, COMMAND_NAMES, OPTIONS, READ_ONLY_NAMES, MAX_SHOWN, PROTECTED_WHY,
-	isMode, statusText, parseMode, restoreMode, parseLastMode,
-	createGrants, clearGrants, classify, checkPath, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy,
+	MODE_IDS, MODE_LABELS, DEFAULT_MODE, STATUS_KEY, ENTRY_TYPE, COMMAND_NAMES, OPTIONS, READ_ONLY_NAMES, MAX_SHOWN, MAX_ASKABLE, PROTECTED_WHY, PROGRAM_WHY,
+	isMode, statusText, parseMode, restoreMode, parseLastMode, canonName,
+	createGrants, clearGrants, classify, checkPath, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, pinKeys,
 };
