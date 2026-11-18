@@ -160,6 +160,11 @@ async function runScenario(name, o) {
 		PI_CRUST_CHAR_LOGDIR: logDir,
 		...(T.env || {}), // per-scenario switches (for example PI_CRUST_SELFTEST_NO_PI=1)
 	};
+	if (T.settings) {
+		// settings.json of the app for this run (for example toolCallCheckIn), in the fresh data folder
+		fs.mkdirSync(env.PI_CRUST_SELFTEST_USERDATA, { recursive: true });
+		fs.writeFileSync(path.join(env.PI_CRUST_SELFTEST_USERDATA, "settings.json"), JSON.stringify(T.settings));
+	}
 	let log = "";
 	let code;
 	try {
