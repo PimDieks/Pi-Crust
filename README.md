@@ -205,9 +205,9 @@ A new Claude Agent chat opens with a setup card: step 1 is the key, step 2 is th
 
 **What a Claude Agent chat sends to Anthropic.**
 - Your prompts, and the files and command output the agent reads while it works, go to Anthropic through your own API key. Usage is billed to your Anthropic account. That is the whole purpose of the chat, and nothing else of yours is sent on purpose.
-- Pi Crust switches off the engine's other traffic with the engine's own documented switches: usage telemetry, error reporting, the automatic updater (the app downloads one checked engine version itself), the feedback command and the "How is Claude doing?" survey, feature-flag fetching, and the automatic download of the official plugin directory. Pi Crust sets these every time it starts the engine, whatever your own environment says.
-- The engine's built-in skills and workflows are switched off as well, so the agent starts with only your project's own instructions (`CLAUDE.md`) and its ordinary tools. A few small built-in plugins of the engine have no documented switch and stay on.
-- What stays: if a company proxy is set in your environment (`HTTPS_PROXY` and similar), the engine keeps using it. The agent's web fetch tool, when it is used, still checks the host name of a page with Anthropic before fetching it.
+- Pi Crust sets the engine's own switches for usage telemetry, error reporting, the automatic updater (the app downloads one checked engine version itself), the feedback command and survey, feature-flag fetching, the automatic download of the official plugin directory, and its non-essential traffic in general. It sets them every time it starts the engine, and variables from your own environment that would reconfigure the engine (names starting with `ANTHROPIC_`, `CLAUDE_CODE_`, `MAX_`, `MCP_`, `OTEL_`, `ENABLE_`, `DISABLE_`, `BETA_TRACING_`, and `NODE_OPTIONS`, `BASH_ENV`, `API_TIMEOUT_MS`, `USE_BUILTIN_RIPGREP`) are not passed on to it.
+- The engine's bundled skills and workflows are switched off with its switch for them, so the agent starts with your project's own instructions (`CLAUDE.md`) and its ordinary tools. Nothing is claimed here about other parts that ship with the engine.
+- Pi Crust has not measured everything the engine could send beyond the model requests and does not promise that those switches cover all of it. A company proxy set in your environment (`HTTPS_PROXY` and similar) is kept, so the engine uses it.
 
 ## Views
 
