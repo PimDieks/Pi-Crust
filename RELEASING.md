@@ -25,6 +25,8 @@ Never put a secret value in a file, an issue or a chat. Use the names below exac
    - Azure client secret expires: ____
    - Identity validation expires: ____
 
+When the build is signed, the release workflow checks that `app-update.yml` carries the publisher name (without it the installed app would silently stop verifying update signatures), and for unsigned builds that it does not.
+
 Without the signing secrets the build still works, but the installer is NOT signed. You will see UNSIGNED BUILD in the run summary and at the top of the draft notes.
 
 ## Making a release

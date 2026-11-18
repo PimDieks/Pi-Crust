@@ -4,6 +4,7 @@
 //      app cannot find its updates) and names the github provider.
 //   2. dist/latest.yml says the same version as the tag, and names the installer.
 //   3. the sha512 and size in latest.yml equal the real installer (the updater refuses a download that does not match).
+//   4. signed build (--signed, or HAS_SIGNING=true): app-update.yml must have publisherName; unsigned: it must not.
 // Exit 0 when all hold, 1 with one line per problem otherwise. No dependencies.
 "use strict";
 const fs = require("node:fs");
@@ -15,12 +16,18 @@ const scalar = (text, key) => {
 	return m ? m[1].replace(/^['"]|['"]$/g, "") : null;
 };
 
-function check(dist, version) {
+function check(dist, version, { signed = false } = {}) {
 	const problems = [];
 	const installer = `Pi-Crust-Setup-${version}.exe`;
 	const upd = path.join(dist, "win-unpacked", "resources", "app-update.yml");
 	if (!fs.existsSync(upd)) problems.push(`app-update.yml is missing from win-unpacked/resources (the installed app could not look for updates).`);
-	else if (scalar(fs.readFileSync(upd, "utf8"), "provider") !== "github") problems.push(`app-update.yml does not name the github provider.`);
+	else {
+		const yml = fs.readFileSync(upd, "utf8");
+		if (scalar(yml, "provider") !== "github") problems.push(`app-update.yml does not name the github provider.`);
+		const pub = scalar(yml, "publisherName") !== null || /^publisherName:/m.test(yml);
+		if (signed && !pub) problems.push(`The build is signed but app-update.yml has no publisherName (the updater would not verify the signature of updates).`);
+		if (!signed && pub) problems.push(`The build is unsigned but app-update.yml has a publisherName (every update would be rejected).`);
+	}
 	const latest = path.join(dist, "latest.yml");
 	if (!fs.existsSync(latest)) problems.push(`latest.yml was not produced.`);
 	else {
@@ -42,12 +49,13 @@ function check(dist, version) {
 }
 
 if (require.main === module) {
-	const [dist, version] = process.argv.slice(2);
+	const [dist, version] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 	if (!dist || !version) {
 		process.stderr.write("Usage: node scripts/check-release-build.js <dist-dir> <version>\n");
 		process.exit(1);
 	}
-	const problems = check(dist, version.replace(/^v/, ""));
+	const signed = process.argv.includes("--signed") || process.env.HAS_SIGNING === "true"; // the release workflow sets HAS_SIGNING
+	const problems = check(dist, version.replace(/^v/, ""), { signed });
 	for (const p of problems) process.stderr.write(`${p}\n`);
 	if (!problems.length) process.stdout.write(`Release build ok: app-update.yml present, latest.yml matches ${version} and the installer.\n`);
 	process.exit(problems.length ? 1 : 0);

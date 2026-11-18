@@ -11,7 +11,12 @@ const dir = path.resolve(process.argv[2] || ".");
 const port = Number(process.argv[3] || process.env.PORT || 8099);
 
 const server = http.createServer((req, res) => {
-	const name = decodeURIComponent((req.url || "/").split("?")[0]).replace(/^\/+/, "");
+	let name;
+	try {
+		name = decodeURIComponent((req.url || "/").split("?")[0]).replace(/^\/+/, "");
+	} catch {
+		return end(400); // malformed %-escape
+	}
 	const file = path.resolve(dir, name);
 	if (file !== dir && !file.startsWith(dir + path.sep)) return end(403);
 	let st;
