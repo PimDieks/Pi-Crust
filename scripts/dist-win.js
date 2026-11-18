@@ -3,7 +3,8 @@
 // Stamps this clone's folder and commit into the packaged package.json (piCrustSource, piCrustCommit), so the
 // installed app knows where to look for updates and which commit it was built from (src/update-main.js).
 // A release build (CI=true or --release) leaves out piCrustSource, so no local path ends up in the installer and the same commit
-// gives the same installer on any machine. piCrustCommit is still stamped.
+// gives the same installer on any machine. piCrustCommit is still stamped, and piCrustBuild=release tells the app to update from
+// GitHub releases instead of a git clone (src/update-mode.js).
 "use strict";
 const { spawnSync } = require("child_process");
 const path = require("path");
@@ -15,7 +16,7 @@ const cli = require.resolve("electron-builder/cli.js", { paths: [root] });
 const argv = process.argv.slice(2);
 const release = process.env.CI === "true" || argv.includes("--release");
 const extra = argv.filter((a) => a !== "--release");
-const args = [cli, "--win", "nsis", "--x64", ...(release ? [] : [`-c.extraMetadata.piCrustSource=${root}`]), ...(commit ? [`-c.extraMetadata.piCrustCommit=${commit}`] : []), ...extra];
+const args = [cli, "--win", "nsis", "--x64", ...(release ? ["-c.extraMetadata.piCrustBuild=release"] : [`-c.extraMetadata.piCrustSource=${root}`]), ...(commit ? [`-c.extraMetadata.piCrustCommit=${commit}`] : []), ...extra];
 // electron-builder needs real Node: under Electron running as Node (the in-app updater) its argument parser sees
 // Electron, skips one argument too few and fails with "Unknown argument: ...cli.js". Use the Node on PATH then.
 const env = { ...process.env };
