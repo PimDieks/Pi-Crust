@@ -212,3 +212,10 @@ test("the stand-in log shows 'key present', never the key", async () => {
 	assert.match(text, /key present/);
 	assert.ok(!text.includes(KEY));
 });
+
+test("start: the engine is told to scrub credentials from the tool subprocesses (documented CLAUDE_CODE_SUBPROCESS_ENV_SCRUB), whatever the base env says", async () => {
+	const t = await rig({});
+	t.adapter.start({ cwd: t.cwd, env: { PATH: "p", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0" }, mode: "plan" }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	assert.strictEqual(t.sdk.calls[0].options.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
+});

@@ -251,3 +251,147 @@ test("the mode is read on every call, so a switch mid-chat takes effect at once"
 	mode = "plan";
 	assert.equal((await can("Edit", { file_path: inP("a.js") })).behavior, "deny");
 });
+
+// --- review round: every path field, Agent mode, sandbox flag, hardened git, odd decisions, tool table, grants per shell, /proc environ ---
+test("every path field is judged and the strictest wins (NotebookEdit with a file_path inside and a notebook_path outside)", async () => {
+	const { can, asked } = rig("ask-commands", "undefined");
+	const r = await can("NotebookEdit", { file_path: inP("a.txt"), notebook_path: outP("x.ipynb"), new_source: "x" });
+	assert.equal(r.behavior, "deny");
+	assert.equal(asked.length, 1);
+	const swapped = rig("ask-commands", "undefined");
+	assert.equal((await swapped.can("NotebookEdit", { file_path: outP("a.txt"), notebook_path: inP("x.ipynb") })).behavior, "deny");
+	assert.equal(swapped.asked.length, 1);
+	const inside = rig("ask-commands", "undefined");
+	assert.equal((await inside.can("NotebookEdit", { file_path: inP("a.txt"), notebook_path: inP("x.ipynb") })).behavior, "allow");
+	const plan = rig("plan", "Allow once");
+	assert.equal((await plan.can("NotebookEdit", { file_path: inP("a.txt"), notebook_path: inP("x.ipynb") })).behavior, "deny");
+});
+test("a network notebook_path or file_path on a read asks; in Plan it is blocked without asking", async () => {
+	for (const input of [{ notebook_path: "//evil/s/a.ipynb" }, { file_path: "//evil/s/a.ipynb" }, { file_path: inP("a.js"), notebook_path: "//evil/s/a.ipynb" }, { path: inP("src"), local_path: "\\\\evil\\s\\x" }]) {
+		for (const tool of ["Read", "Grep"]) {
+			const { can, asked } = rig("ask-commands", "undefined");
+			assert.equal((await can(tool, input)).behavior, "deny", tool + JSON.stringify(input));
+			assert.equal(asked.length, 1, tool + JSON.stringify(input));
+			const p = rig("plan", "Allow once");
+			assert.equal((await p.can(tool, input)).behavior, "deny");
+			assert.equal(p.asked.length, 0);
+		}
+	}
+});
+test("Agent and Task: updatedInput never carries a mode, on every allow path (the value that skips permission checks too)", async () => {
+	for (const tool of ["Agent", "Task"]) {
+		for (const m of ["bypassPermissions", "acceptEdits", "auto", "dontAsk", "default", "plan"]) {
+			const input = { description: "d", prompt: "do it", mode: m };
+			const once = rig("ask-commands", "Allow once");
+			const r1 = await once.can(tool, input);
+			assert.equal(r1.behavior, "allow");
+			assert.equal("mode" in r1.updatedInput, false, `${tool} ${m} once`);
+			assert.equal(r1.updatedInput.prompt, "do it");
+			const chat = rig("ask-commands", "Allow for this chat");
+			await chat.can(tool, input);
+			const r2 = await chat.can(tool, input); // from the grant, no question
+			assert.equal(chat.asked.length, 1);
+			assert.equal("mode" in r2.updatedInput, false, `${tool} ${m} grant`);
+			const tr = rig("trusted", undefined);
+			assert.equal("mode" in (await tr.can(tool, input)).updatedInput, false, `${tool} ${m} trusted`);
+		}
+	}
+});
+test("Bash and PowerShell: dangerouslyDisableSandbox is removed from updatedInput, for a read-only and an asked command", async () => {
+	for (const tool of ["Bash", "PowerShell"]) {
+		const ro = rig("ask-commands", "undefined");
+		const r1 = await ro.can(tool, { command: "rg TODO src", dangerouslyDisableSandbox: true });
+		assert.equal(r1.behavior, "allow");
+		assert.equal("dangerouslyDisableSandbox" in r1.updatedInput, false, tool + " read-only");
+		assert.equal(r1.updatedInput.command, "rg TODO src");
+		const asked = rig("ask-commands", "Allow once");
+		const r2 = await asked.can(tool, { command: "npm test", dangerouslyDisableSandbox: true });
+		assert.equal(r2.behavior, "allow");
+		assert.equal(asked.asked.length, 1);
+		assert.equal("dangerouslyDisableSandbox" in r2.updatedInput, false, tool + " asked");
+		const tr = rig("trusted", undefined);
+		assert.equal("dangerouslyDisableSandbox" in (await tr.can(tool, { command: "x", dangerouslyDisableSandbox: true })).updatedInput, false);
+	}
+});
+test("a read-only git command runs in its hardened form: updatedInput.command is the logic's rewrite, not the model's text", async () => {
+	const { can, asked } = rig("ask-commands", "undefined");
+	const r = await can("Bash", { command: "git status" });
+	assert.equal(r.behavior, "allow");
+	assert.equal(asked.length, 0);
+	assert.notEqual(r.updatedInput.command, "git status");
+	assert.match(r.updatedInput.command, /^git -c core\.fsmonitor=false -c core\.hooksPath=\S+ .*--no-pager status$/);
+	const want = logic.decide({ mode: "ask-commands", toolName: "bash", input: { command: "git status" }, cwd: proj, grants: logic.createGrants() }).rewrite;
+	assert.equal(r.updatedInput.command, want);
+});
+test("a decision with an unexpected action denies (never allows), whatever the logic returned", async () => {
+	const orig = logic.decide;
+	try {
+		for (const odd of [{ action: "allow-always" }, { action: "ALLOW" }, { action: undefined, rewrite: "x" }, {}, null, undefined, "allow"]) {
+			logic.decide = () => odd;
+			const { can, asked } = rig("ask-commands", "Allow once");
+			const r = await can("Bash", { command: "rg x" });
+			assert.equal(r.behavior, "deny", JSON.stringify(odd));
+			assert.equal(asked.length, 0);
+		}
+	} finally {
+		logic.decide = orig;
+	}
+});
+const SDK_TOOLS = ["Agent", "Bash", "ExitPlanMode", "Edit", "Read", "Write", "Glob", "Grep", "TaskStop", "ListMcpResources", "RefreshMcpTools", "Mcp", "NotebookEdit", "ReadMcpResourceDir", "ReadMcpResource", "ReportFindings", "TodoWrite", "WebFetch", "WebSearch", "AskUserQuestion", "SendFeedback", "ClaudeDesign", "Projects", "EnterPlanMode", "TaskCreate", "TaskGet", "TaskUpdate", "TaskList", "Workflow", "CronCreate", "CronDelete", "CronList", "ScheduleWakeup", "RemoteTrigger", "ShowOnboardingRolePicker", "OfferChromeSetup", "ReadNotifications", "Monitor", "ProposeSkills", "ProposeGoal", "Artifact", "PushNotification", "EnterWorktree", "ExitWorktree"];
+test("every tool in the SDK type file is named in the table with a deliberate category", () => {
+	for (const n of SDK_TOOLS) assert.ok(Object.prototype.hasOwnProperty.call(P.TOOL_TABLE, n), n + " is not in the table");
+	const safe = ["Read", "Glob", "Grep", "TodoWrite", "AskUserQuestion", "EnterPlanMode", "TaskCreate", "TaskGet", "TaskUpdate", "TaskList"];
+	const kinds = { Edit: "edit", Write: "edit", NotebookEdit: "edit", Bash: "shell", Agent: "subagent" };
+	for (const n of SDK_TOOLS) assert.equal(logic.classify(P.logicName(n)), safe.includes(n) ? "safe" : kinds[n] || "command", n);
+});
+test("the tools that reach out or start things ask in Ask before commands and are blocked in Plan, with no question", async () => {
+	for (const n of ["Monitor", "WebFetch", "WebSearch", "ReadMcpResource", "ReadMcpResourceDir", "Mcp", "CronCreate", "EnterWorktree", "ExitPlanMode", "Workflow", "RemoteTrigger", "Artifact"]) {
+		const a = rig("ask-commands", "undefined");
+		assert.equal((await a.can(n, { command: "x", url: "https://example.com" })).behavior, "deny", n);
+		assert.equal(a.asked.length, 1, n);
+		const p = rig("plan", "Allow once");
+		assert.equal((await p.can(n, {})).behavior, "deny", n);
+		assert.equal(p.asked.length, 0, n);
+	}
+});
+test("a grant for a Bash command does not cover the same text in PowerShell, nor the other way round", async () => {
+	const a = rig("ask-commands", "Allow for this chat");
+	assert.equal((await a.can("Bash", { command: "npm test" })).behavior, "allow");
+	assert.equal(a.asked.length, 1);
+	assert.equal((await a.can("PowerShell", { command: "npm test" })).behavior, "allow");
+	assert.equal(a.asked.length, 2, "PowerShell asked again");
+	assert.equal((await a.can("PowerShell", { command: "npm test" })).behavior, "allow");
+	assert.equal(a.asked.length, 2, "its own grant works");
+	assert.equal((await a.can("Bash", { command: "npm test" })).behavior, "allow");
+	assert.equal(a.asked.length, 2);
+	const b = rig("ask-commands", "Allow for this chat");
+	await b.can("PowerShell", { command: "npm run x" });
+	await b.can("Bash", { command: "npm run x" });
+	assert.equal(b.asked.length, 2, "a PowerShell grant does not cover Bash");
+	logic.clearGrants(b.grants);
+	await b.can("PowerShell", { command: "npm run x" });
+	assert.equal(b.asked.length, 3, "clearing the grants clears PowerShell's too");
+});
+test("reading /proc/<anything>/environ asks (once only) and is denied in Plan, through the shell and the read tools", async () => {
+	const cases = [["Bash", { command: "cat /proc/self/environ" }], ["Bash", { command: "cat /proc/1234/environ" }], ["Bash", { command: "rg X /proc/self/environ" }], ["Read", { file_path: "/proc/self/environ" }], ["Read", { file_path: "\\proc\\self\\environ" }], ["Grep", { pattern: "KEY", path: "/proc/12/environ" }], ["Bash", { command: "cat /proc/self/../self/environ" }]];
+	for (const [tool, input] of cases) {
+		for (const mode of ["ask-edits", "ask-commands"]) {
+			const a = rig(mode, "Allow once");
+			assert.equal((await a.can(tool, input)).behavior, "allow", `${mode} ${tool} ${JSON.stringify(input)} after Allow`);
+			assert.equal(a.asked.length, 1, `${mode} ${JSON.stringify(input)} asks`);
+			assert.deepEqual(a.asked[0].prompt.options, ["Allow once", "Deny"], "no 'for this chat'");
+			await a.can(tool, input);
+			assert.equal(a.asked.length, 2, "asks every time");
+			const n = rig(mode, "undefined");
+			assert.equal((await n.can(tool, input)).behavior, "deny");
+			assert.equal((await rig(mode, "Allow for this chat").can(tool, input)).behavior, "deny", "not offered, so it does not allow");
+		}
+		const p = rig("plan", "Allow once");
+		const r = await p.can(tool, input);
+		assert.equal(r.behavior, "deny", `plan ${JSON.stringify(input)}`);
+		assert.equal(p.asked.length, 0);
+	}
+	const ok = rig("ask-commands", "undefined");
+	assert.equal((await ok.can("Bash", { command: "cat /etc/hostname" })).behavior, "allow");
+	assert.equal((await ok.can("Read", { file_path: inP("src/environment.js") })).behavior, "allow");
+});

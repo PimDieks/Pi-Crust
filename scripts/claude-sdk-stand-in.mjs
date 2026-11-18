@@ -25,7 +25,7 @@ const DEFAULT_SCRIPT = [
 export function describeOptions(o = {}) {
 	const out = {};
 	for (const [k, v] of Object.entries(o)) {
-		if (k === "env") out.env = { ANTHROPIC_API_KEY: v && v.ANTHROPIC_API_KEY ? "key present" : "key absent", names: Object.keys(v || {}).sort(), CLAUDE_CONFIG_DIR: v && v.CLAUDE_CONFIG_DIR };
+		if (k === "env") out.env = { ANTHROPIC_API_KEY: v && v.ANTHROPIC_API_KEY ? "key present" : "key absent", names: Object.keys(v || {}).sort(), CLAUDE_CONFIG_DIR: v && v.CLAUDE_CONFIG_DIR, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: v && v.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB };
 		else if (typeof v === "function") out[k] = "[function]";
 		else out[k] = v;
 	}

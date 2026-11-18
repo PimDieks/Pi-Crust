@@ -113,6 +113,9 @@ function createClaudeAdapter(deps = {}) {
 		delete env.ANTHROPIC_AUTH_TOKEN;
 		delete env.CLAUDE_CODE_OAUTH_TOKEN;
 		if (cfg.configDir) env.CLAUDE_CONFIG_DIR = cfg.configDir;
+		// Documented (code.claude.com/docs/en/env-vars): strips credentials such as ANTHROPIC_API_KEY from the environments of Bash
+		// commands, hooks and stdio MCP servers; on Linux Bash also gets its own PID namespace, out of reach of the engine's /proc.
+		env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
 		return env;
 	}
 
