@@ -1,3 +1,7 @@
+/* The `hidden` attribute always wins. Without !important an author rule such as `#browser-error { display: flex }` or `button.icon { display: inline-flex }`
+   beats the browser's own `[hidden] { display: none }` (it is a user-agent rule), and the element shows although the code hid it. A box that should show
+   when it is not hidden gets its display from its own rule, as before; this only decides the hidden case. Checked for every tab by the layers selftest. */
+[hidden] { display: none !important; }
 /* Pi Crust design tokens. Names follow the Figma variables (semantic-colors: dark / light).
    Theme is set on <html data-theme="dark|light"> by theme.js. */
 :root, :root[data-theme="dark"] {
@@ -1353,11 +1357,13 @@ button.is-disabled:hover { background: none; color: inherit; }
 .pc-text { display: flex; flex-direction: column; gap: var(--space-3xs); color: var(--text); font-size: var(--fs-md); }
 .pc-line { margin: 0; }
 .sc-steps { display: flex; flex-direction: column; gap: var(--space-3xs); }
-.sc-step, .ob-row.sc-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: var(--space-sm); padding: var(--space-sm); border-radius: var(--radius-sm); background: var(--panel-2); }
+.sc-step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: var(--space-sm); padding: var(--space-sm); border-radius: var(--radius-sm); background: var(--panel-2); }
 .sc-mark { width: 20px; height: 20px; border: 1px solid var(--border); border-radius: var(--radius-full); display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); }
-.sc-step[data-state="done"] .sc-mark, .sc-row.ready .sc-mark { color: var(--text-success); border-color: currentColor; }
-.sc-step[data-state="failed"] .sc-mark, .sc-row.failed .sc-mark { color: var(--err); border-color: currentColor; }
+.sc-step[data-state="done"] .sc-mark { color: var(--text-success); border-color: currentColor; }
+.sc-step[data-state="failed"] .sc-mark { color: var(--err); border-color: currentColor; }
+.ob-row.failed .ob-mark { color: var(--err); }
 .sc-mark.sc-spin { color: var(--accent-2); border-color: transparent; }
+.ob-mark.sc-spin { color: var(--accent-2); display: inline-flex; align-items: center; justify-content: center; }
 .sc-spinner { width: 18px; height: 18px; flex: none; display: block; animation: sc-turn 0.9s linear infinite; }
 .sc-spinner .sc-ring { fill: none; stroke: var(--border); stroke-width: 2; }
 .sc-spinner .sc-arc { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }

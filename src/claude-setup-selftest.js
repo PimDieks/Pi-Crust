@@ -62,7 +62,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		const was = themeSetting();
 		for (const th of ["light", "dark"]) {
 			setTheme(th);
-			await wait(300);
+			await wait(700); // the colours of a full-window view fade; a shot taken inside the fade shows dim text
 			if (want !== undefined) primaryCheck(name, th, scope, want);
 			await snap(`claude-setup-${name}-${th}`);
 		}
@@ -250,6 +250,17 @@ selftestSteps.push(async ({ snap, wait }) => {
 		const keyBtns = [...(row("claude-key")?.querySelectorAll(".sc-actions button") || [])].map((b) => b.textContent);
 		check(keyBtns.join() === "Change key,Remove key", `panel key buttons: ${keyBtns}`);
 		await shots("panel-rows-done", "", "#ob-rows");
+		// the Claude Agent rows are drawn like the Pi, Git, Project and Figma rows: same background, same plain marks (no circle)
+		{
+			const piRow = row("git") || row("pi");
+			const kr = row("claude-key");
+			const cs = (n) => getComputedStyle(n);
+			check(cs(kr).backgroundColor === cs(piRow).backgroundColor, `Claude row background ${cs(kr).backgroundColor} vs ${cs(piRow).backgroundColor}`);
+			check(kr.querySelector(".ob-mark")?.textContent === "✓" && piRow.querySelector(".ob-mark")?.textContent === "✓", "done marks differ");
+			check(!kr.querySelector(".sc-mark") && !row("claude-limit").querySelector(".sc-mark"), "a Claude row still has the circled mark");
+			check(cs(kr.querySelector(".ob-mark")).borderTopWidth === cs(piRow.querySelector(".ob-mark")).borderTopWidth && cs(kr.querySelector(".ob-mark")).borderRadius === cs(piRow.querySelector(".ob-mark")).borderRadius, "the Claude mark has a different border from the Pi mark");
+			check(cs(kr).borderRadius === cs(piRow).borderRadius && cs(kr).paddingLeft === cs(piRow).paddingLeft, "the Claude row's shape differs");
+		}
 		row("claude-key").querySelector('[data-action="change-key"]').click();
 		await wait(150);
 		check(!!row("claude-key").querySelector('.sc-field input[type="password"]') && !dialogOpen, "Change key in the panel has no inline field");
@@ -263,10 +274,23 @@ selftestSteps.push(async ({ snap, wait }) => {
 			limitIn.value = "0.1";
 			row("claude-limit").querySelector("form").requestSubmit();
 			check(await until(() => /\$0\.50/.test(row("claude-limit")?.querySelector(".pc-error")?.textContent || "")), "a limit under the minimum was not refused in the panel");
+			// zero, a negative number and text: each refused with its own readable sentence, and the typed text stays in the field
+			for (const [bad, re] of [["0", /zero/], ["-2", /negative/], ["abc", /not an amount/], ["", /Enter an amount/]]) {
+				const f = row("claude-limit").querySelector("#claude-limit-input");
+				f.value = bad;
+				row("claude-limit").querySelector("form").requestSubmit();
+				check(await until(() => re.test(row("claude-limit")?.querySelector(".pc-error")?.textContent || "")), `limit "${bad}" in the panel: "${row("claude-limit")?.querySelector(".pc-error")?.textContent}"`);
+				check(row("claude-limit").querySelector("#claude-limit-input").value === bad, `the refused text "${bad}" did not stay in the field`);
+				check(ui.state()?.limitUsd !== 0 && ui.state()?.limitUsd > 0, "a refused limit changed the setting");
+			}
 			const input2 = row("claude-limit").querySelector("#claude-limit-input");
-			input2.value = "7.5";
+			check(input2.type === "text" && input2.inputMode === "decimal", `limit field type ${input2.type}/${input2.inputMode}`);
+			input2.value = "7,5"; // a comma works like a point
 			row("claude-limit").querySelector("form").requestSubmit();
-			check(await until(() => ui.state()?.limitUsd === 7.5 && /Saved/.test(row("claude-limit")?.textContent || "")), "a valid limit was not saved from the panel");
+			check(await until(() => ui.state()?.limitUsd === 7.5 && /Saved/.test(row("claude-limit")?.textContent || "")), "a valid limit (7,5) was not saved from the panel");
+			check(row("claude-limit").querySelector("#claude-limit-input").value === "7.50", `the field shows "${row("claude-limit").querySelector("#claude-limit-input").value}", not 7.50`);
+			check(/pauses and asks once it has used about \$7\.50\./.test(row("claude-limit").textContent) && /A Claude Agent chat pauses/.test(row("claude-limit").textContent) && /Spend limit per chat/.test(row("claude-limit").textContent), `limit row wording: ${row("claude-limit").textContent}`);
+			check(!/per run|Claude Agent run/.test(row("claude-limit").textContent), "the limit row still says run");
 			await crust.claude.setLimit(5);
 		}
 		window.crustOnboarding.close({ restore: false });
@@ -313,13 +337,14 @@ selftestSteps.push(async ({ snap, wait }) => {
 		// Change limit: an invalid amount is refused, a valid one is a setting and continues
 		pc().querySelector('[data-action="change-limit"]').click();
 		await wait(150);
-		const lim = pc().querySelector('input[type="number"]');
-		check(lim && lim.value === "5", "the limit field does not start at the current limit");
+		const lim = pc().querySelector(".pc-limit input");
+		check(lim && lim.value === "5.00", `the limit field does not start at the current limit: "${lim && lim.value}"`);
+		check(/Spend limit per chat/.test(pc().querySelector(".pc-limit label")?.textContent || ""), "the pause card's field is not labelled per chat");
 		await shots("pause-limit", "continue,save-limit", ".pause-card");
 		lim.value = "0.1";
 		pc().querySelector("form").requestSubmit();
 		check(await until(() => pc()?.querySelector(".pc-error")), "an invalid limit was accepted");
-		pc().querySelector('input[type="number"]').value = "7.5";
+		pc().querySelector(".pc-limit input").value = "7,5";
 		pc().querySelector("form").requestSubmit();
 		check(await until(() => !pc() && !made.pause), "Save and continue did not close the pause card");
 		check((await crust.claude.state()).limitUsd === 7.5, `limit setting: ${(await crust.claude.state()).limitUsd}`);
@@ -331,6 +356,31 @@ selftestSteps.push(async ({ snap, wait }) => {
 		pc().querySelector('[data-action="continue"]').click();
 		check(await until(() => !pc() && !made.pause), "Continue did not close the pause card");
 		check(await until(() => made.state.ready && !input.readOnly && input.placeholder.startsWith("Ask Claude Agent"), 10000), "the chat did not come back after Continue");
+
+		// 8b. a restored fork whose parent chat is gone: a card that says so, the message box disabled with the reason, nothing else
+		{
+			const gone = { type: "claude_fork_gone", message: "The chat this one was forked from is gone, so there is nothing to continue. Start a new chat." };
+			withChat(made, () => handleRecord(gone));
+			await wait(250);
+			const gc = made.el.querySelector(".gone-card");
+			check(!!gc && vis(gc) && /original chat is gone/.test(gc.querySelector("h3")?.textContent || ""), `gone card: ${gc && gc.textContent}`);
+			check(/forked from a chat that no longer exists/.test(gc?.textContent || "") && /Start a new chat/.test(gc?.textContent || ""), "gone card text");
+			check(input.readOnly && input.placeholder === "The chat this one was forked from is gone" && send.dataset.reason === input.placeholder && send.getAttribute("aria-disabled") === "true", `gone gate: ${input.readOnly} "${input.placeholder}"`);
+			{
+				const was = themeSetting();
+				for (const th of ["light", "dark"]) {
+					setTheme(th);
+					await wait(700);
+					await snap(`claude-setup-fork-gone-${th}`);
+				}
+				setTheme(was);
+				await wait(150);
+			}
+			made.forkGone?.el.remove();
+			made.forkGone = null;
+			ui.syncComposer(made);
+			check(!input.readOnly && input.placeholder.startsWith("Ask Claude Agent"), `message box after clearing the gone card: "${input.placeholder}"`);
+		}
 
 		// 6. the chip in a Claude Agent chat's header is the way to its key: it opens the Setup view at the Claude Agent rows, also once Pi is set up
 		{
@@ -365,6 +415,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 			const box = $("#ob-rows").getBoundingClientRect();
 			const rr = firstRow?.getBoundingClientRect();
 			check(rr && rr.height > 0 && rr.top >= box.top - 1 && rr.bottom <= box.bottom + 1, `the Claude Agent key row is not in view: ${JSON.stringify(rr)} in ${JSON.stringify(box)}`);
+			await wait(1200); // the opening fade of the full-window view must be over before the first shot
 			await shots("chip-opens-setup", undefined, "#onboarding");
 			window.crustOnboarding.close({ restore: true });
 			await wait(200);

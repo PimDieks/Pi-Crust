@@ -12,6 +12,7 @@
 (() => {
 	const REASON_SETUP = "Finish setup to send a message";
 	const REASON_PAUSE = "Choose Continue to send a message";
+	const REASON_GONE = "The chat this one was forked from is gone";
 	const DEFAULT_LIMIT = 5;
 	const KEY_HINT = "Your own Anthropic key. Usage is billed to your Anthropic account.";
 	const ENGINE_HINT = "Downloaded once, checked before use.";
@@ -26,7 +27,8 @@
 	// Returns { state, mark, parts } where parts are the three cells: mark, text (title, line, field, bar) and actions.
 	function stepCells(kind, sf, names) {
 		const st = S || { key: { state: "todo" }, engine: { state: "todo" } };
-		const mark = el("span", "ob-mark sc-mark");
+		// The card draws a circled mark; the Setup panel rows (names.plain) use exactly the marks of the other rows: a plain ✓, ○, – and !.
+		const mark = el("span", names.plain ? "ob-mark" : "ob-mark sc-mark");
 		mark.setAttribute("aria-hidden", "true");
 		const text = el("div", "ob-text");
 		const actions = el("div", "sc-actions");
@@ -320,7 +322,7 @@
 	}
 
 	// --- the message box: disabled with a reason ---------------------------------------------------------------------
-	const gateReason = (c) => (!c ? "" : c.needsSetup ? REASON_SETUP : c.pause ? REASON_PAUSE : "");
+	const gateReason = (c) => (!c ? "" : c.needsSetup ? REASON_SETUP : c.pause ? REASON_PAUSE : c.forkGone ? c.forkGone.reason : "");
 	let syncing = false;
 	function syncComposer(c = active) {
 		if (!c || c !== active) return;
@@ -358,6 +360,23 @@
 		}
 	}
 
+	// The spend limit field: text, so a comma or a point both work (a number field shows "7,5" in some locales); checked here with a readable
+	// message, then by main again. Always shown as two decimals with a point.
+	function limitInput() {
+		const num = el("input");
+		num.type = "text";
+		num.inputMode = "decimal";
+		num.autocomplete = "off";
+		num.spellcheck = false;
+		return num;
+	}
+	async function saveLimit(text) {
+		const v = UsdInput.parse(text);
+		if (!v.ok) return v;
+		const r = await crust.claude.setLimit(v.value);
+		return r && r.ok ? r : { ok: false, error: (r && r.error) || "The limit could not be saved." };
+	}
+
 	// --- the pause card ----------------------------------------------------------------------------------------------
 	function pauseCard(chat, rec) {
 		dropPause(chat);
@@ -388,20 +407,16 @@
 				change.type = "button";
 				change.dataset.action = "change-limit";
 				change.setAttribute("aria-expanded", String(p.editing));
-				change.onclick = () => ((p.editing = !p.editing), (p.error = null), draw());
+				change.onclick = () => ((p.editing = !p.editing), (p.error = null), (p.draft = undefined), draw());
 				row.append(change);
 			}
 			const kids = [title, text, row];
 			if (p.editing) {
 				const f = el("form", "sc-field pc-limit");
 				f.noValidate = true; // our own message for an amount that is out of range, not the browser's bubble
-				const label = el("label", "pc-label", "Spend limit per run");
-				const num = el("input");
-				num.type = "number";
-				num.min = "0.5";
-				num.max = "1000";
-				num.step = "0.5";
-				num.value = String(p.limit);
+				const label = el("label", "pc-label", "Spend limit per chat");
+				const num = limitInput();
+				num.value = p.draft !== undefined ? p.draft : UsdInput.show(p.limit);
 				num.id = `pc-limit-${chat.id}`;
 				label.htmlFor = num.id;
 				const save = el("button", "btn", "Save and continue");
@@ -410,9 +425,10 @@
 				f.append(label, num, save);
 				f.onsubmit = async (e) => {
 					e.preventDefault();
-					const r = await crust.claude.setLimit(Number(num.value));
+					const r = await saveLimit(num.value);
 					if (!r.ok) {
 						p.error = r.error;
+						p.draft = num.value;
 						return draw();
 					}
 					p.limit = r.limitUsd;
@@ -432,6 +448,23 @@
 		draw();
 		chat.el.append(node);
 		if (chat === active) chat.el.scrollTop = chat.el.scrollHeight;
+		syncComposer(chat);
+	}
+	// A restored fork (or rewound chat) whose old session no longer exists: a card at the top of the chat that says so, and the message box stays
+	// disabled with the reason. Nothing is sent anywhere; the person starts a new chat.
+	function forkGoneCard(chat, rec) {
+		chat.forkGone?.el.remove();
+		const forked = !/continues/.test(String(rec && rec.message));
+		const node = el("section", "pause-card gone-card");
+		node.setAttribute("role", "region");
+		const title = el("h3", "pc-title", forked ? "The original chat is gone" : "The chat this one continues is gone");
+		title.id = `gone-title-${chat.id}`;
+		node.setAttribute("aria-labelledby", title.id);
+		const text = el("div", "pc-text");
+		text.append(el("p", "pc-line", forked ? "This chat was forked from a chat that no longer exists, so there is nothing to continue from." : "The chat this one continued no longer exists, so there is nothing to continue from."), el("p", "pc-line", "Start a new chat to carry on."));
+		node.append(title, text);
+		chat.forkGone = { el: node, reason: forked ? REASON_GONE : "The chat this one continues is gone" };
+		chat.el.prepend(node);
 		syncComposer(chat);
 	}
 	function dropPause(chat) {
@@ -457,7 +490,7 @@
 				li.dataset.id = `claude-${kind}`;
 				const sf = { kind, keyOpen: false, keyBusy: false, keyError: null, engineBusy: false, engineErr: null };
 				sf.render = (focusField) => {
-					const c = stepCells(kind, sf, { key: label, engine: label, todoMark: "○", first: firstOpen() });
+					const c = stepCells(kind, sf, { key: label, engine: label, todoMark: "–", first: firstOpen(), plain: true });
 					li.className = `ob-row sc-row ${c.state === "done" ? "ready" : c.state}`;
 					const opt = el("span", "ob-optional", "Optional");
 					c.text.querySelector(".sc-title").append(opt);
@@ -480,24 +513,20 @@
 		const sf = { draft: null, error: null, saved: false };
 		sf.render = () => {
 			const current = S && Number.isFinite(Number(S.limitUsd)) ? Number(S.limitUsd) : DEFAULT_LIMIT;
-			const mark = el("span", "ob-mark sc-mark", "✓");
+			const mark = el("span", "ob-mark", "✓"); // the same mark as the Pi, Git, Project and Figma rows
 			mark.setAttribute("aria-hidden", "true");
 			const text = el("div", "ob-text");
 			const title = el("span", "ob-label sc-title", "Claude Agent spend limit");
 			title.append(el("span", "ob-optional", "Optional"));
 			const head = el("div", "sc-head");
 			head.append(title);
-			const line = el("div", "ob-line sc-line", `A Claude Agent run pauses and asks once it has used about ${usd(current)}.`);
+			const line = el("div", "ob-line sc-line", `A Claude Agent chat pauses and asks once it has used about ${usd(current)}.`);
 			const f = el("form", "sc-field pc-limit");
 			f.noValidate = true;
-			const label = el("label", "pc-label", "Spend limit per run");
-			const num = el("input");
-			num.type = "number";
-			num.min = "0.5";
-			num.max = "1000";
-			num.step = "0.5";
+			const label = el("label", "pc-label", "Spend limit per chat");
+			const num = limitInput();
 			num.id = "claude-limit-input";
-			num.value = sf.draft !== null ? sf.draft : String(current);
+			num.value = sf.draft !== null ? sf.draft : UsdInput.show(current);
 			num.oninput = () => (sf.draft = num.value);
 			label.htmlFor = num.id;
 			const save = el("button", "btn secondary", "Save");
@@ -506,10 +535,10 @@
 			f.append(label, num, save);
 			f.onsubmit = async (e) => {
 				e.preventDefault();
-				const r = await crust.claude.setLimit(Number(num.value));
+				const r = await saveLimit(num.value);
 				sf.error = r.ok ? null : r.error;
 				sf.saved = !!r.ok;
-				if (r.ok) sf.draft = null;
+				sf.draft = r.ok ? null : num.value; // a refused text stays in the field to be corrected
 				sf.render();
 			};
 			text.append(head, line, f);
@@ -556,6 +585,7 @@
 		gateReason,
 		syncComposer,
 		pauseCard,
+		forkGoneCard,
 		panelRows,
 		state: () => S,
 		cardOf: (chat) => cards.get(chat.id) || null,

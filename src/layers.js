@@ -21,6 +21,50 @@
 "use strict";
 
 selftestSteps.push(async ({ snap, wait }) => {
+	// Which elements carry `hidden` while some other rule of ours gives them a display (the bug class the global `[hidden] { display: none !important }`
+	// closes)? Recorded as they get the attribute during this step (menus, panels and cards built in JS too), listed at the end as information.
+	const shadowed = new Set();
+	const displayRules = [];
+	{
+		const walk = (rules) => {
+			for (const r of rules) {
+				if (r.type === 1) {
+					if (r.style && r.style.display && r.style.display !== "none" && !/\[hidden\]/.test(r.selectorText)) displayRules.push(r.selectorText);
+				} else if (r.type === 4) {
+					if (window.matchMedia(r.conditionText || r.media.mediaText).matches) walk(r.cssRules);
+				} else if (r.type === 12 || r.constructor.name === "CSSLayerBlockRule") walk(r.cssRules);
+			}
+		};
+		for (const sh of document.styleSheets) {
+			try {
+				walk(sh.cssRules);
+			} catch {}
+		}
+	}
+	const describeEl = (n) => `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${typeof n.className === "string" && n.className.trim() ? "." + n.className.trim().split(/\s+/).join(".") : ""}`;
+	const shadowedBy = (n) => displayRules.find((sel) => {
+		try {
+			return n.matches(sel);
+		} catch {
+			return false;
+		}
+	});
+	const noteHidden = (n) => {
+		if (n.nodeType !== 1) return;
+		for (const e of [n, ...n.querySelectorAll("[hidden]")]) {
+			if (!e.hasAttribute("hidden") || e.tagName === "OPTION") continue;
+			const by = shadowedBy(e);
+			if (by) shadowed.add(`${describeEl(e)}  <- ${by.slice(0, 60)}`);
+		}
+	};
+	noteHidden(document.documentElement);
+	const hiddenWatch = new MutationObserver((list) => {
+		for (const m of list) {
+			if (m.type === "attributes") noteHidden(m.target);
+			else for (const n of m.addedNodes) noteHidden(n);
+		}
+	});
+	hiddenWatch.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"] });
 	const LAYERS = ["base", "panel", "popover", "modal", "toast", "confirm"]; // lowest to highest, same order as styles.css
 	const BLOCKING = new Set(["modal", "confirm"]); // these dim and cover what is below on purpose
 	const cssLayer = (name) => getComputedStyle(document.documentElement).getPropertyValue(`--layer-${name}`).trim();
@@ -535,6 +579,28 @@ selftestSteps.push(async ({ snap, wait }) => {
 				await shut(first);
 			}
 		}
+	}
+	// 7. The `hidden` attribute always wins: an element with `hidden` has no box, in every tab, in both themes. A rule such as
+	//    `#browser-error { display: flex }` or `button.icon { display: inline-flex }` used to beat it (the terminal's close button
+	//    showed in the tab, which is not a bottom panel). Walks the whole DOM, so elements built in JS count too.
+	{
+		const strays = () => [...document.querySelectorAll("[hidden]")].filter((n) => n.tagName !== "OPTION" && n.getClientRects().length > 0 && getComputedStyle(n).display !== "none").map((n) => `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${n.className && typeof n.className === "string" ? "." + n.className.trim().split(/\s+/).join(".") : ""}`);
+		const problems = [];
+		const tabNames = [...document.querySelectorAll(".tabs [data-tab]")].map((b) => b.dataset.tab);
+		for (const t of ["light", "dark"]) {
+			setTheme(t);
+			for (const name of tabNames) {
+				switchTab(name);
+				await wait(600);
+				const s = strays();
+				if (s.length) problems.push(`${t}/${name}: ${s.join(", ")}`);
+				if (t === "dark" && (name === "terminal" || name === "browser")) await snap(`hidden-attr-${name}`);
+			}
+		}
+		if (problems.length) bad++;
+		console.error(`SELFTEST layers [hidden] elements have no box (every tab, both themes): ${problems.length ? "MISMATCH " + problems.join("; ") : "OK"}`);
+		hiddenWatch.disconnect();
+		console.error(`SELFTEST layers info: elements that carry [hidden] while another rule gives them a display (the global rule hides them; before it, they showed): ${[...shadowed].join(" | ") || "none"}`);
 	}
 	setTheme(was);
 	switchTab(tab);
