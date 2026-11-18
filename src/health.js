@@ -60,7 +60,7 @@
 			{ pi: "unknown", git: "unknown", project: "unknown", auth: "none" },
 			[
 				"pi|unknown|Pi is installed, but Pi Crust can't read its version.|Check again",
-				"auth|todo|Not signed in. Choose the account you already pay for.|Sign in",
+				"auth|todo|Sign in to a model provider.|Sign in",
 				"git|unknown|Can't tell if Git is installed.|Check again",
 				"project|unknown|Can't tell if that folder is a Git project.|Check again",
 				"figma|unknown|Not checked yet. You can set up Figma later in the Design tab.|Set up Figma",

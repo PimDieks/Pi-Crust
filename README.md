@@ -52,7 +52,7 @@ The installer installs for your user only (no admin) and adds Start Menu and des
 
 An app installed from a release updates itself: about 15 seconds after start, and then every hour, **Pi Crust update available** shows in the notifications. **Update** downloads it, **Restart now** installs it (or it installs when you quit), and **Release notes** opens that release on GitHub. Updates only go forward. To **go back to a previous version**, download the older installer from the [Releases page](https://github.com/PimDieks/Pi-Crust/releases) and run it over the current one: your settings and chats stay.
 
-**First launch.** Pi Crust opens a setup checklist: Pi, an AI account, Git and a project folder, with one button for each. It can install what is missing after you confirm a list of exactly what will be installed, and then a short guided task shows the loop of ask, change and undo. You can skip it; a **Setup** pill stays in the chat header until the required lines are done, and `/setup`, the command palette and the **Help** menu bring it back. See [docs/day-1.md](docs/day-1.md).
+**First launch.** Pi Crust opens a setup checklist: Pi, a model provider, Git and a project folder, with one button for each. It can install what is missing after you confirm a list of exactly what will be installed, and then a short guided task shows the loop of ask, change and undo. You can skip it; a **Setup** pill stays in the chat header until the required lines are done, and `/setup`, the command palette and the **Help** menu bring it back. See [docs/day-1.md](docs/day-1.md).
 
 Then open **Pi Crust** from the Start Menu, or use the launcher in a terminal (cmd or PowerShell):
 

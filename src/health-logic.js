@@ -14,7 +14,7 @@ const MIN_PI = "1.0.0";
 const MIN_NODE = "22.19.0";
 
 const REQUIRED = ["pi", "auth", "git", "project"];
-const LABELS = { pi: "Pi", auth: "AI account", git: "Git", project: "Project", figma: "Figma" };
+const LABELS = { pi: "Pi", auth: "Model provider", git: "Git", project: "Project", figma: "Figma" };
 
 // "git version 2.47.1.windows.1" / "v22.19.0" / "1.4.0" -> "2.47.1" / "22.19.0" / "1.4.0", or null.
 function parseVersion(text) {
@@ -68,7 +68,7 @@ function authRow(f, piFact) {
 	}
 	// A provider that can be signed in to and says "not signed in" is a definite answer. Only "couldn't check" everywhere is not.
 	const definite = rows.some((r) => r.kind !== "local" && r.status === "disconnected");
-	if (definite) return row("auth", "todo", "Not signed in. Choose the account you already pay for.", act("sign-in", "Sign in"));
+	if (definite) return row("auth", "todo", "Sign in to a model provider.", act("sign-in", "Sign in"));
 	return row("auth", "unknown", "Pi Crust can't check sign-in with this version of Pi.", act("recheck", "Check again"));
 }
 

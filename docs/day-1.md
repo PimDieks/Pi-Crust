@@ -19,7 +19,7 @@ The first time you open Pi Crust, a welcome view shows a short checklist. Each l
 | Line | What it means | The button |
 |---|---|---|
 | **Pi** | Pi is the agent. It has to be on this computer. | **Install Pi** |
-| **AI account** | Pi needs an account to think with. Use the one you already pay for. | **Sign in** |
+| **Model provider** | Pi needs a model provider (an AI service) to think with. Sign in to the one you already pay for. | **Sign in** |
 | **Git** | Pi Crust uses Git to show your changes and to undo them. | **Install Git** |
 | **Project** | The folder you want to work on. | **Choose folder** |
 | **Figma** (optional) | Lets Pi read what you select in Figma. You can do this later. | **Set up Figma** |
@@ -34,7 +34,7 @@ If the install can't run, for example on a work laptop that blocks installs, the
 
 ### Sign in
 
-**Sign in** opens the list of accounts Pi can use (Claude, GitHub Copilot, ChatGPT, or a local model with Ollama). Choose the one you already pay for. A browser window opens for the sign-in. Pi Crust never sees your password.
+**Sign in** opens the list of model providers Pi can use (Claude, GitHub Copilot, ChatGPT, or a local model with Ollama). Choose the one you already pay for. A browser window opens for the sign-in. Pi Crust never sees your password.
 
 ### Choose a folder
 

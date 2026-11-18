@@ -210,7 +210,7 @@ const BUILTIN_COMMANDS = [
 	{ name: "clone", description: "Duplicate the session at its current position", run: cloneChat },
 	{ name: "export", args: "[path]", description: "Export the session as HTML", run: exportChat },
 	{ name: "copy", description: "Copy the last assistant message", run: copyLast },
-	{ name: "setup", description: "Open the setup checklist (Pi, AI account, Git, project)", always: true, run: () => openSetup("slash", view?.id) },
+	{ name: "setup", description: "Open the setup checklist (Pi, model provider, Git, project)", always: true, run: () => openSetup("slash", view?.id) },
 	{ name: "remote", description: "Control your chats from your phone (Remote access)", run: () => window.crustRemote?.open() },
 	{ name: "quit", description: "Close Pi Crust", run: () => window.close() },
 	...Object.entries(TERMINAL_ONLY).map(([name, description]) => ({ name, description: `${description} (terminal Pi only)`, run: () => terminalOnly(name) })),

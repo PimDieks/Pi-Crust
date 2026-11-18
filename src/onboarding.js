@@ -19,7 +19,7 @@
 	const recheckBtn = $("#ob-recheck");
 	const taskLink = $("#ob-first-task");
 
-	const LABELS = { pi: "Pi", auth: "AI account", git: "Git", project: "Project", figma: "Figma" };
+	const LABELS = { pi: "Pi", auth: "Model provider", git: "Git", project: "Project", figma: "Figma" };
 	const MARK = { ready: "✓", todo: "○", unknown: "–" };
 
 	let health = null; // last result of crust.health.check()
@@ -390,7 +390,7 @@
 	const prevActions = window.crustPaletteActions;
 	window.crustPaletteActions = () => [
 		...(prevActions?.() || []),
-		{ label: "Setup checklist…", desc: "Pi, AI account, Git, project", run: () => open("palette") },
+		{ label: "Setup checklist…", desc: "Pi, model provider, Git, project", run: () => open("palette") },
 		{ label: "First task…", desc: "ask, change, undo", run: () => window.crustFirstTask?.show() },
 	];
 	crust.health.onOpen?.((what) => (what === "first-task" ? window.crustFirstTask?.show() : open("menu")));
