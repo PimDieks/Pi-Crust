@@ -190,7 +190,7 @@ function pick(o, keys) {
 // The part of an extension_ui_request the phone needs.
 function slimRequest(req, expiresAt) {
 	const out = pick(req, ["id", "method", "title", "message", "options", "placeholder", "prefill", "timeout"]);
-	if (typeof out.title === "string") out.title = truncHead(out.title, 1500);
+	if (typeof out.title === "string") out.title = truncHead(out.title, Array.isArray(req.options) && req.options.includes("Allow once") ? 30000 : 1500); // an approval shows ALL of what is approved (up to 20,000 characters)
 	if (typeof out.message === "string") out.message = truncHead(out.message, 4000);
 	if (typeof out.prefill === "string") out.prefill = truncHead(out.prefill, 32 * 1024);
 	if (Array.isArray(out.options)) out.options = out.options.slice(0, 50).map((o) => truncHead(typeof o === "string" ? o : (o?.label ?? o?.value ?? JSON.stringify(o)), 300));

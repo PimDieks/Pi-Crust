@@ -1218,17 +1218,63 @@
 		};
 		const cancel = () => mk("Cancel", "", () => respond({ cancelled: true }, btns));
 
-		box.append(el("div", "q", req.title || "Pi asks"));
+		// A permission prompt ("Allow once" ...): the question, the whole text to approve in a wrapping, scrollable box, the mode.
+		// Only its own answers, no Cancel (closing or a timeout count as Deny). Same layout as the desktop's.
+		const optLabels = (req.options || []).map((o) => (typeof o === "string" ? o : o.label || o.value || String(o)));
+		const perm = req.method === "select" && typeof req.title === "string" && optLabels.includes("Allow once") && optLabels.includes("Deny");
+		box.classList.toggle("perm", perm);
+		if (perm) {
+			const lines = req.title.split("\n");
+			const question = lines.shift();
+			const mode = lines.length && /^Mode: /.test(lines[lines.length - 1]) ? lines.pop() : "";
+			const reasonRe = /^(This file can |This is a network path|The project folder is |Pi Crust could not read |The computer may send |Resolves to )/;
+			const longRe = /^This (command|path|tool call) is [\d,.]+ characters long/;
+			let longKind = "";
+			const reasons = [];
+			const peel = (end) => {
+				const i = end ? lines.length - 1 : 0;
+				const m = lines[i].match(longRe);
+				if (m) longKind = m[1];
+				else reasons.push(lines[i]);
+				end ? lines.pop() : lines.shift();
+			};
+			while (lines.length && (reasonRe.test(lines[0]) || longRe.test(lines[0]))) peel(false);
+			while (lines.length > 1 && (reasonRe.test(lines[lines.length - 1]) || longRe.test(lines[lines.length - 1]))) peel(true);
+			box.append(el("div", "q", question || "Pi asks"));
+			if (reasons.length) box.append(el("div", "m ask-reason", reasons.join("\n")));
+			const detail = el("div", `ask-detail${longKind ? " long" : ""}`);
+			const text = lines.join("\n");
+			const pre = el("pre", "ask-text");
+			let last = 0;
+			for (const m of text.matchAll(/\u27e8[^\u27e9\n]{1,40}\u27e9/g)) {
+				if (m.index > last) pre.append(text.slice(last, m.index));
+				pre.append(el("span", "ask-mark", m[0]));
+				last = m.index + m[0].length;
+			}
+			if (last < text.length) pre.append(text.slice(last));
+			detail.append(pre);
+			if (longKind) {
+				detail.append(el("div", "ask-end", `End of ${longKind}`));
+				detail.tabIndex = 0;
+			}
+			box.append(detail);
+			if (mode) box.append(el("div", "ask-mode", mode));
+			if (longKind) box.append(el("div", "ask-long", `Long ${longKind}: scroll to read all of it.`));
+		} else box.append(el("div", "q", req.title || "Pi asks"));
 		if (req.message) box.append(el("div", "m", req.message));
 		if (req.method === "select") {
 			const opts = el("div", "opts");
+			let deny = null;
 			for (const o of req.options || []) {
 				const label = typeof o === "string" ? o : o.label || o.value || String(o);
 				const value = typeof o === "string" ? o : o.value ?? label;
-				opts.append(mk(label, "", () => respond({ value }, btns)));
+				const b = mk(label, perm ? (label === "Allow once" ? "primary" : label === "Deny" ? "ask-deny" : "") : "", () => respond({ value }, btns));
+				if (perm && label === "Deny") deny = b;
+				opts.append(b);
 			}
-			opts.append(cancel());
+			if (!perm) opts.append(cancel());
 			box.append(opts);
+			if (deny) deny.focus({ preventScroll: true }); // the safe default: Enter on open can only deny
 		} else if (req.method === "confirm") {
 			const opts = el("div", "opts inline");
 			opts.append(mk("Yes", "primary", () => respond({ confirmed: true }, btns)), mk("No", "", () => respond({ confirmed: false }, btns)));
