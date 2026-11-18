@@ -158,6 +158,7 @@
 				<header class="pane-header">
 					<span class="pane-title">Pi</span>
 					<button type="button" id="ctx-meter" title="Model, context and usage" aria-haspopup="dialog" aria-expanded="false"><span class="pill-model">Model</span><svg class="pill-chev" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg><span class="meter-seg" data-seg="ctx" hidden><span class="meter-label">Ctx</span><span class="ctx-bar"><span></span></span><span class="ctx-pct"></span></span><span class="meter-seg" data-seg="copilot" hidden><span class="meter-label">Copilot</span><span class="ctx-bar"><span></span></span><span class="ctx-pct"></span></span></button>
+					<button type="button" id="setup-pill" class="st-pill" aria-haspopup="dialog" hidden></button>
 					<span class="spacer"></span>
 					<button type="button" class="icon remote-indicator off" id="remote-indicator" title="Remote access: off" aria-label="Remote access" aria-haspopup="menu" aria-expanded="false" hidden><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/></svg><span class="ri-count"></span></button>
 					<button class="icon" id="open-palette" title="Command palette (⌘K)" aria-label="Command palette"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg></button>
@@ -197,6 +198,21 @@
 		</div>
 
 		<div id="toasts"></div>
+		<div id="onboarding" hidden>
+			<div class="ob-card" role="dialog" aria-modal="true" aria-labelledby="ob-title" aria-describedby="ob-sub">
+				<h1 id="ob-title">Welcome to Pi Crust</h1>
+				<p id="ob-sub" class="ob-sub">A few things to set up before your first chat.</p>
+				<ul id="ob-rows" class="ob-rows" role="list" aria-label="Setup checklist"></ul>
+				<span class="fp-sr" id="ob-live" role="status" aria-live="polite"></span>
+				<div class="ob-actions">
+					<button type="button" class="ob-link" id="ob-recheck">Check again</button>
+					<button type="button" class="ob-link" id="ob-first-task" hidden>Show the first task</button>
+					<span class="spacer"></span>
+					<button type="button" class="btn secondary" id="ob-skip">Skip for now</button>
+					<button type="button" class="btn" id="ob-start">Start</button>
+				</div>
+			</div>
+		</div>
 		<div id="repo-picker" hidden>
 			<div class="picker-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
 				<h1 id="picker-title">Which repo do you want to work in?</h1>
@@ -262,6 +278,7 @@
 		<script src="mendix.js"></script>
 		<script src="turn-shots.js"></script>
 		<script src="timeline.js"></script>
+		<script src="onboarding.js"></script>
 		<script src="repos.js"></script>
 		<script src="layers.js"></script>
 		<script src="voice-ui.js"></script>

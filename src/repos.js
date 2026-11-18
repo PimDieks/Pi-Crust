@@ -5,17 +5,19 @@ let pickerItems = [];
 let pickerIndex = 0;
 let pickerOpen = false;
 let pickerData = null;
+let pickerCancellable = false; // the welcome view opens the picker over itself: there is something to go back to
 
 function shortPath(p, home) {
 	return tildePath(p, home);
 }
 
-async function openRepoPicker() {
+async function openRepoPicker({ cancellable = false } = {}) {
 	if (pickerOpen) return;
 	pickerOpen = true;
+	pickerCancellable = cancellable;
 	crust.browser.hide(true, "picker");
 	$("#repo-picker").hidden = false;
-	$("#picker-cancel").hidden = !info.repo; // at startup there's nothing to go back to
+	$("#picker-cancel").hidden = !info.repo && !cancellable; // at startup there's nothing to go back to
 	$("#picker-filter").value = "";
 	$("#picker-list").replaceChildren(el("div", "picker-group", "Looking for repos…"));
 	$("#picker-filter").focus();
@@ -24,7 +26,7 @@ async function openRepoPicker() {
 }
 
 function closeRepoPicker() {
-	if (!pickerOpen || !info.repo) return; // stays open until a repo is chosen
+	if (!pickerOpen || (!info.repo && !pickerCancellable)) return; // stays open until a repo is chosen
 	pickerOpen = false;
 	$("#repo-picker").hidden = true;
 	crust.browser.hide(false, "picker");
@@ -138,7 +140,8 @@ function initRepos() {
 async function startRepos() {
 	const { repo } = await crust.repos.uiReady();
 	applyRepo(repo);
-	if (!repo) openRepoPicker();
+	const welcome = await window.crustOnboarding?.atStart(); // first launch: the welcome view opens, its Project row picks the folder
+	if (!repo && !welcome) openRepoPicker();
 }
 
 // Switching repos while a chat is working: the "Pi is still working" confirmation must be on top of the picker (it is
