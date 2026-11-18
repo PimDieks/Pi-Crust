@@ -42,10 +42,8 @@ let chatSeq = 0;
 // ---------------------------------------------------------------------------
 // Environment: Electron started from the Dock has a minimal PATH, so add nvm's node and Homebrew.
 // ---------------------------------------------------------------------------
-// The PATH key as the environment spells it ("Path" on Windows); setting another spelling would leave two.
-const pathKey = (env) => Object.keys(env).find((k) => k.toUpperCase() === "PATH") || "PATH";
-// Windows: nvm-windows keeps each version in %NVM_HOME%\vX.Y.Z (node.exe right in it).
-const nvmWinHome = () => process.env.NVM_HOME || (process.env.APPDATA ? path.join(process.env.APPDATA, "nvm") : null);
+const { pathKey, nvmWinHome, onPath } = require("./env-path");
+const piLocator = require("./agents/pi/locate");
 function buildEnvWin() {
 	const extra = [];
 	const home = nvmWinHome();
@@ -56,8 +54,7 @@ function buildEnvWin() {
 			if (fs.existsSync(path.join(preferred, "node.exe"))) extra.push(preferred);
 		}
 	} catch {}
-	const pi = findPi();
-	if (pi) extra.push(pi.binDir);
+	extra.push(...piLocator.pathExtras(findPi()));
 	const key = pathKey(process.env);
 	const env = { ...process.env, [key]: [...extra, process.env[key] || ""].join(path.delimiter) };
 	delete env.ELECTRON_RUN_AS_NODE;
@@ -76,130 +73,20 @@ function buildEnv() {
 		}
 	} catch {}
 	// Pi's own bin last, so `pi` is on PATH (terminal, scripts) without overriding the repo's Node.
-	const pi = findPi();
-	if (pi) extra.push(pi.binDir);
+	extra.push(...piLocator.pathExtras(findPi()));
 	const env = { ...process.env, PATH: [...extra, process.env.PATH || ""].join(":") };
 	delete env.ELECTRON_RUN_AS_NODE;
 	return env;
 }
 
-// Where Pi is installed, independent of the opened repo: PI_CRUST_PI, nvm's default version, any other nvm
-// version (newest first), then Homebrew / ~/.local. Returns the resolved CLI script and the Node next to it, so Pi
-// always runs on the Node it was installed with, whatever the repo's .nvmrc says.
+// Where Pi is installed lives in agents/pi/locate.js. The selftest switch stays here, next to SELFTEST.
 function locatePi() {
 	if (SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1") return null; // selftest only: act as if Pi isn't installed
-	if (IS_WIN) return findPiWin();
-	const home = os.homedir();
-	const nvmDir = path.join(home, ".nvm", "versions", "node");
-	const candidates = [];
-	if (process.env.PI_CRUST_PI) candidates.push(process.env.PI_CRUST_PI);
-	try {
-		const def = fs.readFileSync(path.join(home, ".nvm", "alias", "default"), "utf8").trim().replace(/^v/, "");
-		candidates.push(path.join(nvmDir, `v${def}`, "bin", "pi"));
-	} catch {}
-	try {
-		const versions = fs.readdirSync(nvmDir).filter((v) => /^v\d/.test(v));
-		const num = (v) => v.slice(1).split(".").map(Number);
-		versions.sort((a, b) => {
-			const [x, y] = [num(a), num(b)];
-			for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return y[i] - x[i];
-			return 0;
-		});
-		for (const v of versions) candidates.push(path.join(nvmDir, v, "bin", "pi"));
-	} catch {}
-	candidates.push("/opt/homebrew/bin/pi", "/usr/local/bin/pi", path.join(home, ".local", "bin", "pi"));
-	for (const bin of candidates) {
-		if (!fs.existsSync(bin)) continue;
-		const binDir = path.dirname(bin);
-		const nodeHere = path.join(binDir, "node");
-		let script = null;
-		try {
-			script = fs.realpathSync(bin);
-		} catch {}
-		// A JS entry point next to a Node binary: run it with that Node. Otherwise run the binary as is.
-		if (script && fs.existsSync(nodeHere) && /\.(c|m)?js$/.test(script)) {
-			return { binDir, command: nodeHere, args: [script] };
-		}
-		return { binDir, command: bin, args: [] };
-	}
-	return null;
+	return piLocator.locate();
 }
 // Remembered until `findPi({ fresh: true })` (see pi-cache.js): installing Pi while the app runs must work without a restart.
 const findPi = makeFindPi(locatePi);
 
-// Windows: PI_CRUST_PI (cli.js, pi.cmd or pi.exe), npm's global folder (%APPDATA%\npm), nvm-windows (the active
-// %NVM_SYMLINK%, then %NVM_HOME%\vX newest first), then PATH. Never through the pi.cmd shim (a .cmd only runs in a
-// shell, which breaks stdio and arguments): its CLI script runs with the node.exe next to it, else the one on PATH.
-const PI_PACKAGES = [require("./pi-package").PI_PACKAGE.name, ...require("./pi-package").PI_OLD_NAMES].map((n) => path.join(...n.split("/"))); // current scope first; the deprecated one is still found (see pi-package.js)
-function onPath(name, env = process.env) {
-	for (const dir of String(env[pathKey(env)] || "").split(path.delimiter)) {
-		if (!dir) continue;
-		const p = path.join(dir.replace(/^"|"$/g, ""), name);
-		if (fs.existsSync(p)) return p;
-	}
-	return null;
-}
-// pi.cmd (npm's cmd-shim) -> the script it runs: "%dp0%\node_modules\...\cli.js".
-function scriptOfShim(cmd) {
-	try {
-		const m = /"%dp0%\\([^"]+?\.[cm]?js)"/i.exec(fs.readFileSync(cmd, "utf8"));
-		return m ? path.join(path.dirname(cmd), m[1]) : null;
-	} catch {
-		return null;
-	}
-}
-// <prefix>\node_modules\<pkg>\package.json "bin" -> the CLI script.
-function scriptOfPrefix(prefix) {
-	for (const pkg of PI_PACKAGES) {
-		const dir = path.join(prefix, "node_modules", pkg);
-		try {
-			const bin = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).bin;
-			const rel = typeof bin === "string" ? bin : bin && bin.pi;
-			if (rel && fs.existsSync(path.join(dir, rel))) return path.join(dir, rel);
-		} catch {}
-	}
-	return null;
-}
-function findPiWin() {
-	const usualNode = () => [process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs", "node.exe"), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "nodejs", "node.exe")].find((p) => p && fs.existsSync(p)) || null; // a Node installed after the app started isn't on its PATH yet
-	const nodeFor = (binDir) => (fs.existsSync(path.join(binDir, "node.exe")) ? path.join(binDir, "node.exe") : onPath("node.exe") || usualNode());
-	const viaScript = (binDir, script) => {
-		const node = script && nodeFor(binDir);
-		return node ? { binDir, command: node, args: [script] } : null;
-	};
-	const given = process.env.PI_CRUST_PI;
-	if (given && fs.existsSync(given)) {
-		if (/\.exe$/i.test(given)) return { binDir: path.dirname(given), command: given, args: [] };
-		const script = /\.(cmd|bat)$/i.test(given) ? scriptOfShim(given) : given;
-		const r = viaScript(path.dirname(given), script);
-		if (r) return r;
-	}
-	const prefixes = [];
-	if (process.env.APPDATA) prefixes.push(path.join(process.env.APPDATA, "npm"));
-	if (process.env.NVM_SYMLINK) prefixes.push(process.env.NVM_SYMLINK);
-	try {
-		const home = nvmWinHome();
-		const versions = fs.readdirSync(home).filter((v) => /^v\d/.test(v));
-		const num = (v) => v.slice(1).split(".").map(Number);
-		versions.sort((a, b) => {
-			const [x, y] = [num(a), num(b)];
-			for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return y[i] - x[i];
-			return 0;
-		});
-		for (const v of versions) prefixes.push(path.join(home, v));
-	} catch {}
-	for (const prefix of prefixes) {
-		const r = viaScript(prefix, scriptOfPrefix(prefix));
-		if (r) return r;
-	}
-	const shim = onPath("pi.cmd");
-	if (shim) {
-		const r = viaScript(path.dirname(shim), scriptOfShim(shim) || scriptOfPrefix(path.dirname(shim)));
-		if (r) return r;
-	}
-	const exe = onPath("pi.exe");
-	return exe ? { binDir: path.dirname(exe), command: exe, args: [] } : null;
-}
 
 
 // Feature modules that follow the UI's events even without a window (remote-main.js).
