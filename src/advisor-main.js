@@ -43,6 +43,7 @@ function ensurePointer({ target, dir = agentDir() }) {
 }
 
 function register() {
+	if (!require("electron").app.isPackaged && process.env.PI_CRUST_SELFTEST === "1") return; // a test run must not repoint the user's Pi at a test checkout
 	try {
 		const result = ensurePointer({ target: path.join(__dirname, "pi-extension", "advisor.ts") });
 		if (result !== "unchanged") console.log(`[advisor] pointer in ~/.pi/agent/extensions: ${result}`);
