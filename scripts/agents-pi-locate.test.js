@@ -126,3 +126,10 @@ test("windows lookup: npm prefix, both package scopes (current first), nvm newes
 
 	withEnv({ APPDATA: empty, PATH: empty, NVM_HOME: empty, ProgramFiles: empty, LOCALAPPDATA: empty }, () => assert.strictEqual(L.findPiWin(), null));
 });
+
+test("PI_CRUST_PI is a documented user setting (README), so the lookup honours it in every mode, not only in selftest", () => {
+	const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+	assert.match(readme, /\|\s*`PI_CRUST_PI`\s*\|/);
+	const src = fs.readFileSync(path.join(__dirname, "..", "src", "agents", "pi", "locate.js"), "utf8");
+	assert.ok(!/SELFTEST/.test(src), "locate.js has no selftest gate on PI_CRUST_PI");
+});
