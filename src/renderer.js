@@ -734,8 +734,10 @@ const scroll = () => {
 	if (atBottom) messages.scrollTop = messages.scrollHeight;
 };
 function addNotice(text, cls = "notice") {
-	messages.append(el("div", `msg ${cls}`, text));
+	const n = el("div", `msg ${cls}`, text);
+	messages.append(n);
 	scroll();
+	return n;
 }
 
 // Setup (the welcome view) isn't built yet: this only announces the request. The welcome view listens for it:
@@ -1269,8 +1271,17 @@ function handleRecord(r) {
 			return;
 		}
 		case "auto_retry_start":
-			addNotice(`Retrying (${r.attempt}/${r.maxAttempts}): ${r.errorMessage}`);
+			chat.retryNotice = addNotice(`Retrying (${r.attempt}/${r.maxAttempts}): ${r.errorMessage}`);
 			return;
+		case "auto_retry_end": {
+			// Closes the notice auto_retry_start opened (Claude Agent's adapter sends it; Pi's own does not).
+			const n = chat.retryNotice;
+			chat.retryNotice = null;
+			const text = r.success ? `Retry ${r.attempt} worked.` : `Retrying stopped after attempt ${r.attempt}${r.finalError ? `: ${r.finalError}` : "."}`;
+			if (n && n.isConnected) n.textContent = text;
+			else addNotice(text);
+			return;
+		}
 		case "compaction_start":
 			addNotice("Compacting the conversation…");
 			return;

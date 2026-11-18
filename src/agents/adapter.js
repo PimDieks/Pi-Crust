@@ -56,7 +56,7 @@ const REQUEST_TYPES = Object.freeze([
 	"extension_ui_response", // one answer per request id; no response record
 ]);
 
-// Records the app receives (17 types).
+// Records the app receives (18 types).
 const RECORD_TYPES = Object.freeze([
 	"response",
 	"agent_start",
@@ -70,6 +70,7 @@ const RECORD_TYPES = Object.freeze([
 	"tool_execution_update",
 	"tool_execution_end",
 	"auto_retry_start",
+	"auto_retry_end", // sent by the Claude adapter only: closes the notice auto_retry_start opens
 	"compaction_start",
 	"compaction_end",
 	"session_info_changed",
