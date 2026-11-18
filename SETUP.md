@@ -93,6 +93,8 @@ Without Tailscale, the panel can also serve your Wi-Fi (plain http, no notificat
 
 Everything below is for Windows 10 or 11 and PowerShell. The macOS steps above stay as they are.
 
+Using the installer from the [Releases page](https://github.com/PimDieks/Pi-Crust/releases)? Then skip the prerequisites: the first-launch checklist installs Node.js, Git and Pi for you, after you confirm the list. See [docs/day-1.md](docs/day-1.md). The prerequisites below are for running from a clone.
+
 ### Prerequisites
 
 - Node LTS from [nodejs.org](https://nodejs.org), or [nvm-windows](https://github.com/coreybutler/nvm-windows)

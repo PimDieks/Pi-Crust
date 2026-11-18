@@ -386,6 +386,15 @@
 		return false;
 	}
 
+	// Ways back in: the palette (here), /setup (slash.js), the header pill, the Help menu, the model panel and the Pi-missing message.
+	const prevActions = window.crustPaletteActions;
+	window.crustPaletteActions = () => [
+		...(prevActions?.() || []),
+		{ label: "Setup checklist…", desc: "Pi, AI account, Git, project", run: () => open("palette") },
+		{ label: "First task…", desc: "ask, change, undo", run: () => window.crustFirstTask?.show() },
+	];
+	crust.health.onOpen?.((what) => (what === "first-task" ? window.crustFirstTask?.show() : open("menu")));
+
 	window.crustOnboarding = {
 		open,
 		close,
@@ -566,6 +575,47 @@
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 		await wait(300);
 		say("escape skips", !opened && root.hidden && !pill.hidden);
+		// --- ways back in: palette, /setup (with no Pi running), the window event, the model panel's empty state ---
+		await setState({ pi: "missing", node: "missing" });
+		const userMsgs = () => active.el.querySelectorAll(".msg.user").length;
+		const sent0 = userMsgs();
+		await openPalette("setup");
+		await wait(300);
+		const setupItem = paletteItems.find((i) => i.label === "Setup checklist…");
+		say("palette lists setup", !!setupItem && typeof setupItem.run === "function", `items=${paletteItems.map((i) => i.label).join(" | ")}`);
+		setupItem?.run();
+		closePalette();
+		await waitFor(() => opened);
+		say("palette opens it", opened && !root.hidden);
+		await skip();
+		await openPalette("first task");
+		await wait(300);
+		say("palette lists first task", paletteItems.some((i) => i.label === "First task…"), `items=${paletteItems.map((i) => i.label).join(" | ")}`);
+		closePalette();
+		const readyBefore = state.ready;
+		state.ready = false; // a chat with no running Pi
+		const handled = await sendPrompt("/setup");
+		await waitFor(() => opened);
+		const toastText = [...document.querySelectorAll("#toasts .toast")].map((x) => x.textContent).join("|");
+		say("/setup with no Pi", handled === true && opened && userMsgs() === sent0 && !/still starting|isn't running/.test(toastText), `handled=${handled} opened=${opened} messages=${userMsgs() - sent0} toasts="${toastText}"`);
+		await skip();
+		const other = await sendPrompt("/reload");
+		state.ready = readyBefore;
+		say("other commands still need Pi", other === false && !opened);
+		window.dispatchEvent(new CustomEvent("crust:open-setup", { detail: { source: "pi-missing", chatId: active.id } }));
+		await waitFor(() => opened);
+		say("the Pi-missing button opens it", opened);
+		await skip();
+		const models0 = active.models;
+		active.models = [];
+		openContextPanel();
+		await wait(300);
+		const link = [...document.querySelectorAll("#ctx-panel .ctx-empty .ob-link")].find((b) => b.textContent === "Open setup");
+		link?.click();
+		await waitFor(() => opened);
+		active.models = models0;
+		say("model panel link", !!link && opened && !$("#ctx-panel"), `link=${!!link}`);
+		await skip();
 		// everything done: no pill
 		await setState({ figma: "ready" });
 		say("no pill when done", pill.hidden && health.ready);

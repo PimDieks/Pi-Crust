@@ -201,6 +201,7 @@ contextBridge.exposeInMainWorld("crust", {
 		stubSet: (s) => ipcRenderer.invoke("health:stubSet", s), // selftest only
 		installPlan: (o) => ipcRenderer.invoke("health:installPlan", o), // { needs, plan: { ok, steps, lines, text, manual } }: the list for the confirm
 		install: (o) => ipcRenderer.invoke("health:install", o), // after the confirm: { ok, error, blocked, manual, details, health }
+		onOpen: on("onboarding:open"), // from the Help menu: "setup" | "first-task"
 		onInstallProgress: on("health:install-progress"), // { kind: start | step | line... | done | fail | end, id, text }
 	},
 	remote: {

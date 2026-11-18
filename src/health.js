@@ -146,13 +146,14 @@
 		let opened = null;
 		window.addEventListener("crust:open-setup", (e) => (opened = e.detail));
 		for (let t = 0; t < 15000 && !(active.dead || active.state.ready); t += 100) await wait(100);
-		const body = () => document.body.innerText;
+		const body = () => `${$("#chat-pane").innerText}
+${$("#toasts").innerText}`; // the chat and its notices; the Commits list may quote this very change in a commit subject
 		const errBoxes = () => [...document.querySelectorAll(".msg.error")];
 		const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label && b.offsetParent);
 		const clean = !/ENOENT|spawn pi/i.test(body());
 		if (!noPi) {
 			const ok = active.state.ready && !active.dead && !errBoxes().length && !btn("Open setup") && clean;
-			console.error(`SELFTEST onboarding-exit control: ready=${active.state.ready} errorBoxes=${errBoxes().length} openSetup=${!!btn("Open setup")} enoentOnScreen=${!clean} -> ${ok ? "OK" : "MISMATCH"}`);
+			console.error(`SELFTEST onboarding-exit control: ready=${active.state.ready} errorBoxes=${errBoxes().length} openSetup=${!!btn("Open setup")} enoentOnScreen=${!clean}${clean ? "" : ` ("${(/(.{0,40})(ENOENT|spawn pi)(.{0,40})/is.exec(body()) || [""])[0].replace(/\s+/g, " ")}")`} -> ${ok ? "OK" : "MISMATCH"}`);
 			return;
 		}
 		const box = errBoxes().find((b) => b.textContent.startsWith("Pi isn't installed yet. Open setup to install it."));

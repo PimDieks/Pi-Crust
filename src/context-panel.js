@@ -126,7 +126,19 @@ function modelParts() {
 	const head = el("div", `ctx-head${window.crustSubs ? " ctx-models-head" : ""}`);
 	head.append(el("span", "ctx-title", "Model"));
 	const parts = [head];
-	if (!models.length) return [...parts, el("div", "ctx-empty", !active?.state.ready ? "Starting Pi…" : all.length ? "No models from this subscription in this chat." : "No models available.")];
+	if (!models.length) {
+		const empty = el("div", "ctx-empty", !active?.state.ready ? "Starting Pi…" : all.length ? "No models from this subscription in this chat." : "No models available.");
+		if (active?.state.ready && !all.length) {
+			const link = el("button", "ob-link", "Open setup");
+			link.type = "button";
+			link.onclick = () => {
+				closeContextPanel();
+				openSetup("models", active.id);
+			};
+			empty.append(" ", link);
+		}
+		return [...parts, empty];
+	}
 	if (models.length > 8) {
 		const f = el("input", "ctx-filter");
 		f.placeholder = "Filter models…";

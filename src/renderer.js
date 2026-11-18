@@ -1950,7 +1950,7 @@ async function submit({ steer = false } = {}) {
 
 // Send a prompt (or a /command); queued as steering while Pi works. Returns false when Pi rejected it.
 async function sendPrompt(text, images = [], { steer = false } = {}) {
-	if (!state.ready) {
+	if (!state.ready && !(!images.length && isAlwaysCommand(text))) {
 		notReadyToast();
 		return false;
 	}

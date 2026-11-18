@@ -210,6 +210,7 @@ const BUILTIN_COMMANDS = [
 	{ name: "clone", description: "Duplicate the session at its current position", run: cloneChat },
 	{ name: "export", args: "[path]", description: "Export the session as HTML", run: exportChat },
 	{ name: "copy", description: "Copy the last assistant message", run: copyLast },
+	{ name: "setup", description: "Open the setup checklist (Pi, AI account, Git, project)", always: true, run: () => openSetup("slash", view?.id) },
 	{ name: "remote", description: "Control your chats from your phone (Remote access)", run: () => window.crustRemote?.open() },
 	{ name: "quit", description: "Close Pi Crust", run: () => window.close() },
 	...Object.entries(TERMINAL_ONLY).map(([name, description]) => ({ name, description: `${description} (terminal Pi only)`, run: () => terminalOnly(name) })),
@@ -225,11 +226,26 @@ window.crustLocalCommands ||= [];
 const allBuiltinCommands = () => [...BUILTIN_COMMANDS, ...window.crustLocalCommands];
 
 // Returns true when `text` was a built-in command and has been handled here.
+// Commands that need no running Pi (/setup).
+const isAlwaysCommand = (text) => {
+	const m = /^\/(\S+)/.exec(text.trim());
+	return !!m && allBuiltinCommands().some((c) => c.always && c.name === m[1]);
+};
+
 async function handleBuiltinCommand(text) {
 	const m = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
 	if (!m) return false;
 	const cmd = allBuiltinCommands().find((c) => c.name === m[1]);
 	if (!cmd) return false;
+	if (cmd.always) {
+		// works without Pi: it is the way to get one
+		try {
+			await cmd.run((m[2] || "").trim());
+		} catch (e) {
+			toast(`/${cmd.name} failed: ${e.message}`, "error");
+		}
+		return true;
+	}
 	if (!state.ready) {
 		notReadyToast();
 		return true;

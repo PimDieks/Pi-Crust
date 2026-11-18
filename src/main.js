@@ -1536,6 +1536,7 @@ function buildMenu() {
 		},
 		// Windows: no Close (Ctrl+W) here, closing the window quits the app and every chat; File > Exit stays.
 		IS_WIN ? { label: "Window", submenu: [{ role: "minimize" }] } : { role: "windowMenu" },
+		require("./help-menu").helpMenu({ send, openExternal: (url) => shell.openExternal(url) }),
 	];
 	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
