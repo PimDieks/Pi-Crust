@@ -42,9 +42,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 	// layer: the --layer-* it must use; plus: its offset inside that layer (distinct levels for modals that can co-occur).
 	// Pi's question and the approval prompt of the permission modes: both docked in #ask, in the chat pane's flow, no z-index of
 	// their own. The approval prompt has a command to approve (the long one is the phone-view worst case) and three answers.
-	const LONG_COMMAND = "npm run build -- --mode production " + "--define:FEATURE_FLAG_NUMBER_ONE=enabled ".repeat(40) + "--outdir dist
-" + "x".repeat(700) + "
-node scripts/cleanup.js --really --everything";
+	const LONG_COMMAND = "npm run build -- --mode production " + "--define:FEATURE_FLAG_NUMBER_ONE=enabled ".repeat(40) + "--outdir dist\n" + "x".repeat(700) + "\nnode scripts/cleanup.js --really --everything";
 	const askOverlay = (name, spec, extra = {}) => ({
 		name,
 		layer: "base",
@@ -66,14 +64,9 @@ node scripts/cleanup.js --really --everything";
 	const PERM_OPTIONS = ["Allow once", "Allow for this chat", "Deny"];
 	const OVERLAYS = [
 		askOverlay("ask", { title: "Layers test", message: "Pick one", options: ["One", "Two"] }),
-		askOverlay("perm-ask", { title: 'Allow this command?
-git commit -m "Fix login"
-Mode: Ask before commands', options: PERM_OPTIONS }),
+		askOverlay("perm-ask", { title: 'Allow this command?\ngit commit -m "Fix login"\nMode: Ask before commands', options: PERM_OPTIONS }),
 		// The long command takes part in the explicit cases only (alone, toasts, slash menu, welcome view), not in the pair matrix.
-		askOverlay("perm-ask-long", { title: `Allow this command?
-This command is ${LONG_COMMAND.length} characters long. Read all of it before you allow it.
-${LONG_COMMAND}
-Mode: Ask before commands`, options: PERM_OPTIONS }, { with: [] }),
+		askOverlay("perm-ask-long", { title: `Allow this command?\nThis command is ${LONG_COMMAND.length} characters long. Read all of it before you allow it.\n${LONG_COMMAND}\nMode: Ask before commands`, options: PERM_OPTIONS }, { with: [] }),
 		{
 			name: "diff-add",
 			layer: "panel",

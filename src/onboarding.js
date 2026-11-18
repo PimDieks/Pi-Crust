@@ -198,7 +198,9 @@
 		if (typeof closeContextPanel === "function") closeContextPanel();
 		document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
 		document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-		if (document.activeElement && document.activeElement.closest?.("#composer")) document.activeElement.blur();
+		const input = $("#input");
+		if (document.activeElement === input) input.blur();
+		input.dispatchEvent(new FocusEvent("blur")); // the menus close on blur; an unfocused window (a test run) never sends the real one
 	}
 
 	async function open(source = "menu") {
