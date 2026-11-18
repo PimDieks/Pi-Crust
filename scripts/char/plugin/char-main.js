@@ -8,6 +8,10 @@
 const fs = require("node:fs");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+// "<TMP>" in a step's strings is the run's temp folder (where the events file lives).
+const sub = (v) => (typeof v === "string" ? v.replace("<TMP>", path.dirname(process.env.PI_CRUST_CHAR_OUT)) : Array.isArray(v) ? v.map(sub) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)])) : v);
 const get = (o, dotted) => dotted.split(".").reduce((v, k) => (v == null ? undefined : v[k]), o);
 
 function register(ctx) {
@@ -75,6 +79,11 @@ function register(ctx) {
 				}
 				return { gone, hadPid: typeof pid === "number" };
 			}
+			case "git": {
+				// A git command in the fixture repo (for example: git worktree add), to set a scenario up.
+				const r = spawnSync("git", sub(s.args), { cwd: process.env.PI_CRUST_CWD, stdio: "ignore" });
+				return { status: r.status };
+			}
 			case "unsetEnv":
 			delete process.env[s.name]; // "installing Pi while the app runs": the next search finds it
 			return { unset: s.name };
@@ -84,7 +93,7 @@ function register(ctx) {
 				// Calls a handler the app registered with ipcMain.handle, as the renderer would.
 				const h = ctx.ipcMain._invokeHandlers && ctx.ipcMain._invokeHandlers.get(s.channel);
 				if (!h) return { error: "no handler" };
-				const r = await h({ sender: ctx.win && ctx.win.webContents }, ...(s.args || []));
+				const r = await h({ sender: ctx.win && ctx.win.webContents }, ...sub(s.args || []));
 				if (s.summary === "subs-status") return { rows: (r.rows || []).filter((x) => x.kind === "oauth").map((x) => [x.id, x.status, x.detail]) };
 				return { result: r };
 			}
