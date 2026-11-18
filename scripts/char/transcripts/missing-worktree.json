@@ -1,6 +1,6 @@
 {
 	"name": "missing-worktree",
-	"description": "A chat in a worktree whose process ended and whose folder was then removed: a restart reports the missing worktree (pi:started with missingWorktree, then pi:exit with the error) and spawns nothing.",
+	"description": "A chat in a worktree whose process ended and whose folder was then removed: a restart reports the missing worktree (pi:started with missingWorktree, then pi:exit with the error) and spawns nothing. The 2500 ms settle before the restart lets main's 2 s worktree-list cache (src/worktree-main.js listCached) expire; without it the restart sees the removed worktree as still listed and the result depends on timing.",
 	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
 	"state": {
 		"model": {
@@ -103,6 +103,10 @@
 		{
 			"do": "rm",
 			"path": "<TMP>/wt"
+		},
+		{
+			"do": "settle",
+			"ms": 2500
 		},
 		{
 			"do": "restart",

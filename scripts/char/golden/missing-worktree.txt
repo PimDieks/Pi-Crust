@@ -21,12 +21,13 @@ E {"src":"drive","i":6,"do":"waitEmit","matched":true}
 E {"src":"drive","i":7,"do":"settle"}
 E {"src":"drive","i":8,"do":"git","status":0}
 E {"src":"drive","i":9,"do":"rm","removed":true}
-E {"src":"main","channel":"pi:started","payload":{"chatId":"chat-2","cwd":"<TMP>/wt","worktree":{"cwd":"<TMP>/wt","branch":"char-wt"},"sessionFile":null}}
-E {"src":"drive","i":10,"do":"restart","restarted":true}
-E {"src":"main","channel":"pi:exit","payload":{"chatId":"chat-2","error":"spawn C:\\Program Files\\nodejs\\node.exe ENOENT","errorCode":"ENOENT","notInstalled":false}}
-E {"src":"drive","i":11,"do":"waitEmit","matched":false}
-E {"src":"drive","i":12,"do":"settle"}
-E {"src":"drive","i":13,"do":"request","result":{"success":false,"error":"Pi is not running"}}
+E {"src":"drive","i":10,"do":"settle"}
+E {"src":"main","channel":"pi:started","payload":{"chatId":"chat-2","cwd":"<REPO>","worktree":null,"missingWorktree":"<TMP>/wt","sessionFile":null}}
+E {"src":"main","channel":"pi:exit","payload":{"chatId":"chat-2","error":"Worktree <TMP>/wt no longer exists","missingWorktree":"<TMP>/wt"}}
+E {"src":"drive","i":11,"do":"restart","restarted":true}
+E {"src":"drive","i":12,"do":"waitEmit","matched":false}
+E {"src":"drive","i":13,"do":"settle"}
+E {"src":"drive","i":14,"do":"request","result":{"success":false,"error":"Pi is not running"}}
 P1 {"seq":1,"dir":"meta","argv":["--mode","rpc","-e","<APP>/src/pi-extension/crust-context.ts","-e","<APP>/src/pi-extension/crust-guard.ts","-e","<APP>/src/pi-extension/advisor.ts","-e","<APP>/src/pi-extension/permission-modes.ts"],"cwd":"<REPO>","env":{"PI_CRUST_TOOL_CHECKIN":"40","PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
 P1 {"seq":2,"dir":"in","data":{"id":"ui-1","type":"get_state"}}
 P1 {"seq":3,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-1\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
