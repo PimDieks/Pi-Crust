@@ -140,3 +140,40 @@ async function startRepos() {
 	applyRepo(repo);
 	if (!repo) openRepoPicker();
 }
+
+// Switching repos while a chat is working: the "Pi is still working" confirmation must be on top of the picker (it is
+// always open then) and every button must be clickable. State is stubbed: a chat is marked working, nothing is sent to Pi,
+// and the answer is "No", so the switch never happens. Run alone with: npm run selftest -- repos
+selftestSteps.push(async ({ snap, wait }) => {
+	const c = active;
+	if (!c) return console.error("SELFTEST repo switch confirm: no active chat -> MISMATCH");
+	const was = c.state.streaming;
+	const theme = themeSetting();
+	c.state.streaming = true;
+	for (const t of ["dark", "light"]) {
+		setTheme(t);
+		await openRepoPicker();
+		await wait(300);
+		const pending = chooseRepo("Z:\stub-other-repo"); // anyWorking() is true: asks first, never reaches crust.repos.open
+		await wait(300);
+		const modal = $("#modal");
+		const shown = !$("#modal-backdrop").hidden && /still working/.test(modal.textContent);
+		const buttons = [...modal.querySelectorAll(".modal-actions button")];
+		const hit = buttons.map((b) => {
+			const r = b.getBoundingClientRect();
+			const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+			return { label: b.textContent, ok: !!top && (top === b || b.contains(top)), over: top ? top.id || top.className || top.tagName : "none" };
+		});
+		const ok = shown && buttons.length === 2 && hit.every((h) => h.ok);
+		console.error(`SELFTEST repo switch confirm (${t}): shown=${shown} title=${JSON.stringify(modal.querySelector("h2")?.textContent)} buttons=${JSON.stringify(hit)} -> ${ok ? "OK" : "MISMATCH"}`);
+		await snap(`repos-switch-confirm-${t}`);
+		// "No" answers confirmed:false, so chooseRepo returns without switching.
+		(buttons.find((b) => b.textContent === "No") || buttons[0])?.click();
+		await pending;
+		await wait(200);
+		closeRepoPicker();
+		await wait(200);
+	}
+	c.state.streaming = was;
+	setTheme(theme);
+});
