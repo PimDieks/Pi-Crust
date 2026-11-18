@@ -65,8 +65,8 @@
 	--layer-base: 0;
 	--layer-panel: 15; /* floating bits over the content: the diff "add to chat" pill */
 	--layer-popover: 20; /* menus and popovers: slash menu, worktree menu, context panel, timeline popover */
-	--layer-toast: 30; /* notifications and the update card */
-	--layer-modal: 40; /* full-screen layers: repo picker, command palette, image preview */
+	--layer-modal: 40; /* full-screen layers, in this order: repo picker (+0), image preview (+1), command palette (+2: opened with the shortcut over the others) */
+	--layer-toast: 45; /* notifications and the update card: a message is never hidden, so above the modals, below a confirmation */
 	--layer-confirm: 50; /* questions that need an answer: Pi's dialogs and the app's own confirmations */
 	/* semantic-sizes, mode "compact" */
 	--radius-xs: 2px;
@@ -317,7 +317,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .pick-pill.image { padding-left: 2px; cursor: zoom-in; }
 .pick-pill .pp-thumb { width: 14px; height: 14px; object-fit: cover; border-radius: 999px; flex: none; }
 #composer.dropping { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); }
-.image-preview { position: fixed; inset: 0; z-index: var(--layer-modal); display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 85%, transparent); cursor: zoom-out; }
+.image-preview { position: fixed; inset: 0; z-index: calc(var(--layer-modal) + 1); display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 85%, transparent); cursor: zoom-out; }
 .image-preview img { max-width: 90vw; max-height: 90vh; border-radius: var(--radius-md); box-shadow: var(--elevation-3); }
 .pick-pill .pp-label { overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
 .pick-pill .pp-remove { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: var(--fs-md); line-height: 1; border-radius: 999px; }
@@ -482,7 +482,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .history-item.current { border-color: var(--levels-2-up); }
 
 /* Command palette */
-#palette-backdrop { position: fixed; inset: 0; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: var(--layer-modal); }
+#palette-backdrop { position: fixed; inset: 0; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: calc(var(--layer-modal) + 2); }
 #palette-backdrop[hidden] { display: none; }
 #palette { width: min(640px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-3); overflow: hidden; }
 #palette-input { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 10px var(--space-md); font-size: var(--fs-lg); outline: none; }

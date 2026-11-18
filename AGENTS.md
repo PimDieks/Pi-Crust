@@ -30,5 +30,5 @@ Every commit and push runs the secret check (`.githooks`, `scripts/check-secrets
 
 ## UI layers: nothing overlaps
 
-Every new overlay (menu, popover, toast, panel, modal, confirmation) takes a named `--layer-*` z-index from `src/styles.css` (panel, popover, toast, modal, confirm; never a bare number), and anything that needs an answer sits above whatever is open.
+Every new overlay (menu, popover, toast, panel, modal, confirmation) takes a named `--layer-*` z-index from `src/styles.css` (panel, popover, modal, toast, confirm; never a bare number, except 1, 2 or 5 inside one component), and anything that needs an answer sits above whatever is open.
 Add a case for it to `OVERLAYS` in `src/layers.js` and run `npm run selftest -- layers`: every control of the top overlay must be reachable with `elementFromPoint`.
