@@ -1,0 +1,31 @@
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Read data.txt and count the lines."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Read data.txt and count the lines."}]}}
+{"type":"claude_session","sessionId":"uuid-236","model":"claude-haiku-5-5","permissionMode":"default"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Also end your final answer with the word DONE."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Also end your final answer with the word DONE."}]}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"id":"toolu-06","toolName":"read"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"toolu-06","name":"read","arguments":{"path":"C:\\work\\proj\\data.txt"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-06","name":"read","arguments":{"path":"C:\\work\\proj\\data.txt"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-06","toolName":"read","args":{"path":"C:\\work\\proj\\data.txt"}}
+{"type":"tool_execution_end","toolCallId":"toolu-06","toolName":"read","args":{"path":"C:\\work\\proj\\data.txt"},"result":{"content":[{"type":"text","text":"1\talpha\n2\tbeta\n3\tgamma\n4\t"}]},"isError":false,"durationMs":7}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"The file"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" has three lines:"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"\n\n1. al"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"pha\n2. beta"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"\n3. gamma\n\nThe"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" Read output"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" also show"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"ed a line"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" 4 with"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" no content. That is probably a"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" trailing newline at the end"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" of the file, not a real line"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" of"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" text.\n\nDONE"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":1,"content":"The file has three lines:\n\n1. alpha\n2. beta\n3. gamma\n\nThe Read output also showed a line 4 with no content. That is probably a trailing newline at the end of the file, not a real line of text.\n\nDONE"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"The file has three lines:\n\n1. alpha\n2. beta\n3. gamma\n\nThe Read output also showed a line 4 with no content. That is probably a trailing newline at the end of the file, not a real line of text.\n\nDONE"}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"costUsd":0.00048372500000000006,"totalCostUsd":0.00048372500000000006}
+{"type":"agent_settled"}

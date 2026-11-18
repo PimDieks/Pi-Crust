@@ -1,0 +1,44 @@
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"In notes.txt change apple to pear."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"In notes.txt change apple to pear."}]}}
+{"type":"claude_session","sessionId":"uuid-108","model":"claude-haiku-5-5","permissionMode":"default"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":1,"id":"toolu-04","toolName":"read"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":1,"toolCall":{"type":"toolCall","id":"toolu-04","name":"read","arguments":{"path":"C:\\work\\proj\\notes.txt"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-04","name":"read","arguments":{"path":"C:\\work\\proj\\notes.txt"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-04","toolName":"read","args":{"path":"C:\\work\\proj\\notes.txt"}}
+{"type":"tool_execution_end","toolCallId":"toolu-04","toolName":"read","args":{"path":"C:\\work\\proj\\notes.txt"},"result":{"content":[{"type":"text","text":"1\tShopping list\n2\tI like an apple a day.\n3\tBuy milk.\n4\t"}]},"isError":false,"durationMs":7}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"id":"toolu-05","toolName":"edit"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"toolu-05","name":"edit","arguments":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-05","name":"edit","arguments":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-05","toolName":"edit","args":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}
+{"type":"tool_execution_end","toolCallId":"toolu-05","toolName":"edit","args":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"},"result":{"content":[{"type":"text","text":"Denied by the capture script (test)."}]},"isError":true,"durationMs":7,"denied":true}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"I couldn't make the"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" change"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":". The Edit tool retur"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"ned \""}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"Denied by the capture script"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" (test)\","}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" so notes.txt still says"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" \"apple\""}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" on line 2. I ha"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"ven't tried another"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" way"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" to write"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" the file, since that would get"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" around the denial. If"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" you want the"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" edit made"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":", you"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"'"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"ll need to allow it or t"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"ell me how"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" you"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"'"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"d like to proceed."}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":1,"content":"I couldn't make the change. The Edit tool returned \"Denied by the capture script (test)\", so notes.txt still says \"apple\" on line 2. I haven't tried another way to write the file, since that would get around the denial. If you want the edit made, you'll need to allow it or tell me how you'd like to proceed."}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"I couldn't make the change. The Edit tool returned \"Denied by the capture script (test)\", so notes.txt still says \"apple\" on line 2. I haven't tried another way to write the file, since that would get around the denial. If you want the edit made, you'll need to allow it or tell me how you'd like to proceed."}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"costUsd":0.0005899400000000001,"totalCostUsd":0.0005899400000000001}
+{"type":"agent_settled"}

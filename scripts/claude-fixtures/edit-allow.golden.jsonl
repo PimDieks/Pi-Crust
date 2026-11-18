@@ -1,0 +1,22 @@
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"In notes.txt change apple to pear."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"In notes.txt change apple to pear."}]}}
+{"type":"claude_session","sessionId":"uuid-41","model":"claude-haiku-5-5","permissionMode":"default"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":1,"id":"toolu-02","toolName":"read"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":1,"toolCall":{"type":"toolCall","id":"toolu-02","name":"read","arguments":{"path":"C:\\work\\proj\\notes.txt"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-02","name":"read","arguments":{"path":"C:\\work\\proj\\notes.txt"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-02","toolName":"read","args":{"path":"C:\\work\\proj\\notes.txt"}}
+{"type":"tool_execution_end","toolCallId":"toolu-02","toolName":"read","args":{"path":"C:\\work\\proj\\notes.txt"},"result":{"content":[{"type":"text","text":"1\tShopping list\n2\tI like an apple a day.\n3\tBuy milk.\n4\t"}]},"isError":false,"durationMs":7}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"id":"toolu-03","toolName":"edit"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"toolu-03","name":"edit","arguments":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-03","name":"edit","arguments":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-03","toolName":"edit","args":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}
+{"type":"tool_execution_end","toolCallId":"toolu-03","toolName":"edit","args":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"},"result":{"content":[{"type":"text","text":"<redacted 244 chars>"}]},"isError":false,"durationMs":7}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"done"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"done"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"costUsd":0.0008984599999999999,"totalCostUsd":0.0008984599999999999}
+{"type":"agent_settled"}

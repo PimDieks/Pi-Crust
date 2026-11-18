@@ -1,0 +1,22 @@
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Read notes.txt and tell me what it says."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Read notes.txt and tell me what it says."}]}}
+{"type":"claude_session","sessionId":"uuid-01","model":"claude-haiku-5-5","permissionMode":"default"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"id":"toolu-01","toolName":"read"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"toolu-01","name":"read","arguments":{"path":"C:\\work\\proj\\notes.txt"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-01","name":"read","arguments":{"path":"C:\\work\\proj\\notes.txt"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-01","toolName":"read","args":{"path":"C:\\work\\proj\\notes.txt"}}
+{"type":"tool_execution_end","toolCallId":"toolu-01","toolName":"read","args":{"path":"C:\\work\\proj\\notes.txt"},"result":{"content":[{"type":"text","text":"1\tShopping list\n2\tI like an apple a day.\n3\tBuy milk.\n4\t"}]},"isError":false,"durationMs":7}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"The file is"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" a short"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" shopping list that"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" says"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" \"I like an apple a day"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\" and \""}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Buy milk.\""}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"The file is a short shopping list that says \"I like an apple a day\" and \"Buy milk.\""}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"The file is a short shopping list that says \"I like an apple a day\" and \"Buy milk.\""}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"costUsd":0.000663,"totalCostUsd":0.000663}
+{"type":"agent_settled"}
