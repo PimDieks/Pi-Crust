@@ -45,7 +45,7 @@ function collect({ current = () => true } = {}) {
 }
 const until = async (fn, ms = 8000) => {
 	for (let t = 0; t < ms && !fn(); t += 25) await new Promise((r) => setTimeout(r, 25));
-	assert.ok(fn(), "condition not reached in time");
+	assert.ok(fn(), "condition not reached in time ");
 };
 
 test("start: arguments (--mode rpc, four -e extensions, optional --session), cwd and ready data; the probe reply is not a record", async () => {
@@ -95,15 +95,20 @@ test("framing: split on LF only, CR stripped, partial lines joined, blank lines 
 	P.stop(proc);
 });
 
-test("a throwing sink.record is reported like unparseable output (same as before the move)", async () => {
-	const f = script("d.js", probeAnswerer(`if (req.type === "prompt") process.stdout.write('{"type":"agent_start"}\\n');`));
+test("a throwing sink.record or sink.ready is reported as what it is, not as an unparseable record, and later lines still arrive", async () => {
+	const f = script("d.js", probeAnswerer(`if (req.type === "prompt") process.stdout.write('{"type":"agent_start"}\\n{"type":"agent_end"}\\nnot json\\n');`));
 	const events = [];
-	const sink = { isCurrent: () => true, ready: (h, d) => events.push(["ready"]), record: () => { throw new Error("boom"); }, stderr: (h, t) => events.push(["stderr", t]), exit: () => {} };
+	let n = 0;
+	const sink = { isCurrent: () => true, ready: () => { throw new Error("ready boom"); }, record: (h, r) => { events.push(["record", r.type]); if (++n === 1) throw new Error("boom"); }, stderr: (h, t) => events.push(["stderr", t]), exit: () => {} };
 	const proc = P.start({ pi: { command: process.execPath, args: [f] }, cwd: dir, env: process.env }, sink);
-	await until(() => events.some((e) => e[0] === "ready"));
+	await until(() => events.some((e) => e[0] === "stderr" && /ready boom/.test(e[1])));
 	proc.stdin.write(JSON.stringify({ id: "p1", type: "prompt" }) + "\n");
-	await until(() => events.some((e) => e[0] === "stderr"));
-	assert.match(events.find((e) => e[0] === "stderr")[1], /^Unparseable record: \{"type":"agent_start"\}/);
+	await until(() => events.some((e) => e[0] === "stderr" && /^Unparseable/.test(e[1])));
+	const err = events.filter((e) => e[0] === "stderr").map((e) => e[1]);
+	assert.ok(err.includes("Handling a record failed: ready boom"));
+	assert.ok(err.includes("Handling a record failed: boom"));
+	assert.deepStrictEqual(err.filter((t) => /^Unparseable/.test(t)), ["Unparseable record: not json"]); // only the real junk
+	assert.deepStrictEqual(events.filter((e) => e[0] === "record").map((e) => e[1]), ["agent_start", "agent_end"]); // the second record still arrived
 	P.stop(proc);
 });
 

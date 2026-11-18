@@ -5,7 +5,7 @@
 // Sink (all called synchronously, in the order things happen; `handle` is the child process):
 //   isCurrent(handle)         false once the handle was replaced, its chat closed or the repo changed: its events are dropped
 //   ready(handle, data)       Pi answered the probe; `data` is the get_state data
-//   record(handle, record)    one record from Pi (the probe's own reply is never forwarded). May throw: it is reported as stderr text
+//   record(handle, record)    one record from Pi (the probe's own reply is never forwarded). May throw: it is reported as stderr text "Handling a record failed: <message>" (never as an unparseable record)
 //   stderr(handle, text)      a chunk of stderr, or "Unparseable record: ..."
 //   exit(handle, info)        info: { kind: "timeout", error } (no answer within READY_TIMEOUT_MS; the driver stops the process right after),
 //                             { kind: "error", error, errorCode } (could not spawn), { kind: "exit", code, signal }
@@ -86,9 +86,17 @@ function start(opts, sink) {
 			buf = buf.slice(nl + 1);
 			if (line.endsWith("\r")) line = line.slice(0, -1);
 			if (!line.trim()) continue;
+			let record;
 			try {
-				const record = JSON.parse(line);
-				if (record.id === PROBE_ID) {
+				record = JSON.parse(line);
+			} catch {
+				sink.stderr(proc, `Unparseable record: ${line.slice(0, 200)}`);
+				continue;
+			}
+			// The callbacks are the app's code: when one throws, that is reported as what it is, never as a bad record, and the
+			// lines after it are still delivered.
+			try {
+				if (record && record.id === PROBE_ID) {
 					if (!ready) {
 						ready = true;
 						clearInterval(probe);
@@ -98,7 +106,7 @@ function start(opts, sink) {
 				}
 				sink.record(proc, record);
 			} catch (e) {
-				sink.stderr(proc, `Unparseable record: ${line.slice(0, 200)}`);
+				sink.stderr(proc, `Handling a record failed: ${e && e.message ? e.message : e}`);
 			}
 		}
 	});
