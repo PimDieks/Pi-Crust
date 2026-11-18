@@ -1,0 +1,28 @@
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Run two commands."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Run two commands."}]}}
+{"type":"claude_session","sessionId":"uuid-01","model":"claude-haiku-5-5","permissionMode":"default"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"id":"toolu-01","toolName":"bash"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"toolu-01","name":"bash","arguments":{"command":"Write-Output first","description":"Print the first word"}}}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":1,"id":"toolu-02","toolName":"bash"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":1,"toolCall":{"type":"toolCall","id":"toolu-02","name":"bash","arguments":{"command":"echo second","description":"Print the second word"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-01","name":"bash","arguments":{"command":"Write-Output first","description":"Print the first word"}},{"type":"toolCall","id":"toolu-02","name":"bash","arguments":{"command":"echo second","description":"Print the second word"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-01","toolName":"bash","args":{"command":"Write-Output first","description":"Print the first word"}}
+{"type":"tool_execution_start","toolCallId":"toolu-02","toolName":"bash","args":{"command":"echo second","description":"Print the second word"}}
+{"type":"tool_execution_end","toolCallId":"toolu-01","toolName":"bash","args":{"command":"Write-Output first","description":"Print the first word"},"result":{"content":[{"type":"text","text":"first"}]},"isError":false,"durationMs":14}
+{"type":"tool_execution_end","toolCallId":"toolu-02","toolName":"bash","args":{"command":"echo second","description":"Print the second word"},"result":{"content":[{"type":"text","text":"second\nShell cwd was reset to C:workproj"}]},"isError":false,"durationMs":14}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Both"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" com"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"mand"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"s ra"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"n: f"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"irst"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" and"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" sec"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"ond."}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Both commands ran: first and second."}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Both commands ran: first and second."}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"costUsd":0.0012494799999999999,"totalCostUsd":0.0012494799999999999}
+{"type":"agent_settled"}

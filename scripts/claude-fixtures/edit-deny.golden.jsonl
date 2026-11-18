@@ -10,10 +10,10 @@
 {"type":"tool_execution_end","toolCallId":"toolu-04","toolName":"read","args":{"path":"C:\\work\\proj\\notes.txt"},"result":{"content":[{"type":"text","text":"1\tShopping list\n2\tI like an apple a day.\n3\tBuy milk.\n4\t"}]},"isError":false,"durationMs":7}
 {"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
 {"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"id":"toolu-05","toolName":"edit"}}
-{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"toolu-05","name":"edit","arguments":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}}}
-{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-05","name":"edit","arguments":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}],"stopReason":"toolUse"}}
-{"type":"tool_execution_start","toolCallId":"toolu-05","toolName":"edit","args":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}
-{"type":"tool_execution_end","toolCallId":"toolu-05","toolName":"edit","args":{"replace_all":false,"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"},"result":{"content":[{"type":"text","text":"Denied by the capture script (test)."}]},"isError":true,"durationMs":7,"denied":true}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"toolu-05","name":"edit","arguments":{"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu-05","name":"edit","arguments":{"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"toolu-05","toolName":"edit","args":{"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"}}
+{"type":"tool_execution_end","toolCallId":"toolu-05","toolName":"edit","args":{"path":"C:\\work\\proj\\notes.txt","oldText":"apple","newText":"pear"},"result":{"content":[{"type":"text","text":"Denied by the capture script (test)."}]},"isError":true,"durationMs":7,"denied":true}
 {"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
 {"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":"I couldn't make the"}}
 {"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":1,"delta":" change"}}

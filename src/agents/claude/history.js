@@ -5,8 +5,9 @@
 // toolResult). The SDK's rows lack tool_use_result and live thinking text, so a stored Edit card has no structured diff.
 //
 // Where sessions live: the engine writes them under its CLAUDE_CONFIG_DIR, which the app sets for the child only. The SDK
-// functions read the calling process's environment, so each call runs with CLAUDE_CONFIG_DIR set to the app's own folder
-// (restored after, one call at a time). With no app folder nothing is read: the user's own Claude sessions are never listed.
+// functions read the calling process's environment (they take no per-call option), so each call runs with CLAUDE_CONFIG_DIR set to
+// the app's own folder: loaded first, set only around the call itself, restored after, one call at a time. A child spawned by
+// something else while the SDK call is awaited could still inherit it; that window is the call, not the module load. With no app folder nothing is read: the user's own Claude sessions are never listed.
 "use strict";
 
 const { STOP_REASON, toolName, mapArgs, piBlocks, resultContent } = require("./translate");
@@ -117,12 +118,13 @@ function createHistory(deps) {
 		const run = async () => {
 			const dir = deps.configDir();
 			if (!dir) return null;
+			const sdk = await deps.loadSdk(); // before the variable is set: a slow import must not hold it
 			const env = deps.env || process.env;
 			const had = Object.prototype.hasOwnProperty.call(env, "CLAUDE_CONFIG_DIR");
 			const old = env.CLAUDE_CONFIG_DIR;
 			env.CLAUDE_CONFIG_DIR = dir;
 			try {
-				return await fn(await deps.loadSdk());
+				return await fn(sdk);
 			} finally {
 				if (had) env.CLAUDE_CONFIG_DIR = old;
 				else delete env.CLAUDE_CONFIG_DIR;
@@ -133,14 +135,16 @@ function createHistory(deps) {
 		return p;
 	}
 	return {
-		// { cwd } -> items, newest first, at most 60. Never throws: an unreadable list is an empty one.
+		// { cwd } -> items, newest first, at most 60. Throws when the SDK does, with the key scrubbed: the caller (listAllSessions) keeps
+		// the reason in its per-agent status so the session list can say why it is empty. No app folder is not an error: nothing is read.
 		async listSessions({ cwd } = {}) {
+			let list;
 			try {
-				const list = await inConfigDir((sdk) => sdk.listSessions({ dir: cwd, limit: 60 }));
-				return (Array.isArray(list) ? list : []).map(sessionItem).filter((s) => s.firstPrompt).sort((a, b) => b.mtime - a.mtime);
-			} catch {
-				return [];
+				list = await inConfigDir((sdk) => sdk.listSessions({ dir: cwd, limit: 60 }));
+			} catch (e) {
+				throw new Error("Claude sessions could not be listed: " + (deps.scrub ? deps.scrub(e && e.message ? e.message : e) : String((e && e.message) || e)));
 			}
+			return (Array.isArray(list) ? list : []).map(sessionItem).filter((s) => s.firstPrompt).sort((a, b) => b.mtime - a.mtime);
 		},
 		// A session's messages in the stored shape. Throws when the SDK does.
 		async loadMessages(sessionId, { cwd } = {}) {

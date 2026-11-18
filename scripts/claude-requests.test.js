@@ -338,3 +338,60 @@ test("negative control: without its task_notification the background card never 
 	assert.equal(ends(run(msgs)), 1);
 	assert.equal(ends(run(msgs.filter((m) => m.subtype !== "task_notification"))), 0);
 });
+
+test("history: the SDK is loaded before CLAUDE_CONFIG_DIR is set, the variable is set only around the call, calls do not overlap, a spawn in between sees nothing", async () => {
+	const { createHistory } = require("../src/agents/claude/history");
+	const env = {};
+	const seen = []; // what a child spawned at each point would inherit
+	const spawn = (label) => seen.push([label, env.CLAUDE_CONFIG_DIR]);
+	let active = 0;
+	let maxActive = 0;
+	const sdk = {
+		listSessions: async () => {
+			active++;
+			maxActive = Math.max(maxActive, active);
+			spawn("inside-call");
+			await new Promise((r) => setTimeout(r, 15));
+			active--;
+			return [];
+		},
+	};
+	const h = createHistory({
+		env,
+		configDir: () => "C:\\app\\claude",
+		loadSdk: async () => {
+			spawn("during-load");
+			await new Promise((r) => setTimeout(r, 15));
+			spawn("end-of-load");
+			return sdk;
+		},
+	});
+	const a = h.listSessions({ cwd: "x" });
+	const b = h.listSessions({ cwd: "y" });
+	await Promise.all([a, b]);
+	spawn("after");
+	assert.equal(maxActive, 1, "one SDK call at a time");
+	for (const [label, v] of seen) {
+		if (label === "inside-call") assert.equal(v, "C:\\app\\claude", label);
+		else assert.equal(v, undefined, `${label}: a child spawned now must not inherit it`);
+	}
+	assert.equal(seen.filter(([l]) => l === "inside-call").length, 2);
+	assert.ok(!("CLAUDE_CONFIG_DIR" in env), "restored");
+});
+
+test("history: listSessions says why it failed (scrubbed) instead of returning an empty list; the merged list keeps the reason per agent", async () => {
+	const t = await rig({ breakSdk: (s) => ({ ...s, listSessions: async () => { throw new Error("disk trouble " + KEY); } }) });
+	await assert.rejects(t.adapter.listSessions({ cwd: t.cwd }), (e) => /could not be listed: disk trouble/.test(e.message) && !e.message.includes(KEY));
+	const { listAllSessions } = require("../src/chat-agents");
+	const got = await listAllSessions({ adapters: [{ id: "claude", listSessions: (o) => t.adapter.listSessions(o) }], repo: t.cwd });
+	assert.equal(got.status.claude.ok, false);
+	assert.match(got.status.claude.reason, /disk trouble/);
+	t.stop();
+});
+
+test("contextStatus: skillCount comes from the init skills the adapter recorded", () => {
+	const track = newTrack();
+	track.skillCount = 4;
+	assert.equal(contextStatus({ categories: [], totalTokens: 1, maxTokens: 10 }, track).skillCount, 4);
+	assert.equal(contextStatus({ categories: [], totalTokens: 1, maxTokens: 10 }).skillCount, 0);
+});
