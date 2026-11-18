@@ -615,7 +615,11 @@
 		await skip();
 		const other = await sendPrompt("/reload");
 		state.ready = readyBefore;
-		say("other commands still need Pi", other === false && !opened);
+		// A message sent before Pi is ready still gets its warning ...
+		const early = [...document.querySelectorAll("#toasts .toast")].some((x) => x.textContent === "Pi is still starting…");
+		say("other commands still need Pi", other === false && !opened && early, `toast=${early}`);
+		// ... and this test's own toast must not outlive it: it used to sit over the first-task card in the next step's screenshots.
+		$("#toasts").replaceChildren();
 		window.dispatchEvent(new CustomEvent("crust:open-setup", { detail: { source: "pi-missing", chatId: active.id } }));
 		await waitFor(() => opened);
 		say("the Pi-missing button opens it", opened);

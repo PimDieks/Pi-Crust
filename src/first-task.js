@@ -228,6 +228,7 @@
 		await crust.health.onboardingSet("firstTaskHiddenAt", null);
 		await crust.health.onboardingSet("doneAt");
 		const sent0 = msgs();
+		t("no stray toast", !$("#toasts").childElementCount, `toasts="${$("#toasts").textContent}"`);
 		$("#input").value = "";
 		finish();
 		switchTab("browser");

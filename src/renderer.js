@@ -1300,6 +1300,7 @@ async function runSelftestTour() {
 		}
 		for (const step of selftestSteps) {
 			if (!selftestWants(step.stepName)) continue;
+			$("#toasts")?.replaceChildren(); // a toast one step caused on purpose must not show in the next step's screenshots
 			try {
 				await step({ snap, wait });
 			} catch (e) {
