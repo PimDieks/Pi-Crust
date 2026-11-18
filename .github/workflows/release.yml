@@ -192,6 +192,8 @@ jobs:
             test -f "dist/$f" || { echo "::error title=Missing build output::dist/$f was not produced."; exit 1; }
           done
           grep -q "Pi-Crust-Setup-$VERSION.exe" dist/latest.yml || { echo "::error title=latest.yml mismatch::latest.yml does not name the installer."; exit 1; }
+      - name: Check what the in-app updater needs
+        run: node scripts/check-release-build.js dist "${TAG#v}"
       - name: Write the deny-list from the secret
         id: deny
         env:

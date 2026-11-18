@@ -159,6 +159,15 @@ Then run `dist\Pi-Crust-Setup-x.y.z.exe`. It installs for your user only (no adm
 
 ### Update
 
+**Installed from a release** (the installer from the [Releases page](https://github.com/PimDieks/Pi-Crust/releases)): Pi Crust checks GitHub for a newer published release 15 seconds after it starts and then every hour. **Pi Crust update available** asks first; **Update** downloads it (with a progress bar), then **Restart now** or **Later** (it installs when you quit). **Release notes** opens the release page. If the check fails because you are offline you only see a card after you press **Check again**. If an update fails the card says why, with **Retry**, **Copy details** and **Go back to a previous version**, which opens the Releases page: download the older installer and run it over the current one. Settings and chats live in `%APPDATA%\pi-crust` and are kept.
+
+- Only published releases count. Drafts and pre-releases are never offered to a normal install.
+- Until builds are signed, Windows SmartScreen may warn about the downloaded installer; choose More info, then Run anyway.
+- Once builds are signed, the updater only installs an update signed by the publisher name written into the app, and that name must equal the certificate's subject name exactly. An unsigned build cannot update a signed install: install the signed installer by hand once.
+- An app built from a clone (`npm run dist:win` without `--release`) and `npm start` keep the git update described below. Installing a released installer over a clone-built app turns it into a release install.
+
+**Built from a clone:**
+
 ```powershell
 cd path\to\pi-crust
 npm run update

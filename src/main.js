@@ -23,7 +23,8 @@ function repoFromArgs(argv) {
 	return p && fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.resolve(p) : null;
 }
 const DEV_URL = process.env.PI_CRUST_URL || "http://localhost:3000/";
-const SELFTEST = process.env.PI_CRUST_SELFTEST === "1";
+const SELFTEST = !app.isPackaged && process.env.PI_CRUST_SELFTEST === "1"; // never in a packaged app: a stray variable must not switch off updates or the crash dialog
+if (SELFTEST) process.on("uncaughtException", (e) => { console.error("SELFTEST crash", e); app.exit(1); }); // selftest only: a crash logs and exits, no dialog
 const START_HIDDEN = process.env.PI_CRUST_HIDDEN === "1"; // set by the login item: start in the background
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const IGNORED = new Set([".git", "node_modules", "dist", ".turbo", ".next", "coverage", ".DS_Store", "__generated__"]);
@@ -950,7 +951,7 @@ ipcMain.on("ui:focus", () => {
 });
 // PI_CRUST_SELFTEST_ONLY=timeline,annotate: run only those tour steps (by feature script name; "core" = the built-in tour).
 const SELFTEST_ONLY = SELFTEST ? (process.env.PI_CRUST_SELFTEST_ONLY || "").split(",").map((s) => s.trim().toLowerCase().replace(/\.js$/, "")).filter(Boolean) : [];
-ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY }));
+ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY, selftestNoPrompt: SELFTEST && process.env.PI_CRUST_SELFTEST_NOPROMPT === "1" }));
 
 // ---------------------------------------------------------------------------
 // Repos: recent list, discovery, switching.
@@ -1430,6 +1431,7 @@ function createWindow() {
 		minHeight: 600,
 		title: "Pi Crust",
 		show: !START_HIDDEN,
+		...(SELFTEST && process.env.PI_CRUST_SELFTEST_OFFSCREEN === "1" ? { x: -4000, y: -4000, focusable: false, skipTaskbar: true } : {}), // selftest only: no window on the user's screen
 		backgroundColor: nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0",
 		webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false },
 	});
@@ -1489,7 +1491,7 @@ async function runSelftest() {
 	});
 	const prompt = process.env.PI_CRUST_SELFTEST_PROMPT || "Reply with one short sentence: which folder are you working in?";
 	await new Promise((r) => setTimeout(r, 4000));
-	win.webContents.send("selftest:prompt", prompt);
+	if (process.env.PI_CRUST_SELFTEST_NOPROMPT !== "1") win.webContents.send("selftest:prompt", prompt); // NOPROMPT=1: no message to Pi
 	ipcMain.once("selftest:done", async () => {
 		await new Promise((r) => setTimeout(r, 1000));
 		await capture("final");

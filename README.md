@@ -52,6 +52,8 @@ npm run dist:win         # builds dist\Pi-Crust-Setup-<version>.exe
 
 Run the installer. It installs for your user only (no admin) and adds Start Menu and desktop shortcuts and an uninstall entry. The installer is not signed, so SmartScreen asks: choose More info, then Run anyway.
 
+You can also skip the build: download `Pi-Crust-Setup-<version>.exe` from the [Releases page](https://github.com/PimDieks/Pi-Crust/releases) and run it. An app installed from a release updates itself: about 15 seconds after start, and then every hour, **Pi Crust update available** shows in the notifications. **Update** downloads it, **Restart now** installs it (or it installs when you quit), and **Release notes** opens that release on GitHub. Updates only go forward. To **go back to a previous version**, download the older installer from the [Releases page](https://github.com/PimDieks/Pi-Crust/releases) and run it over the current one: your settings and chats stay.
+
 Then open **Pi Crust** from the Start Menu, or use the launcher in a terminal (cmd or PowerShell):
 
 ```powershell

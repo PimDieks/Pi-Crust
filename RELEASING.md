@@ -25,6 +25,8 @@ Never put a secret value in a file, an issue or a chat. Use the names below exac
    - Azure client secret expires: ____
    - Identity validation expires: ____
 
+When the build is signed, the release workflow checks that `app-update.yml` carries the publisher name (without it the installed app would silently stop verifying update signatures), and for unsigned builds that it does not.
+
 Without the signing secrets the build still works, but the installer is NOT signed. You will see UNSIGNED BUILD in the run summary and at the top of the draft notes.
 
 ## Making a release
@@ -43,14 +45,15 @@ Without the signing secrets the build still works, but the installer is NOT sign
    - These four files are attached: `Pi-Crust-Setup-X.Y.Z.exe`, `Pi-Crust-Setup-X.Y.Z.exe.blockmap`, `latest.yml`, `SHA256SUMS.txt`.
    - The notes do not start with UNSIGNED BUILD, unless you want an unsigned release. If they do and you publish anyway, delete that line first.
    - Download the exe. Right click it, Properties, Digital Signatures: the signer must be Nullvorm (or your validated legal name, if Microsoft would not show Nullvorm).
-   - In PowerShell, `Get-FileHash .\Pi-Crust-Setup-X.Y.Z.exe -Algorithm SHA256` must equal the line in `SHA256SUMS.txt`.
+   - In PowerShell, `Get-FileHash .\Pi-Crust-Setup-X.Y.Z.exe -Algorithm SHA256` must equal the line in `SHA256SUMS.txt`. The checksum is only in that attached file, not in the release notes, so download `SHA256SUMS.txt` too.
 7. Install it on a clean Windows account. Start the app and check that the version is the new one.
-8. Press Publish release on the draft. Tell the team. Tell them that Windows SmartScreen may warn for the first weeks (choose More info, then Run anyway), even when the file is signed.
+8. Press Publish release on the draft. Then wait for the update to appear on a test machine that has the previous release installed (the card **Pi Crust update available** shows within an hour, or press Check again), press Update and Restart now, and check the version. Tell the team. Tell them that Windows SmartScreen may warn for the first weeks (choose More info, then Run anyway), even when the file is signed.
 
 ## If something is wrong
 
 1. Not published yet: just delete the draft, fix the problem on `main`, and make the next version number. Never move or re-use a tag.
-2. Already published: tick "Set as a pre-release" on that release or delete it (the tag stays). Tell the team. Then release a fixed version with a higher number.
+2. Already published: tick "Set as a pre-release" on that release or delete it (the tag stays). That stops the update for everyone who has not taken it yet. Tell the team. Then release a fixed version with a higher number.
+3. For people who already updated: updates only go forward. They go back to a previous version by downloading the older installer from the Releases page and running it over the current one (settings and chats stay). The failed-update card links there too, so keep the older installers on the Releases page.
 
 ## Notes
 
