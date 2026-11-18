@@ -12,6 +12,12 @@
 // popovers close each other (a click outside closes the open one), and the toast and the update card sit in opposite
 // corners (checked below as an explicit pair). Modals that can be open together have distinct levels:
 // repo picker (+0) < image preview (+1) < command palette (+2, the shortcut works over both).
+//
+// Setup (onboarding.js, first-task.js): the welcome view is popover - 1 (a full-screen view: the sign-in panel, the repo picker, the
+// palette, toasts and confirms all open over it). The header pill and the first-task card are in the page flow, no layer. What each
+// does while the view is open: a question from Pi closes the view (the pill reopens it); the view refuses to open while a question is
+// pending; the picker and the palette open over it and stay on top. These cases open the view and the card for real, so they need the
+// health stub in the environment (PI_CRUST_HEALTH_STUB={}, as the onboarding step does): nothing is written to settings.json.
 "use strict";
 
 selftestSteps.push(async ({ snap, wait }) => {
@@ -158,6 +164,53 @@ selftestSteps.push(async ({ snap, wait }) => {
 			close: () => closePalette(),
 		},
 		{
+			name: "welcome-view",
+			layer: "popover",
+			plus: -1,
+			with: ["context-panel", "repo-picker", "palette", "toast", "update-card", "confirm"], // the others live in the inert app: they cannot open over the view
+			root: () => $("#onboarding"),
+			open: async () => {
+				await crust.health.stubSet({});
+				await window.crustOnboarding.open("layers");
+			},
+			controls: () => [...$("#onboarding").querySelectorAll("button:not([disabled]):not([hidden]):not([aria-disabled='true'])")],
+			close: () => window.crustOnboarding.close({ restore: false }),
+		},
+		{
+			name: "setup-pill",
+			layer: "base", // in the header's flow
+			with: ["toast", "update-card"],
+			root: () => $("#setup-pill"),
+			open: () => {
+				const p = $("#setup-pill");
+				p.dataset.was = p.hidden ? "hidden" : "shown";
+				p.dataset.wasText = p.textContent;
+				p.textContent = "Setup: 2 of 4";
+				p.hidden = false;
+			},
+			controls: () => [$("#setup-pill")],
+			close: () => {
+				const p = $("#setup-pill");
+				p.hidden = p.dataset.was === "hidden";
+				p.textContent = p.dataset.wasText ?? "";
+			},
+		},
+		{
+			name: "first-task",
+			layer: "base", // in the chat pane's flow, above the composer
+			with: ["toast", "update-card", "ask"],
+			root: () => $("#first-task"),
+			open: async () => {
+				await crust.health.stubSet({});
+				window.crustFirstTask.start();
+			},
+			controls: () => [...$("#first-task").querySelectorAll("button")],
+			close: async () => {
+				window.crustFirstTask.hide();
+				await crust.health.onboardingSet("firstTaskHiddenAt", null);
+			},
+		},
+		{
 			name: "toast",
 			layer: "toast",
 			root: () => $("#toasts"),
@@ -190,6 +243,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 	];
 	const byName = (n) => OVERLAYS.find((o) => o.name === n);
 	const level = (o) => LAYERS.indexOf(o.layer) * 100 + (o.plus || 0);
+	const mayPair = (a, b) => (!a.with || a.with.includes(b.name)) && (!b.with || b.with.includes(a.name));
 
 	// False when a scrolling ancestor clips (x, y) away: that row is scrolled out of view, not covered.
 	const clipped = (node, x, y) => {
@@ -215,7 +269,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		}
 		return out;
 	};
-	const settle = (o) => wait(["context-panel", "repo-picker", "palette", "mention-menu"].includes(o.name) ? 600 : 250);
+	const settle = (o) => wait(["context-panel", "repo-picker", "palette", "mention-menu", "welcome-view"].includes(o.name) ? 600 : 250);
 	const shut = async (o) => {
 		try {
 			o.close();
@@ -250,7 +304,8 @@ selftestSteps.push(async ({ snap, wait }) => {
 		// The input's own menus (slash, @) open upward over the question docked above it while the user types (step 4b: Esc closes
 		// them and the question is reachable again). The context panel is never allowed over it: it ends above the question.
 		const ownMenu = !late && lo.name === "ask" && ["slash-menu", "mention-menu"].includes(hi.name);
-		const underRows = (late || !BLOCKING.has(hi.layer)) && !ownMenu && vis(under.root()) ? reach(under) : [];
+		// The welcome view is a full-screen view: the sign-in panel (and anything else) opens over part of it on purpose.
+		const underRows = (late || !BLOCKING.has(hi.layer)) && !ownMenu && lo.name !== "welcome-view" && vis(under.root()) ? reach(under) : [];
 		report(`${first.name} then ${second.name}`, theme, [...topRows, ...underRows], vis(top.root()) ? "" : " top not visible");
 		if (shot) await snap(`layers-${first.name}-${second.name}-${theme}`);
 		await shut(second);
@@ -307,7 +362,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		//    Screenshots: the reported case (confirm over the picker), and a toast over the picker and over Pi's question.
 		for (const lo of OVERLAYS)
 			for (const hi of OVERLAYS) {
-				if (level(hi) <= level(lo)) continue;
+				if (level(hi) <= level(lo) || !mayPair(lo, hi)) continue;
 				const shot = (hi.name === "context-panel" && lo.name === "ask") || (hi.name === "confirm" && lo.name === "repo-picker") || (hi.name === "toast" && ["repo-picker", "ask"].includes(lo.name));
 				await together(lo, hi, theme, shot);
 			}
@@ -333,6 +388,42 @@ selftestSteps.push(async ({ snap, wait }) => {
 		}
 		// 5. Same level, open together: the toast column and the update card.
 		await together(byName("toast"), byName("update-card"), theme, false);
+		// 6. Setup. The first-task card and Pi's question are both in the chat pane's flow: neither may cover the other.
+		await together(byName("first-task"), byName("ask"), theme, true);
+		// 6b. A question from Pi while the welcome view is open closes the view and is reachable; and the view does not open over a question.
+		{
+			const view = byName("welcome-view");
+			const q = byName("ask");
+			await view.open();
+			await settle(view);
+			await q.open();
+			await settle(q);
+			const closed = !vis(view.root()) && !$("#app").inert;
+			report("question while the welcome view is open", theme, reach(q), closed ? "" : ` view still open (visible=${vis(view.root())} inert=${$("#app").inert})`);
+			await shut(view);
+			await view.open(); // a question is still pending: the view must stay closed
+			await settle(view);
+			const refused = !vis(view.root()) && !$("#app").inert && window.crustOnboarding.isOpen() === false;
+			report("welcome view with a question pending", theme, reach(q), refused ? "" : " view opened over the question");
+			await shut(view);
+			await shut(q);
+		}
+		// 6c. The picker and the view together, in both orders: the picker is the top one either way.
+		{
+			const view = byName("welcome-view");
+			const picker = byName("repo-picker");
+			for (const [first, second] of [[picker, view], [view, picker]]) {
+				await first.open();
+				await settle(first);
+				await second.open();
+				await settle(second);
+				const pz = Number(getComputedStyle($("#repo-picker")).zIndex);
+				const vz = Number(getComputedStyle($("#onboarding")).zIndex);
+				report(`${first.name} then ${second.name}: picker on top`, theme, vis($("#repo-picker")) ? reach(picker) : [], pz > vz ? "" : ` picker z=${pz} view z=${vz}`);
+				await shut(second);
+				await shut(first);
+			}
+		}
 	}
 	setTheme(was);
 	switchTab(tab);

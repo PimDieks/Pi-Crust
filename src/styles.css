@@ -64,7 +64,7 @@
 	   A new overlay also gets a case in the `layers` selftest step (src/layers.js). */
 	--layer-base: 0;
 	--layer-panel: 15; /* floating bits over the content: the diff "add to chat" pill */
-	--layer-popover: 20; /* menus and popovers: slash menu, worktree menu, context panel, timeline popover */
+	--layer-popover: 20; /* menus and popovers: slash menu, worktree menu, context panel, timeline popover. The welcome view is popover - 1 (full screen, the sign-in panel opens over it) */
 	--layer-modal: 40; /* full-screen layers, in this order: repo picker (+0), image preview (+1), command palette (+2: opened with the shortcut over the others) */
 	--layer-toast: 45; /* notifications and the update card: a message is never hidden, so above the modals, below a confirmation */
 	--layer-confirm: 50; /* questions that need an answer: Pi's dialogs and the app's own confirmations */
@@ -1237,12 +1237,10 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .fp-file { display: flex; flex-direction: column; gap: var(--space-xs); }
 
 /* --- Setup: the welcome view, the header pill and the first-task card (onboarding.js, first-task.js). Own block: keep apart from other edits. --- */
-/* Order of the layers here (plain numbers on purpose: the ui-layers branch is introducing named tokens, which will replace them):
-   the welcome view above the app (30, the "overlay" layer), the confirms above the view (55), toasts above both (58), so an error
-   such as a failed "git init" is always visible. The sign-in panel and the repo picker (50) also sit above the view. */
-#modal-backdrop { z-index: 55; } /* confirms: above the view (30), the sign-in panel and the repo picker (50) */
-#toasts { z-index: 58; } /* toasts: above the view and every confirm */
-#onboarding { position: fixed; inset: 0; z-index: 30; /* the view: above the app */ display: flex; overflow: auto; padding: var(--space-xl) var(--panel-pad); box-sizing: border-box; background: var(--bg); transition: opacity var(--dur) var(--ease), display var(--dur) allow-discrete, overlay var(--dur) allow-discrete; opacity: 1; }
+/* Layers: the welcome view is a full-screen view that sits one step under the popovers (--layer-popover - 1), so it is above the app
+   and its floating bits, and below everything that may open over it: the sign-in panel (popover), the repo picker and the palette (modal),
+   toasts and every confirmation. The header pill and the first-task card are in the page flow: no layer. */
+#onboarding { position: fixed; inset: 0; z-index: calc(var(--layer-popover) - 1); display: flex; overflow: auto; padding: var(--space-xl) var(--panel-pad); box-sizing: border-box; background: var(--bg); transition: opacity var(--dur) var(--ease), display var(--dur) allow-discrete, overlay var(--dur) allow-discrete; opacity: 1; }
 #onboarding[hidden] { display: none; opacity: 0; } /* without display:none the faded view stayed on top and swallowed clicks */
 #onboarding .ob-col { width: min(600px, 100%); margin: auto; display: flex; flex-direction: column; gap: var(--space-md); }
 .ob-mark-img { width: 40px; height: 40px; border-radius: var(--radius-md); display: block; }

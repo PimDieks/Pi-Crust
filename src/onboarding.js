@@ -194,6 +194,8 @@
 	// --- open and close ------------------------------------------------------------------------
 	async function open(source = "menu") {
 		if (opened) return focusFirst();
+		// A question Pi is waiting on is never covered: the view stays closed while one is pending (the pill opens it after).
+		if (active?.asks?.length) return "question";
 		opened = true;
 		opener = document.activeElement;
 		crust.browser.hide(true, "setup");
@@ -566,7 +568,7 @@
 		const tb = $("#toasts .toast").getBoundingClientRect();
 		const te = document.elementFromPoint(tb.left + tb.width / 2, tb.top + tb.height / 2);
 		const tz = Number(getComputedStyle($("#toasts")).zIndex);
-		say("toast is visible above the view", !!te && $("#toasts").contains(te) && tz > Number(getComputedStyle(root).zIndex) && tz > Number(getComputedStyle($("#modal-backdrop")).zIndex), `top element=${te?.tagName}.${te?.className} toast z=${tz} view z=${getComputedStyle(root).zIndex} confirm z=${getComputedStyle($("#modal-backdrop")).zIndex}`);
+		say("toast is visible above the view", !!te && $("#toasts").contains(te) && tz > Number(getComputedStyle(root).zIndex), `top element=${te?.tagName}.${te?.className} toast z=${tz} view z=${getComputedStyle(root).zIndex} confirm z=${getComputedStyle($("#modal-backdrop")).zIndex}`);
 		const tbtn = $("#toasts .toast button");
 		const tbr = tbtn.getBoundingClientRect();
 		const tbe = document.elementFromPoint(tbr.left + tbr.width / 2, tbr.top + tbr.height / 2);
@@ -589,7 +591,7 @@
 		const plan = calls.find((c) => c.name === "installPlan")?.result;
 		say("install confirm", dialogOpen && plan?.ok && plan.lines.length === 2 && plan.needs.join() === "node,pi" && plan.lines.every((l) => msg.includes(l)) && !/Git/.test(msg) && /^Pi Crust will install:/.test(msg) && /Nothing else on this computer is changed\./.test(msg) && /Pi, the coding agent, from the npm package @earendil-works\/pi-coding-agent/.test(msg) && !install, `lines=${plan?.lines.length} needs=[${plan?.needs}] git=${/Git/.test(msg)} title="${$("#modal h2")?.textContent}"`);
 		layerCheck("install confirm buttons uncovered", "#modal button");
-		say("install confirm above the view", Number(getComputedStyle($("#modal-backdrop")).zIndex) >= Number(getComputedStyle(root).zIndex) && !!(root.compareDocumentPosition($("#modal-backdrop")) & Node.DOCUMENT_POSITION_FOLLOWING), `view z=${getComputedStyle(root).zIndex} confirm z=${getComputedStyle($("#modal-backdrop")).zIndex}`);
+		say("install confirm above the view", Number(getComputedStyle($("#modal-backdrop")).zIndex) >= Number(getComputedStyle(root).zIndex), `view z=${getComputedStyle(root).zIndex} confirm z=${getComputedStyle($("#modal-backdrop")).zIndex}`);
 		await shot("3-install-confirm");
 		$("#modal .modal-actions .secondary").click(); // Cancel
 		await wait(200);

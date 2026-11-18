@@ -31,4 +31,4 @@ Every commit and push runs the secret check (`.githooks`, `scripts/check-secrets
 ## UI layers: nothing overlaps
 
 Every new overlay (menu, popover, toast, panel, modal, confirmation) takes a named `--layer-*` z-index from `src/styles.css` (panel, popover, modal, toast, confirm; never a bare number, except 1, 2 or 5 inside one component), and anything that needs an answer sits above whatever is open.
-Add a case for it to `OVERLAYS` in `src/layers.js` and run `npm run selftest -- layers`: every control of the top overlay must be reachable with `elementFromPoint`.
+Add a case for it to `OVERLAYS` in `src/layers.js` and run `npm run selftest -- layers`: every control of the top overlay must be reachable with `elementFromPoint`. The welcome view is `--layer-popover` minus 1 (a `calc()`); the header pill and the first-task card are in the page flow. The layers step opens the view and the card, so run it with `PI_CRUST_HEALTH_STUB={}` too (and `PI_CRUST_SELFTEST_TIMEOUT=600000`: it takes about four minutes).
