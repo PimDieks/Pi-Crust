@@ -1601,6 +1601,8 @@ function renderAsk() {
 	box.dataset.askId = ask.spec.id;
 	box.hidden = false;
 	closeContextPanel(); // its panel is above the chat pane and would cover the question
+	// A question Pi is waiting on must not sit behind the full setup view: close it (the Setup pill brings it back).
+	if (window.crustOnboarding?.isOpen()) window.crustOnboarding.close({ restore: false });
 	fillDialog(box, ask.spec, ask.finish);
 	if (active.asks.length > 1) box.querySelector("h2")?.append(el("span", "ask-more", ` (+${active.asks.length - 1} more)`));
 	active.el.scrollTop = active.el.scrollHeight;

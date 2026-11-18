@@ -1506,6 +1506,7 @@ async function capture(name) {
 if (SELFTEST) {
 	ipcMain.handle("selftest:capture", (_e, name) => capture(name));
 	ipcMain.handle("selftest:zoom", (_e, level) => setZoom(level));
+	ipcMain.handle("selftest:resize", (_e, w, h) => (win.setSize(Math.max(1, Math.round(w)), Math.max(1, Math.round(h))), win.getSize()));
 	ipcMain.handle("selftest:bounds", () => ({ view: browserView.getBounds(), z: zoomFactor(), visible: browserView.getVisible(), hidden: [...browserHidden] }));
 	// The offscreen selftest window is never focused: let the page behave as if it were (so :focus-visible rings show).
 	ipcMain.handle("selftest:focusEmulation", async (_e, on) => {

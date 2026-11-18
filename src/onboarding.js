@@ -437,6 +437,21 @@
 		const waitFor = async (fn, ms = 4000) => {
 			for (let t = 0; t < ms && !fn(); t += 50) await wait(50);
 		};
+		// Layers: nothing may sit on top of a button, and nothing of the app may show through the view.
+		const shown = (b) => b.offsetParent !== null || getComputedStyle(b).position === "fixed";
+		const covered = (btns) => btns.filter(shown).filter((b) => {
+			b.scrollIntoView?.({ block: "nearest" });
+			const r = b.getBoundingClientRect();
+			const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+			const ok = !!e && (e === b || b.contains(e));
+			if (!ok) console.error(`  covered: "${b.textContent}" by ${e?.tagName}#${e?.id}.${e?.className}`);
+			return !ok;
+		});
+		const layerCheck = (name, sel) => {
+			const btns = [...document.querySelectorAll(sel)].filter(shown);
+			const bad = covered(btns);
+			say(name, btns.length > 0 && !bad.length, `buttons=${btns.length} covered=[${bad.map((b) => b.textContent)}]`);
+		};
 		const _setInstall = (v) => ((install = v), render());
 		const setState = async (stub) => {
 			await crust.health.stubSet(stub);
@@ -462,7 +477,17 @@
 		say("first launch", opens === true && opened && matches() && $("#repo-picker").hidden && !startBtn.textContent.startsWith("Close") && startBtn.disabled && dom()[0].hot && dom().filter((r) => r.hot).length === 1, `rows=${dom().map((r) => r.id + ":" + r.mark).join(",")} start.disabled=${startBtn.disabled} picker.hidden=${$("#repo-picker").hidden}`);
 		say("viewer hidden while open", b0.visible === false && b0.hidden.includes("setup"), `visible=${b0.visible} reasons=[${b0.hidden}]`);
 		say("focus in the view", root.contains(document.activeElement) && document.activeElement.dataset.action === "install-pi", `focus="${document.activeElement.textContent}"`);
+		const bg = getComputedStyle(root).backgroundColor;
+		const rb = root.getBoundingClientRect();
+		say("view fills the window, opaque", rb.width === innerWidth && rb.height === innerHeight && !/rgba\(.*,\s*0(\.\d+)?\)$/.test(bg) && bg === getComputedStyle(document.body).backgroundColor, `box=${rb.width}x${rb.height} window=${innerWidth}x${innerHeight} bg=${bg}`);
+		toast("Selftest toast: must stay behind the view", "warning", { label: "Toast button", onClick() {} });
+		await wait(100);
+		layerCheck("view buttons uncovered, toast present", "#onboarding button");
+		const tb = $("#toasts .toast").getBoundingClientRect();
+		const te = document.elementFromPoint(tb.left + tb.width / 2, tb.top + tb.height / 2);
+		say("toast stays behind the view", !!te && root.contains(te), `top element=${te?.tagName}.${te?.className}`);
 		await shot("1-nothing-set-up");
+		$("#toasts").replaceChildren();
 
 		// Pi missing, everything else fine: the Pi button is the highlighted one, sign-in waits for it
 		await setState({ pi: "missing", node: "missing" });
@@ -478,6 +503,8 @@
 		const msg = $("#modal p")?.textContent || "";
 		const plan = calls.find((c) => c.name === "installPlan")?.result;
 		say("install confirm", dialogOpen && plan?.ok && plan.lines.length === 2 && plan.needs.join() === "node,pi" && plan.lines.every((l) => msg.includes(l)) && !/Git/.test(msg) && /^Pi Crust will install:/.test(msg) && /Nothing else on this computer is changed\./.test(msg) && /Pi, the coding agent, from the npm package @earendil-works\/pi-coding-agent/.test(msg) && !install, `lines=${plan?.lines.length} needs=[${plan?.needs}] git=${/Git/.test(msg)} title="${$("#modal h2")?.textContent}"`);
+		layerCheck("install confirm buttons uncovered", "#modal button");
+		say("install confirm above the view", Number(getComputedStyle($("#modal-backdrop")).zIndex) >= Number(getComputedStyle(root).zIndex) && !!(root.compareDocumentPosition($("#modal-backdrop")) & Node.DOCUMENT_POSITION_FOLLOWING), `view z=${getComputedStyle(root).zIndex} confirm z=${getComputedStyle($("#modal-backdrop")).zIndex}`);
 		await shot("3-install-confirm");
 		$("#modal .modal-actions .secondary").click(); // Cancel
 		await wait(200);
@@ -555,6 +582,7 @@
 		await waitFor(() => dialogOpen);
 		const gmsg = $("#modal p")?.textContent || "";
 		say("git init confirm", dialogOpen && $("#modal h2").textContent === "Make this a Git project?" && gmsg.includes('"git init" in:\n/stub/notes') && /Nothing is added or committed\./.test(gmsg), `"${gmsg.replace(/\n/g, " / ")}"`);
+		layerCheck("git init confirm buttons uncovered", "#modal button");
 		await shot("9-git-init-confirm");
 		$("#modal .modal-actions .secondary").click();
 		await wait(200);
@@ -573,6 +601,23 @@
 		const d2 = dom();
 		say("all ready", matches() && health.ready && d2.every((r) => r.mark === "✓") && !startBtn.disabled && !d2.some((r) => r.hot) && document.activeElement === startBtn, `start.disabled=${startBtn.disabled} counts=${counts()} focus="${document.activeElement.textContent}"`);
 		await shot("7-all-ready");
+		// the view at the smallest window the app allows, and at a large one (most to show: every row still to do)
+		await setState({ pi: "missing", node: "missing", git: "missing", auth: "none", project: "none", figma: "not_reachable" });
+		for (const [name, w, h] of [["18-min-size", 1000, 600], ["19-large", 2560, 1440]]) {
+			const got = await crust.selftest.resize(w, h);
+			await wait(500);
+			const r = root.getBoundingClientRect();
+			const colBox = root.querySelector(".ob-col").getBoundingClientRect();
+			const btns = [...root.querySelectorAll("button")];
+			const bad = covered(btns);
+			const inside = btns.filter(shown).every((b) => { const x = b.getBoundingClientRect(); return x.left >= 0 && x.right <= innerWidth + 0.5; });
+			say(`window ${name}`, r.width === innerWidth && r.height === innerHeight && root.scrollWidth <= root.clientWidth && inside && !bad.length && colBox.width <= 600.5, `window=${got} inner=${innerWidth}x${innerHeight} column=${Math.round(colBox.width)}x${Math.round(colBox.height)} scrolls=${root.scrollHeight > root.clientHeight} covered=[${bad.map((b) => b.textContent)}]`);
+			root.scrollTop = 0;
+			await shot(name);
+		}
+		await crust.selftest.resize(1680, 1000);
+		await wait(400);
+		await setState({});
 
 		// the pill: some required rows left, view closed
 		await setState({ auth: "none", project: "none", figma: "ready" });
@@ -582,6 +627,21 @@
 		const b1 = await crust.selftest.bounds();
 		say("viewer back after skip", !b1.hidden.includes("setup"), `reasons=[${b1.hidden}]`);
 		await shot("8-header-pill");
+		toast("Selftest toast: must not cover the pill", "warning");
+		await wait(100);
+		layerCheck("header pill uncovered, toast present", "#setup-pill");
+		$("#toasts").replaceChildren();
+		// the first-task card, with a toast present
+		await crust.health.onboardingSet("doneAt");
+		window.crustFirstTask?.start();
+		await wait(300);
+		toast("Selftest toast: must not cover the card", "warning");
+		await wait(100);
+		layerCheck("first-task card buttons uncovered, toast present", "#first-task button");
+		$("#toasts").replaceChildren();
+		window.crustFirstTask?.hide();
+		await crust.health.onboardingSet("firstTaskHiddenAt", null);
+		await crust.health.onboardingSet("doneAt", null);
 		pill.click();
 		await wait(200);
 		say("pill reopens", opened && !root.hidden && pill.hidden && root.contains(document.activeElement), `focus="${document.activeElement.textContent}"`);

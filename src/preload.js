@@ -222,6 +222,7 @@ contextBridge.exposeInMainWorld("crust", {
 		done: () => ipcRenderer.send("selftest:done"),
 		capture: (name) => ipcRenderer.invoke("selftest:capture", name),
 		zoom: (level) => ipcRenderer.invoke("selftest:zoom", level),
+		resize: (w, h) => ipcRenderer.invoke("selftest:resize", w, h),
 		bounds: () => ipcRenderer.invoke("selftest:bounds"),
 		focusEmulation: (on) => ipcRenderer.invoke("selftest:focusEmulation", on),
 	},

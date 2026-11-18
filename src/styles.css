@@ -1237,16 +1237,16 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .fp-file { display: flex; flex-direction: column; gap: var(--space-xs); }
 
 /* --- Setup: the welcome view, the header pill and the first-task card (onboarding.js, first-task.js). Own block: keep apart from other edits. --- */
-#onboarding { position: fixed; inset: 0; z-index: 18; display: flex; align-items: center; justify-content: center; padding: var(--space-md); box-sizing: border-box; background: color-mix(in srgb, var(--bg) 96%, transparent); transition: opacity var(--dur) var(--ease), display var(--dur) allow-discrete, overlay var(--dur) allow-discrete; opacity: 1; }
-#onboarding[hidden] { opacity: 0; }
-#onboarding .ob-card { width: min(600px, 100%); max-height: 100%; overflow: auto; box-sizing: border-box; background: var(--panel); border-radius: var(--radius-md); padding: var(--space-xl); box-shadow: var(--elevation-3); display: flex; flex-direction: column; gap: var(--space-md); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
-#onboarding[hidden] .ob-card { opacity: 0; transform: translateY(8px) scale(0.98); }
-@starting-style { #onboarding { opacity: 0; } #onboarding .ob-card { opacity: 0; transform: translateY(8px) scale(0.98); } }
-.ob-card h1 { font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 700; margin: 0; }
-.ob-card p { margin: 0; }
-.ob-sub { color: var(--text-secondary); }
+#onboarding { position: fixed; inset: 0; z-index: 30; /* the modal layer (#modal-backdrop is 30 too and comes later in the page, so confirms sit above this view) */ display: flex; overflow: auto; padding: var(--space-xl) var(--panel-pad); box-sizing: border-box; background: var(--bg); transition: opacity var(--dur) var(--ease), display var(--dur) allow-discrete, overlay var(--dur) allow-discrete; opacity: 1; }
+#onboarding[hidden] { display: none; opacity: 0; } /* without display:none the faded view stayed on top and swallowed clicks */
+#onboarding .ob-col { width: min(600px, 100%); margin: auto; display: flex; flex-direction: column; gap: var(--space-md); }
+.ob-mark-img { width: 40px; height: 40px; border-radius: var(--radius-md); display: block; }
+@starting-style { #onboarding { opacity: 0; } }
+.ob-col h1 { font-size: calc(var(--fs-title) * 1.5); line-height: calc(var(--lh-title) * 1.5); font-weight: 700; margin: 0; }
+.ob-col p { margin: 0; }
+.ob-sub { color: var(--text-secondary); font-size: var(--fs-lg); }
 .ob-rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-3xs); }
-.ob-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--space-sm); padding: var(--space-sm); border-radius: var(--radius-sm); border-left: 2px solid transparent; }
+.ob-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--space-sm); padding: var(--space-sm); border-radius: var(--radius-sm); border-left: 2px solid transparent; background: var(--panel); }
 .ob-row.first { background: var(--selected); border-left-color: var(--accent); }
 .ob-mark { text-align: center; font-weight: 700; color: var(--muted); }
 .ob-row.ready .ob-mark { color: var(--text-success); }
@@ -1271,7 +1271,7 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .ob-link { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fs-sm); color: var(--text-action-on-surface); cursor: pointer; text-decoration: underline; border-radius: var(--radius-xs); }
 .ob-link[hidden] { display: none; }
 .ob-link:focus-visible, #setup-pill:focus-visible, #onboarding .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-@media (max-width: 520px) { .ob-row { grid-template-columns: 20px minmax(0, 1fr); } .ob-row .btn { grid-column: 2; justify-self: start; } #onboarding .ob-card { padding: var(--space-md); } }
+@media (max-width: 520px) { .ob-row { grid-template-columns: 20px minmax(0, 1fr); } .ob-row .btn { grid-column: 2; justify-self: start; } #onboarding { padding: var(--space-md); } }
 #setup-pill { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: var(--space-xs); border: 1px solid var(--borders-softer); background: transparent; }
 #setup-pill::before { content: ""; flex: none; width: 8px; height: 8px; box-sizing: border-box; border-radius: var(--radius-full); border: 1.5px solid currentColor; }
 #setup-pill:hover { background: var(--hover); }
