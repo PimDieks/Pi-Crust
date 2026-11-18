@@ -64,12 +64,14 @@ function createTrialLog({ file, fsApi = fs, now = () => new Date() } = {}) {
 	const by = (sub) => (sub ? "subagent" : "main");
 	return {
 		// What the engine said in its init message: counts and names only.
-		chatStart(chatNo, init, appMode, again) {
+		chatStart(chatNo, init, appMode, again, secretsDropped) {
 			const m = init && typeof init === "object" ? init : {};
 			write({
 				ev: "chat_start",
 				chat: chatId(chatNo),
 				again: !!again,
+				// How many secret-looking environment variables were kept out of the engine: a count, never names or values.
+				envDropped: Number.isInteger(secretsDropped) && secretsDropped >= 0 ? secretsDropped : 0,
 				engineVersion: safeName(m.claude_code_version, 40),
 				keySource: safeName(m.apiKeySource, 40),
 				enginePermissionMode: safeName(m.permissionMode, 40),

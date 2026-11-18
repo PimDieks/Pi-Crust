@@ -126,7 +126,7 @@ test("an adapter chat writes one chat_start and one gate line per call, with no 
 		loadSdk: async () => sdk,
 		killTree: () => {},
 		getSettings: () => ({}),
-		env: {},
+		env: { OPENAI_API_KEY: "LEAKVALUE1", GH_TOKEN: "LEAKVALUE2", PATH: "p" },
 	});
 	adapter.configure({ trial: createTrialLog({ file }) });
 	const SECRET_CMD = "npm run build --token=SECRETTEXT";
@@ -157,6 +157,7 @@ test("an adapter chat writes one chat_start and one gate line per call, with no 
 	assert.equal(rows[0].engineVersion, "2.0.0");
 	assert.equal(rows[0].keySource, "ANTHROPIC_API_KEY");
 	assert.equal(rows[0].appMode, "ask-commands");
+	assert.equal(rows[0].envDropped, 2, "only the count of dropped secret-looking variables");
 	assert.deepEqual(rows[0].skills, { count: 1, names: ["pdf"] });
 	assert.deepEqual(rows[0].agents, { count: 1, names: ["Explore"] });
 	assert.deepEqual(rows.slice(1).map((r) => [r.tool, r.hook, r.outcome, r.prompted, r.by]), [
@@ -164,7 +165,7 @@ test("an adapter chat writes one chat_start and one gate line per call, with no 
 		["Bash", "ask", "deny", true, "subagent"],
 		["Read", "ask", "allow", false, "main"],
 	]);
-	for (const never of [KEY, "SECRETTEXT", "npm run", "private prompt", "notes.txt", cwd]) assert.ok(!text.includes(never), "not in the log: " + never);
+	for (const never of [KEY, "LEAKVALUE", "OPENAI_API_KEY", "GH_TOKEN", "SECRETTEXT", "npm run", "private prompt", "notes.txt", cwd]) assert.ok(!text.includes(never), "not in the log: " + never);
 });
 
 test("chat_start is written once per chat start, not once per turn, and carries the tab's chat id", async () => {

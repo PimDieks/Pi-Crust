@@ -299,6 +299,29 @@ test("start: inherited variables that can reconfigure the engine are dropped; pr
 	for (const n of ["DISABLE_TELEMETRY", "DISABLE_UPDATES"]) assert.strictEqual(o.switches[n], "1", n); // the app's own DISABLE_* still set
 });
 
+test("start: inherited variables with secret-looking names are dropped; ordinary ones and the app's own key stay", async () => {
+	const t = await rig({});
+	const bad = ["OPENAI_API_KEY", "openai_api_key", "GEMINI_APIKEY", "GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "AWS_SESSION_TOKEN", "AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY", "AZURE_CLIENT_SECRET", "DB_PASSWORD", "PGPASSWORD", "MYSQL_PWD", "SVC_PASSWD", "GOOGLE_APPLICATION_CREDENTIALS", "SSH_PRIVATE_KEY", "GITHUB_PAT", "STRIPE_SECRET_KEY_LIVE_SECRET", "TOKEN", "SECRET", "MY_TOKEN_FILE_TOKEN", "FOO_SECRET_BAR", "DATABASE_URL", "REDIS_URL", "MONGODB_URI", "ORDERS_CONNECTION_STRING", "SENTRY_DSN", "REPORTING_DATABASE_URL"];
+	const keep = ["PATH", "SystemRoot", "TEMP", "APPDATA", "USERPROFILE", "LOCALAPPDATA", "HOME", "HTTPS_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSH_AUTH_SOCK", "KEYBOARD_LAYOUT", "TOKENIZERS_NOTE", "SECRETARY", "PWD", "COMSPEC", "PATHEXT", "AWS_PROFILE", "EDITOR", "PASSWORD_POLICY_URL_DOC"];
+	const env = {};
+	for (const n of [...bad, ...keep]) env[n] = "dummy-value-" + n;
+	t.adapter.start({ cwd: t.cwd, env, mode: "plan" }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	const o = t.sdk.calls[0].options.env;
+	for (const n of bad) assert.ok(!o.names.includes(n), `${n} was passed on`);
+	for (const n of keep) assert.ok(o.names.includes(n), `${n} was dropped`);
+	assert.ok(o.names.includes("ANTHROPIC_API_KEY"), "the app's own key arrives");
+});
+
+test("start: dropped secret-looking variables leave no trace in records, stderr or errors", async () => {
+	const t = await rig({});
+	const env = { PATH: "p", OPENAI_API_KEY: "LEAKVALUE1", EXTRA_SECRET_THING_TOKEN: "LEAKVALUE2" };
+	t.adapter.start({ cwd: t.cwd, env, mode: "plan" }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	const seen = JSON.stringify([t.events, t.sdk.calls.map((c) => ({ ...c, options: { ...c.options, env: undefined } }))]);
+	for (const never of ["LEAKVALUE1", "LEAKVALUE2", "OPENAI_API_KEY", "EXTRA_SECRET_THING_TOKEN"]) assert.ok(!seen.includes(never), never);
+});
+
 test("no config folder: nothing starts, with a readable error, and check fails too", async () => {
 	const t = await rig({ configDir: null });
 	t.adapter.start({ cwd: t.cwd }, t.sink);
