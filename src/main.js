@@ -274,7 +274,7 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	// crust-context.ts reports the context breakdown and models used (see context-panel.js).
 	// crust-guard.ts asks to continue after every N tool calls (settings.json toolCallCheckIn, default 40, 0 = off).
 	// advisor.ts adds Anthropic's advisor tool (pairs in ~/.pi/agent/advisor.json, /advisor command).
-	const args = ["--mode", "rpc", ...["crust-context.ts", "crust-guard.ts", "advisor.ts"].flatMap((f) => ["-e", path.join(__dirname, "pi-extension", f)])];
+	const args = ["--mode", "rpc", ...["crust-context.ts", "crust-guard.ts", "advisor.ts", "permission-modes.ts"].flatMap((f) => ["-e", path.join(__dirname, "pi-extension", f)])];
 	if (sessionFile) args.push("--session", sessionFile);
 	const [cmd, cmdArgs] = [pi.command, [...pi.args, ...args]];
 	// Windows: no process groups, and detached would open a console window.
