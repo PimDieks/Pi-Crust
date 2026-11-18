@@ -102,7 +102,7 @@ Using the installer from the [Releases page](https://github.com/PimDieks/Pi-Crus
 - Pi, installed globally. npm 11 skips some install scripts unless you allow them:
 
 ```powershell
-npm i -g @earendil-works/pi-coding-agent --allow-scripts=koffi,protobufjs,@google/genai
+npm i -g @earendil-works/pi-coding-agent@1.5.2 --allow-scripts=koffi,protobufjs,@google/genai
 ```
 
   Then start `pi` once and type `/login` inside it. If PowerShell's execution policy blocks `pi.ps1`, start it with `pi.cmd` instead.

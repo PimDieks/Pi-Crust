@@ -2,6 +2,7 @@
 // The install scripts are only ever run here with their dry-run switch: this test never installs anything.
 const test = require("node:test");
 const assert = require("node:assert");
+const fs = require("node:fs");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { spawnSync } = require("node:child_process");
@@ -191,7 +192,8 @@ test("Git is installed: the plan has no Git line and no Git step", async () => {
 
 test("Git is installed: the runner is asked for node and pi only (dry run)", { skip: !(HAVE_PS || HAVE_SH) && "no shell" }, async () => {
 	const h = handlers({ pi: "missing", node: "missing" });
-	const r = await h.map["health:install"]({}, {});
+	const plan = await h.map["health:installPlan"]({}, {});
+	const r = await h.map["health:install"]({}, { token: plan.token });
 	assert.equal(r.ok, true, r.error);
 	assert.equal(r.dryRun, true);
 	const would = r.lines.filter((l) => l.startsWith("WOULD "));
@@ -210,11 +212,20 @@ test("everything is installed: nothing to plan, nothing to run, and no row offer
 	const r = await h.map["health:installPlan"]({}, {});
 	assert.deepEqual(r.needs, []);
 	assert.equal(r.plan.ok, false);
+	assert.equal(r.token, null, "nothing to confirm, so no token");
 	const run = await h.map["health:install"]({}, {});
 	assert.equal(run.ok, false);
-	assert.equal(run.error, "Nothing to install.");
+	assert.equal(run.noToken, true, "an install without a confirmed list does nothing");
 	const rows = L.buildHealth(L.stubFacts({})).rows;
 	assert.ok(!rows.some((x) => x.action && /^(install|update)-/.test(x.action.id)));
+});
+
+test("the scripts install the same package and version as src/pi-package.js", () => {
+	const { PI_PACKAGE } = require("../src/pi-package");
+	const spec = `${PI_PACKAGE.name}@${PI_PACKAGE.version}`;
+	for (const f of ["install-pi.ps1", "install-pi.sh"]) assert.ok(fs.readFileSync(path.join(ROOT, "scripts", f), "utf8").includes(spec), f);
+	assert.ok(H.PLAN.win32.pi.command.includes(spec) && H.PLAN.darwin.pi.command.includes(spec));
+	assert.ok(H.manualSteps(["pi"], "win32").some((l) => l.includes(spec)));
 });
 
 test("Pi fine, only Git missing: the Git button plans Git alone", async () => {

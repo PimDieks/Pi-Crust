@@ -9,8 +9,9 @@
 //   needs:  what an install would have to add, in install order: a subset of ["node", "git", "pi"] (see install-pi script).
 "use strict";
 
-// Assumed floors (Pim's open decision 6): Pi from the version that has `pi auth check`, Node as npm lists it for Pi 1.5.x.
-const MIN_PI = "1.0.0";
+// Floors: Pi is the version this release is tested with (pi-package.js), Node as npm lists it for Pi 1.5.x.
+const MIN_PI = require("./pi-package").PI_PACKAGE.version; // the version this release is tested with: older Pi gets the "Update Pi" row
+const PI_VERSION_OK = MIN_PI; // what the stub reports for a current Pi
 const MIN_NODE = "22.19.0";
 
 const REQUIRED = ["pi", "auth", "git", "project"];
@@ -164,7 +165,7 @@ function stubFacts(s = {}) {
 		: { repo: "/stub/site", exists: true, isGit: true };
 	const fg = pick(s.figma, null);
 	return {
-		pi: tool(s.pi, "1.4.0", "0.73.1"),
+		pi: tool(s.pi, PI_VERSION_OK, "0.73.1"),
 		node: tool(s.node, "22.19.0", "20.11.0"),
 		git: tool(s.git, "2.47.1", "2.0.0"),
 		auth: { subs },

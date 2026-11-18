@@ -78,7 +78,7 @@ function piPackageRoot(script, fsImpl = fs) {
 	let dir = path.dirname(script);
 	for (let i = 0; i < 6; i++) {
 		try {
-			if (JSON.parse(fsImpl.readFileSync(path.join(dir, "package.json"), "utf8")).name === "@earendil-works/pi-coding-agent") return dir;
+			if (JSON.parse(fsImpl.readFileSync(path.join(dir, "package.json"), "utf8")).name === require("./pi-package").PI_PACKAGE.name) return dir;
 		} catch {}
 		const up = path.dirname(dir);
 		if (up === dir) break;

@@ -8,7 +8,7 @@ decides what is missing and shows the same list in its confirm. The script asks 
 or an installer may show its own Windows prompt.
   node  winget install OpenJS.NodeJS.LTS
   git   winget install Git.Git
-  pi    npm install -g @earendil-works/pi-coding-agent
+  pi    npm install -g @earendil-works/pi-coding-agent@1.5.2   (the version in src/pi-package.js)
 
 -DryRun prints what would be done ("WOULD <id>: <command>") and changes nothing: no winget, no npm is started.
 
@@ -34,7 +34,7 @@ $ErrorActionPreference = 'Stop'
 $Steps = [ordered]@{
 	node = @{ Title = 'Node.js (current LTS)'; Exe = 'winget'; Args = @('install', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--silent', '--accept-package-agreements', '--accept-source-agreements') }
 	git  = @{ Title = 'Git'; Exe = 'winget'; Args = @('install', '--id', 'Git.Git', '--exact', '--silent', '--accept-package-agreements', '--accept-source-agreements') }
-	pi   = @{ Title = 'Pi, the coding agent'; Exe = 'npm'; Args = @('install', '-g', '@earendil-works/pi-coding-agent', '--allow-scripts=koffi,protobufjs,@google/genai') }
+	pi   = @{ Title = 'Pi, the coding agent'; Exe = 'npm'; Args = @('install', '-g', '@earendil-works/pi-coding-agent@1.5.2', '--allow-scripts=koffi,protobufjs,@google/genai') }
 }
 
 $wanted = @($Needs.Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
