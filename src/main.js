@@ -109,6 +109,7 @@ function send(channel, payload) {
 // The process itself (spawn, framing, readiness probe, kill) lives in agents/pi/process.js.
 const agents = require("./agents/registry").createRegistry();
 const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6
+agents.register(require("./agents/claude")); // phase 7: inert until the UI offers it; Pi stays the default
 const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: structuredClone(a.capabilities) }); // a copy: the renderer's message never aliases the adapter's object // what the renderer is told about a chat's agent
 
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
