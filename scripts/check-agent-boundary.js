@@ -8,6 +8,10 @@
 // Exit 0: no hit outside the adapter and the allow-list, and no allow-list entry that matches nothing (a stale entry is a failure too,
 // so the list can only shrink unnoticed never). Exit 1: a hit, a stale or incomplete entry. Exit 2: bad usage.
 // Comments are ignored (they may talk about Pi); strings and code are not.
+//
+// One more rule, "claude-code-name", is not about Pi: the product name "Claude Code" must not appear in anything a user sees. It is checked in
+// every string and line of code in src/ (the adapter folders included; comments there may keep the name) and in the text of the docs
+// (README.md, SETUP.md, CHANGELOG.md, RELEASING.md, AGENTS.md, package.json, docs/). The allowed forms are "Claude Agent" and "powered by Claude".
 "use strict";
 
 const fs = require("node:fs");
@@ -22,7 +26,14 @@ const RULES = [
 	{ id: "pi-binary", re: /\bPI_CRUST_PI\b/, what: "the override variable for Pi's program path" },
 	{ id: "pi-probe", re: /__ready_probe__/, what: "Pi's readiness probe id" },
 	{ id: "pi-status", re: /["'`]crust-context["'`]|["'`]permission-mode["'`]|["'`]copilot-usage["'`]/, what: "status names set by Pi-only extensions" },
+	// everywhere: also reported inside the adapter folders, and in the docs. Spaces only, so identifiers such as the SDK's `claude_code` preset
+	// or CLAUDE_CODE_* variables (code, never shown) are not hits.
+	{ id: "claude-code-name", re: /claude[ \t ]+code/i, what: 'the product name "Claude Code" (use "Claude Agent")', everywhere: true },
 ];
+// Text a user can read outside src/: scanned as plain text, comments included.
+const DOC_FILES = ["README.md", "SETUP.md", "CHANGELOG.md", "RELEASING.md", "AGENTS.md", "package.json"];
+const DOC_DIRS = ["docs"];
+const DOC_EXT = /\.(md|txt|html|json)$/;
 const SCAN_DIRS = ["src"];
 const SCAN_EXT = /\.(js|mjs|cjs|html|ts)$/;
 // Where Pi specifics belong: nothing is reported here.
@@ -37,7 +48,7 @@ function stripComments(text, file) {
 		.join("\n");
 }
 
-function walk(root, dir, out) {
+function walk(root, dir, out, ext = SCAN_EXT) {
 	let entries = [];
 	try {
 		entries = fs.readdirSync(path.join(root, dir), { withFileTypes: true });
@@ -48,8 +59,8 @@ function walk(root, dir, out) {
 		const rel = `${dir}/${e.name}`;
 		if (e.isDirectory()) {
 			if (e.name === "node_modules" || e.name === "local" || e.name.startsWith(".")) continue; // src/local is the user's own, untracked
-			walk(root, rel, out);
-		} else if (SCAN_EXT.test(e.name) && !/\.test\.js$/.test(e.name)) out.push(rel);
+			walk(root, rel, out, ext);
+		} else if (ext.test(e.name) && !/\.test\.js$/.test(e.name)) out.push(rel);
 	}
 	return out;
 }
@@ -59,12 +70,25 @@ function scan(root) {
 	const hits = [];
 	for (const dir of SCAN_DIRS) {
 		for (const file of walk(root, dir, [])) {
-			if (HOME.some((re) => re.test(file))) continue;
+			const rules = HOME.some((re) => re.test(file)) ? RULES.filter((r) => r.everywhere) : RULES;
 			const lines = stripComments(fs.readFileSync(path.join(root, file), "utf8"), file).split(/\r?\n/);
 			lines.forEach((line, i) => {
-				for (const r of RULES) if (r.re.test(line)) hits.push({ file, rule: r.id, line: i + 1, text: line.trim().slice(0, 140), full: line });
+				for (const r of rules) if (r.re.test(line)) hits.push({ file, rule: r.id, line: i + 1, text: line.trim().slice(0, 140), full: line });
 			});
 		}
+	}
+	const docs = DOC_FILES.slice();
+	for (const dir of DOC_DIRS) for (const f of walk(root, dir, [], DOC_EXT)) docs.push(f);
+	for (const file of docs) {
+		let text;
+		try {
+			text = fs.readFileSync(path.join(root, file), "utf8");
+		} catch {
+			continue;
+		}
+		text.split(/\r?\n/).forEach((line, i) => {
+			for (const r of RULES) if (r.everywhere && r.re.test(line)) hits.push({ file, rule: r.id, line: i + 1, text: line.trim().slice(0, 140), full: line });
+		});
 	}
 	return hits;
 }

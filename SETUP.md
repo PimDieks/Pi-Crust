@@ -89,6 +89,41 @@ The phone only sees the chats you share, one by one: open a chat and choose *Use
 
 Without Tailscale, the panel can also serve your Wi-Fi (plain http, no notifications). Pick the right network in the panel if you have more than one. A Wi-Fi pairing lasts 30 days and doesn't work in Tailscale mode.
 
+## Claude Agent (optional)
+
+Pi is all you need. If you also want chats with the second agent, **Claude Agent** (powered by Claude), there are two one-time steps. You do them in the chat itself, on the setup card of your first Claude Agent chat. Open **New chat**'s arrow and choose **Claude Agent**. See [README.md](README.md#claude-agent-optional) for what the agent can and cannot do.
+
+You need your own Anthropic API key. Usage is billed to your own Anthropic account. A Claude subscription does not work for this agent.
+
+**Step 1: the API key.** Press **Add key**, paste your key and press **Save key**. Pi Crust tests it with one tiny request and tells you here if Anthropic does not accept it. The key is stored encrypted by your operating system and is never shown again. If you have not saved a key but `ANTHROPIC_API_KEY` is set on this computer, that one is used. A key you save in the app wins over it.
+
+If the engine is not downloaded yet, the key is saved first and checked as soon as the engine is there.
+
+**Step 2: the engine.** Press **Download**. It is about 175 MB, downloaded once and checked before use. The message box stays off, with a reason, until both steps are done. Then the chat starts.
+
+**Change or remove the key.** In the same card (and in the Setup panel, once you have started a Claude Agent chat) press **Change key** to paste a new one. The old key stays until the new one is accepted. **Remove key** deletes the stored key from this computer. The key stays valid at Anthropic: delete it in your Anthropic account if you want it gone for good.
+
+**Download the engine again.** Close Pi Crust, delete the `claude-engine` folder in the data folder (below), start Pi Crust and open a Claude Agent chat: the card offers **Download** again. If the engine on disk is damaged or has the wrong size, the card says so and offers **Try again**.
+
+**Where things live.** All of it is in Pi Crust's data folder: `~/Library/Application Support/pi-crust/` on macOS, `%APPDATA%\pi-crust` on Windows.
+
+| What | Where |
+|---|---|
+| The engine | `claude-engine/` |
+| The stored key (encrypted) | `claude/` |
+| Claude Agent's own config folder, chat links and rewind data | `claude-config/` |
+
+**If the key check fails.**
+- *"Anthropic did not accept this key"*: copy the whole key again from your Anthropic account, with no spaces around it. Check in your Anthropic account that the key is active.
+- *"Pi Crust could not reach Anthropic"*: check your internet connection, VPN or proxy and try again. Proxy settings from your environment are passed on to the engine.
+- *"The key could not be checked because the engine is not ready"*: do step 2 first.
+
+**If the download fails.** The card shows the reason and **Try again**. A failed download leaves no partial files behind.
+- The engine comes from the public npm registry (`registry.npmjs.org`) over HTTPS and nowhere else. A network that blocks it needs an exception.
+- *"Not enough free disk space"*: free some space, the engine needs more than the download itself once it is unpacked.
+- *"did not match the expected checksum"*: the download was deleted and nothing was installed. Try again, and try another network if it keeps happening.
+- Press **Cancel** during a download to stop it. Everything it wrote is removed.
+
 ## Windows
 
 Everything below is for Windows 10 or 11 and PowerShell. The macOS steps above stay as they are.

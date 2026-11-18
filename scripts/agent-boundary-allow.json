@@ -126,6 +126,12 @@
 			"rule": "pi-status",
 			"contains": "const CONTEXT_STATUS_KEY = \"crust-context\";",
 			"reason": "The app context meter (src/context-panel.js) reads this status key by name. The Claude adapter feeds the same meter from getContextUsage(), so it sets the same key; this one line is the only place the Claude adapter names it."
+		},
+		{
+			"file": "src/agent-ui.js",
+			"rule": "claude-code-name",
+			"contains": "the words Claude Code are on screen",
+			"reason": "The agents selftest looks for the forbidden product name on screen: the phrase is in the check and in its failure message, never shown to a user."
 		}
 	]
 }

@@ -14,12 +14,15 @@ Pi Crust runs on macOS and Windows 11. Read how and why it was designed in the c
 
 Pi runs as a subprocess in RPC mode (`pi --mode rpc`), so everything in `~/.pi/agent` keeps working: the model, subagents, extensions, skills, MCP servers and the Copilot usage status.
 
+Pi is the default agent. You can also start a chat with a second, optional agent, **Claude Agent** (powered by Claude). It needs your own Anthropic API key. See [Claude Agent](#claude-agent-optional).
+
 The layout and some ideas (startup probe, process-group shutdown, tool cards, prompt recall) were inspired by [Pi Desktop](https://github.com/FaqFirebase/pi-desktop). No code was copied.
 
 ## Contents
 
 - [Quick start](#quick-start)
 - [Chat](#chat)
+- [Claude Agent (optional)](#claude-agent-optional)
 - [Views](#views)
 - [Middle tabs](#middle-tabs)
 - [Design tab](#design-tab)
@@ -165,6 +168,40 @@ The data comes from `src/pi-extension/crust-context.ts`, which Pi Crust loads in
 |---|---|
 | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/todos-dark.png"><img src="docs/screenshots/todos-light.png" alt="Todo panel above the composer, two of four items done, next to the Viewer tab showing the running app."></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mermaid-dark.png"><img src="docs/screenshots/mermaid-light.png" alt="A Mermaid flowchart rendered in the chat, showing how a flight status update reaches the card."></picture> |
 
+## Claude Agent (optional)
+
+Pi stays the default. Next to it Pi Crust has a second agent, **Claude Agent**, powered by Claude. You pick the agent for each chat when you start it, and a chat cannot switch agent later. Every chat shows its agent's name in a chip in the chat header. A Claude Agent chat also has a small diamond before its tab title; Pi tabs look as they always did.
+
+**Start a chat.** **New chat** has a small arrow next to it. A plain click on **New chat** starts a Pi chat, as before. The arrow opens a menu with **Pi** and **Claude Agent**.
+
+**What it needs.**
+- **Your own Anthropic API key.** Usage is billed to your own Anthropic account. There is no sign-in with a Claude subscription: for that, use Pi.
+- **A one-time engine download of about 175 MB.** The engine is the program that does the work. It is not in the installer. Pi Crust asks before it downloads a pinned version, and checks it before use.
+
+A new Claude Agent chat opens with a setup card: step 1 is the key, step 2 is the engine. The message box stays off, and says why, until both are done. Nothing covers the app. Details and fixes are in [SETUP.md](SETUP.md#claude-agent-optional).
+
+**Cost.** The cost shown for a chat is an estimate, not your bill. A chat pauses at about 5 dollars and asks before it goes on: a card at the end of the chat says what the chat has used, with **Continue** (up to another 5 dollars) and **Change limit**. The message box stays off until you choose. You can also set the limit in `settings.json` (see Configuration).
+
+**How it differs from a Pi chat.**
+
+| | Claude Agent chat |
+|---|---|
+| Works the same | Permission modes and the approval prompt, Stop, model choice, thinking level (shown as effort), slash commands, images, tool cards, the context meter, checkpoints and Rewind, Earlier chats (they list both agents), and Fork (opens a new tab) |
+| Different | The cost is an estimate. A message you send while it works runs after the current step, so there is no Alt+Enter steering and no queue strip. It compacts long chats by itself |
+| Not available | `/clone`, `/export`, `/compact`, `/session`, `/name`, the advisor, and everything that comes from Pi's extensions: Pi's subscriptions and the Copilot quota. These controls are shown off with a reason, or are absent |
+| Not on the phone | The [phone view](#remote-from-your-phone) shows Pi chats only |
+
+**Rewind and fork.**
+- **Rewind** is the same Rewind as in a Pi chat. Files come back from the app's own snapshots (see [History](#history-checkpoints-rewind-and-screenshots)).
+- A rewound conversation is kept **only in its tab until you send your next message**. If you close Pi Crust before that, the chat reopens as it was before the rewind.
+- **Fork** (`/fork`) opens a new tab that continues from the end of the chat or from an earlier message. It is named "Fork of" and the title of the chat. Like a rewound chat, a new fork exists **only in its tab until you send its first message**. Before that it has no saved conversation of its own.
+
+**Safety.**
+- The four **permission modes** and the same **approval prompt** apply to Claude Agent chats too (see Permission modes in the Chat section). The mode selector, the prompt and its answers work as in a Pi chat.
+- They are a **safety net, not a sandbox**. A command you approve can do anything you can. On Windows the engine has no sandbox of its own, so the modes and the prompt are the only guard.
+- A Claude Agent chat reads the project's `CLAUDE.md` as instructions (a file over 32 KB, a link, or one that leads out of the project folder is ignored). The project's own Claude settings and your own Claude settings are **not** loaded, so nothing in them can approve an action around the mode selector. Pi Crust gives the engine its own config folder, so a Claude sign-in you have on this computer is never used.
+- The API key is kept in the operating system's protected store. It is kept out of the commands the agent runs. A key in the `ANTHROPIC_API_KEY` environment variable is used only when you have not saved one in the app.
+
 ## Views
 
 A view decides which features you see. Switch with the **All | Dev | Design** control in the tab bar, the palette (*View: Dev*), or ⌃⌘1 / ⌃⌘2 / ⌃⌘3. The choice is remembered.
@@ -301,7 +338,7 @@ On Windows, ⌘ and ⌃ mean Ctrl and ⌥ means Alt. Ctrl+W does not close the w
 
 ## Remote from your phone
 
-Chat with Pi from your phone, in a small web app that Pi Crust serves itself. You choose which chats the phone can use. In the phone you can see those chats, read them live, send prompts, stop a run, answer Pi's questions, start a new chat and restart one that stopped. You can't use the terminal, the files or git from the phone.
+Chat with Pi from your phone, in a small web app that Pi Crust serves itself. The phone shows Pi chats only: Claude Agent chats are not listed there. You choose which chats the phone can use. In the phone you can see those chats, read them live, send prompts, stop a run, answer Pi's questions, start a new chat and restart one that stopped. You can't use the terminal, the files or git from the phone.
 
 Turn it on with *Remote access…* in the command palette, `/remote`, or the 📱 button in the chat header. The panel walks you through the setup.
 
@@ -334,6 +371,8 @@ Turn it on with *Remote access…* in the command palette, `/remote`, or the �
 | `figmaFiles` | The Figma file for the Figma picker, per project (saved in Design › Figma status or by pasting a link); `figmaFileKey` and `figmaFileName` are the older app-wide value, used when a project has none |
 | `storybookUrl` | Storybook address; empty means auto-detect |
 | `designTokensFile` | JSON with `colors`, `spacing`, `radii`, `typography`, relative to the repo |
+| `claudeMaxBudgetUsd` | Claude Agent: the amount in US dollars at which a chat pauses and asks before going on (default 5, at least 0.5). **Change limit** on the pause card writes it |
+| `claudeMaxTurns` | Claude Agent: the number of steps a run may take before it pauses (default 100) |
 | `toolCallCheckIn` | Ask "Keep going?" after this many tool calls in one run (default 40, `0` = off). Applies to chats started afterwards |
 | `mendix` | Per-repo Mendix passwords and port; written by the app |
 | `mendixStopOnQuit` | Stop the Mendix app container when Pi Crust quits (default `true`; Postgres keeps running) |

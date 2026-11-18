@@ -6,6 +6,17 @@ The section of a version becomes the text of its release.
 
 ## [Unreleased]
 
+- A second, optional agent: **Claude Agent**, powered by Claude. Pi stays the default. It needs your own Anthropic API key (usage is billed to your Anthropic account; no sign-in with a Claude subscription) and a one-time engine download of about 175 MB, checked before use. See "Claude Agent" in the README and SETUP.md.
+- **New chat** is now a split button. A plain click starts a Pi chat as before; the small arrow next to it lets you pick Pi or Claude Agent for the new chat.
+- Every chat shows its agent's name in a chip in the chat header. Claude Agent tabs get a small diamond before the title; Pi tabs look as before.
+- A new Claude Agent chat opens with a setup card for the key and the engine. The message box is off, and says why, until both are done. The key can be changed or removed from the card, and from the Setup panel once you have started a Claude Agent chat. A wrong key is reported when you save it.
+- The four permission modes and the approval prompt gate Claude Agent chats too. They are a safety net, not a sandbox, and on Windows the engine has no sandbox. The project's `CLAUDE.md` is read as instructions; the project's and your own Claude settings are not loaded. The key is kept in the operating system's protected store and out of the commands the agent runs.
+- A Claude Agent chat shows an estimated cost and pauses at about 5 dollars. A card asks you to **Continue** or **Change limit** (also `claudeMaxBudgetUsd` in `settings.json`).
+- Rewind and Fork work in Claude Agent chats. A rewound chat or a new fork lives only in its tab until you send the next message.
+- Controls a Claude Agent chat cannot use (steering, the queue, `/clone`, `/export`, `/compact`, `/session`, `/name`, the advisor, Pi's subscriptions and Copilot quota) are shown off with a reason, or are absent.
+- Earlier chats lists the saved chats of both agents. Chats you had open come back with their own agent after a restart.
+- The phone view shows Pi chats only for now.
+- The slash and @ menus now sit with a small gap above the message box instead of touching it. The reason a control is disabled shows in its own line under the chat and never covers the chat or a question.
 - First launch shows a setup checklist: Pi, a model provider, Git, a project folder and (optional) Figma, each with one button. Pi Crust can install what is missing after you confirm the list, make a folder a Git project, and open the sign-in and Figma setup. **Skip for now** leaves a **Setup** pill in the chat header.
 - A guided first task above the message box: ask Pi about the project, let it change one file, then undo it with Rewind. Each step ticks when it really happened, and nothing is sent for you.
 - Ways back to setup: the pill, the command palette, `/setup` (works without Pi), a new **Help** menu, and an **Open setup** button where Pi is missing.

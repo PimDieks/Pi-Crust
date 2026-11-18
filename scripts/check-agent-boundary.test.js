@@ -127,3 +127,49 @@ test("this repository: a new .pi use in src/main.js fails, the allowed ones pass
 	assert.match(r.failures[0], /^src\/main\.js:\d+ \[pi-folder\].*extra\.json/);
 	for (const e of allow.entries) assert.ok(e.contains && e.contains.length >= 6, `${e.file}: a contains text`);
 });
+
+test("claude-code-name: the product name fails in strings, in the adapter folders and in the docs; comments in src and the allowed forms pass", () => {
+	const bad = tree({
+		"src/a.js": 'const t = "Powered by Claude Code";\n',
+		"src/agents/claude/b.js": 'const t = `claude code is not installed`;\n',
+		"src/c.html": "<p>Claude Code</p>\n",
+		"README.md": "Pi Crust also runs Claude Code.\n",
+		"docs/guide.md": "Use CLAUDE   CODE here.\n",
+		"CHANGELOG.md": "- fine, Claude Agent\n",
+	});
+	assert.deepStrictEqual(rules(B.check(bad, { entries: [] })), ["README.md:claude-code-name", "docs/guide.md:claude-code-name", "src/a.js:claude-code-name", "src/agents/claude/b.js:claude-code-name", "src/c.html:claude-code-name"]);
+	const ok = tree({
+		"src/agents/claude/x.js": '// the engine of Claude Code, in a comment\nconst preset = "claude_code"; process.env.CLAUDE_CODE_FLAG = "1"; const t = "Claude Agent, powered by Claude";\n',
+		"src/y.js": '/* Claude Code, in a block comment */\nconst n = 1;\n',
+		"README.md": "Claude Agent, powered by Claude.\n",
+	});
+	assert.deepStrictEqual(B.check(ok, { entries: [] }).failures, []);
+});
+
+test("claude-code-name: a planted string in a temporary copy of this repository fails the command, the repository itself passes", () => {
+	const repo = path.join(__dirname, "..");
+	const run = (root) => spawnSync(process.execPath, [SCRIPT, "--root", root], { encoding: "utf8" });
+	assert.strictEqual(run(repo).status, 0);
+	const copy = fs.mkdtempSync(path.join(os.tmpdir(), "pi-boundary-copy-"));
+	const copyFile = (rel) => {
+		fs.mkdirSync(path.dirname(path.join(copy, rel)), { recursive: true });
+		fs.copyFileSync(path.join(repo, rel), path.join(copy, rel));
+	};
+	for (const rel of ["src/agent-ui.js", "src/claude-setup.js", "README.md", "SETUP.md", "CHANGELOG.md"]) copyFile(rel);
+	const allow = path.join(__dirname, "agent-boundary-allow.json");
+	// only the copied files can match an allow-list entry; the others are reported stale, so use an allow-list of the entries that apply
+	const entries = JSON.parse(fs.readFileSync(allow, "utf8")).entries.filter((e) => fs.existsSync(path.join(copy, e.file)));
+	const allowCopy = path.join(copy, "allow.json");
+	fs.writeFileSync(allowCopy, JSON.stringify({ entries }));
+	const runCopy = () => spawnSync(process.execPath, [SCRIPT, "--root", copy, "--allow", allowCopy], { encoding: "utf8" });
+	assert.strictEqual(runCopy().status, 0, runCopy().stderr);
+	for (const [rel, text] of [["src/claude-setup.js", '\nconst planted = "Sign in to Claude Code";\n'], ["README.md", "\nPlanted: Claude Code.\n"]]) {
+		const before = fs.readFileSync(path.join(copy, rel), "utf8");
+		fs.appendFileSync(path.join(copy, rel), text);
+		const r = runCopy();
+		assert.strictEqual(r.status, 1, `${rel}: ${r.stdout}${r.stderr}`);
+		assert.ok(r.stderr.includes(`  ${rel}:`) && r.stderr.includes("[claude-code-name]"), r.stderr);
+		fs.writeFileSync(path.join(copy, rel), before);
+		assert.strictEqual(runCopy().status, 0);
+	}
+});
