@@ -128,7 +128,9 @@
 			}
 			const retry = button("Retry", "secondary", () => {
 				retry.disabled = true;
-				crust.appUpdate.check().then((st) => (st.state === "available" && !st.blocked ? (st.version && crust.appUpdate.download ? crust.appUpdate.download() : crust.appUpdate.run()) : render(st)));
+				// after a failed download: download again; after a failed check: check again and show what it finds (never jump to downloading)
+				if (last.phase === "download") Promise.resolve(crust.appUpdate.download ? crust.appUpdate.download() : crust.appUpdate.run()).then((st) => st && render(st));
+				else crust.appUpdate.check().then(render);
 			});
 			actions.append(retry);
 			if (last.kind) {

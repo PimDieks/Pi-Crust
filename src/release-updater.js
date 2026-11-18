@@ -10,6 +10,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const RELEASES_URL = "https://github.com/PimDieks/Pi-Crust/releases";
+const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 const LOG_MAX_BYTES = 256 * 1024;
 const LOG_RING = 200;
 
@@ -33,7 +34,8 @@ function mapError(err, phase = "check") {
 	if (code === "ERR_CHECKSUM_MISMATCH" || /sha512 checksum mismatch/i.test(text)) kind = "damaged";
 	else if (code === "ERR_UPDATER_INVALID_SIGNATURE" || /not signed by the application owner/i.test(text)) kind = "signature";
 	else if (code === "EBUSY" || /\bEBUSY\b|resource busy or locked|being used by another process/i.test(text)) kind = "locked";
-	else if (code === "EACCES" || code === "EPERM" || /\b(EACCES|EPERM)\b|contains a virus|operation not permitted/i.test(text)) kind = "blocked";
+	else if (code === "EACCES" || code === "EPERM" || /\b(EACCES|EPERM)\b|contains a virus/i.test(text)) kind = "blocked";
+	else if (/operation not permitted/i.test(text) && /\.(exe|blockmap|tmp)|pending|installer/i.test(text)) kind = "blocked";
 	else if (NETWORK.test(code + " " + text)) kind = phase === "check" ? "offline" : "download";
 	return { kind, message: kind === "offline" ? "" : MESSAGES[kind] };
 }
@@ -68,16 +70,28 @@ function createLogger(file, maxBytes = LOG_MAX_BYTES) {
 	return { info: (m) => write("INFO", m), warn: (m) => write("WARN", m), error: (m) => write("ERROR", m), debug: () => {}, lines: (n = 20) => ring.slice(-n) };
 }
 
-// Text for "Copy details": no home folder or user name.
+// Text for "Copy details": no home folder, user name, temp, resources or install folder (any case, either slash, 8.3 short forms).
+const reEscape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function redact(text) {
 	let t = String(text);
-	const names = new Set([os.homedir(), process.env.USERPROFILE, process.env.APPDATA, process.env.LOCALAPPDATA].filter(Boolean));
-	for (const n of names) t = t.split(n).join("<user folder>").split(n.replace(/\\/g, "/")).join("<user folder>");
+	const pairs = [];
+	const add = (p, label) => {
+		if (p && String(p).length > 2) pairs.push([String(p).replace(/[\\/]+$/, ""), label]);
+	};
+	add(os.tmpdir(), "<temp folder>");
+	add(process.resourcesPath, "<app resources>");
+	add(process.execPath && path.dirname(process.execPath), "<install folder>");
+	for (const n of [os.homedir(), process.env.USERPROFILE, process.env.APPDATA, process.env.LOCALAPPDATA]) add(n, "<user folder>");
+	pairs.sort((x, y) => y[0].length - x[0].length); // the longest (most specific) folder first
+	for (const [p, label] of pairs) {
+		const re = new RegExp(p.split(/[\\/]+/).map(reEscape).join("[\\\\/]+"), "gi");
+		t = t.replace(re, label);
+	}
 	try {
 		const user = os.userInfo().username;
-		if (user && user.length > 2) t = t.split(user).join("<user>");
+		if (user && user.length > 2) t = t.replace(new RegExp(reEscape(user), "gi"), "<user>");
 	} catch {}
-	return t;
+	return t.replace(/\b[A-Z0-9_]{1,6}~\d\b/gi, "<user>");
 }
 
 function create({ updater, version, onStatus = () => {}, logFile = null, logger = createLogger(logFile) }) {
@@ -97,7 +111,7 @@ function create({ updater, version, onStatus = () => {}, logFile = null, logger 
 		if (status.state === "downloading") set({ ...status, percent: Math.max(0, Math.min(100, Math.round(p.percent || 0))) });
 	});
 
-	const notesUrl = (v) => (/^[0-9A-Za-z.+-]+$/.test(String(v)) ? `${RELEASES_URL}/tag/v${v}` : RELEASES_URL);
+	const notesUrl = (v) => (SEMVER.test(String(v)) ? `${RELEASES_URL}/tag/v${v}` : RELEASES_URL);
 	function set(s) {
 		status = s;
 		onStatus(status);
@@ -122,10 +136,11 @@ function create({ updater, version, onStatus = () => {}, logFile = null, logger 
 			else if (status.state === "uptodate" || status.state === "offline") set({ state: "none" });
 		} catch (e) {
 			const m = fail(e, "check");
-			if (m.kind === "offline") {
-				if (manual) set({ state: "offline" });
-				// background: no card, it tries again at the next interval
-			} else set({ state: "error", kind: m.kind, message: m.message, details: details() });
+			if (!manual) {
+				// background check: never a card, whatever the reason (offline, 403/404, rate limit, no release yet); it is in the log
+				if (status.state === "uptodate" || status.state === "offline") set({ state: "none" });
+			} else if (m.kind === "offline") set({ state: "offline" });
+			else set({ state: "error", phase: "check", kind: m.kind, message: m.message, details: details() });
 		} finally {
 			busy = false;
 		}
@@ -133,16 +148,17 @@ function create({ updater, version, onStatus = () => {}, logFile = null, logger 
 	}
 
 	async function download() {
-		if (busy || status.state !== "available") return status;
+		const retry = status.state === "error" && status.phase === "download" && foundVersion; // Retry after a failed download
+		if (busy || (status.state !== "available" && !retry)) return status;
 		busy = true;
-		const v = status.version;
+		const v = retry ? foundVersion : status.version;
 		set({ state: "downloading", version: v, percent: 0 });
 		try {
 			await updater.downloadUpdate();
 			set({ state: "ready", version: v, notesUrl: notesUrl(v) });
 		} catch (e) {
 			const m = fail(e, "download");
-			set({ state: "error", kind: m.kind === "offline" ? "download" : m.kind, message: m.kind === "offline" ? MESSAGES.download : m.message, details: details() });
+			set({ state: "error", phase: "download", kind: m.kind === "offline" ? "download" : m.kind, message: m.kind === "offline" ? MESSAGES.download : m.message, details: details() });
 		} finally {
 			busy = false;
 		}
