@@ -1,0 +1,253 @@
+"use strict";
+// Claude agent permissions (phase 7, T6): every cell of mode x tool category, the bypass attempts for the Bash tool,
+// each scripted answer, grants per chat, and fail-closed behaviour. No SDK, no Electron, no model.
+// PERM_STUB=1 runs the same tests against an always-allow stub (the negative control: they must fail).
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const logic = require("../src/permission-logic");
+const real = require("../src/agents/claude/permissions");
+
+const stub = {
+	...real,
+	makeCanUseTool: () => async (toolName, input) => ({ behavior: "allow", updatedInput: input }),
+};
+const P = process.env.PERM_STUB ? stub : real;
+
+const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "claude-perm-")));
+const proj = path.join(tmp, "proj");
+const outside = path.join(tmp, "outside");
+fs.mkdirSync(path.join(proj, "src"), { recursive: true });
+fs.mkdirSync(outside);
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+// Builds a handler with a scripted asker. answer: a string, "undefined", "throw", or a function.
+function rig(mode, answer) {
+	const asked = [];
+	const ask = async (prompt, meta) => {
+		asked.push({ prompt, meta });
+		if (answer === "throw") throw new Error("panel crashed");
+		return typeof answer === "function" ? answer(prompt) : answer === "undefined" ? undefined : answer;
+	};
+	const grants = logic.createGrants();
+	const can = P.makeCanUseTool({ getMode: () => mode, ask, grants, cwd: proj });
+	if (P.makeCanUseTool === stub.makeCanUseTool) can.grants = grants;
+	return { can, asked, grants };
+}
+const inP = (f) => path.join(proj, f);
+const outP = (f) => path.join(outside, f);
+
+const ALL = { plan: "allow", "ask-edits": "allow", "ask-commands": "allow", trusted: "allow" };
+const EDIT_IN = { plan: "deny", "ask-edits": "ask", "ask-commands": "allow", trusted: "allow" };
+const ASK_ALL = { plan: "deny", "ask-edits": "ask", "ask-commands": "ask", trusted: "allow" };
+
+// [label, tool, input, expected outcome per mode]. "ask" means the asker is called once; nobody answers, so it ends as deny.
+const CELLS = [
+	["read (Read, in project)", "Read", { file_path: inP("src/a.js") }, ALL],
+	["search (Grep)", "Grep", { pattern: "x", path: inP("src") }, ALL],
+	["search (Glob)", "Glob", { pattern: "*.js" }, ALL],
+	["todo (TodoWrite)", "TodoWrite", { todos: [] }, ALL],
+	["edit in project (Edit)", "Edit", { file_path: inP("src/a.js"), old_string: "a", new_string: "b" }, EDIT_IN],
+	["edit in project (Write)", "Write", { file_path: inP("src/new.js"), content: "x" }, EDIT_IN],
+	["edit in project (MultiEdit)", "MultiEdit", { file_path: inP("src/a.js"), edits: [] }, EDIT_IN],
+	["edit in project (NotebookEdit)", "NotebookEdit", { notebook_path: inP("n.ipynb"), new_source: "x" }, EDIT_IN],
+	["edit outside the project", "Write", { file_path: outP("x.txt"), content: "x" }, ASK_ALL],
+	["edit of a protected file", "Write", { file_path: inP(".git/config"), content: "x" }, ASK_ALL],
+	["read-only shell (Bash)", "Bash", { command: "rg TODO src" }, ALL],
+	["mutating shell (Bash)", "Bash", { command: "npm install left-pad" }, ASK_ALL],
+	["mutating shell (PowerShell)", "PowerShell", { command: "Remove-Item x" }, ASK_ALL],
+	["subagent (Task)", "Task", { description: "d", prompt: "do it", subagent_type: "general-purpose" }, ASK_ALL],
+	["subagent (Agent)", "Agent", { description: "d", prompt: "do it" }, ASK_ALL],
+	["unknown tool (WebFetch)", "WebFetch", { url: "https://example.com" }, ASK_ALL],
+	["unknown tool (made-up)", "SomethingNew", { x: 1 }, ASK_ALL],
+	["MCP tool", "mcp__srv__do", { a: 1 }, ASK_ALL],
+];
+for (const [label, tool, input, want] of CELLS) {
+	for (const mode of logic.MODE_IDS) {
+		test(`cell: ${label} in ${mode} -> ${want[mode]}`, async () => {
+			const { can, asked } = rig(mode, "undefined");
+			const r = await can(tool, input, { signal: new AbortController().signal });
+			if (want[mode] === "allow") {
+				assert.equal(r.behavior, "allow");
+				assert.equal(asked.length, 0);
+				assert.deepEqual(r.updatedInput, input);
+			} else {
+				assert.equal(r.behavior, "deny");
+				assert.ok(r.message && r.message.length > 10);
+				assert.equal(asked.length, want[mode] === "ask" ? 1 : 0, "asked or not");
+			}
+			assert.equal(Object.prototype.hasOwnProperty.call(r, "updatedPermissions"), false);
+		});
+	}
+}
+
+test("every mode maps to SDK options; trusted alone skips, an unreadable mode never does", () => {
+	assert.equal(P.sdkModeFor("plan").permissionMode, "plan");
+	assert.equal(P.sdkModeFor("ask-edits").permissionMode, "default");
+	assert.equal(P.sdkModeFor("ask-commands").permissionMode, "default");
+	assert.deepEqual(P.sdkModeFor("trusted"), { permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
+	for (const bad of [undefined, null, "yolo", 7, "__proto__", "constructor"]) assert.equal(P.sdkModeFor(bad).permissionMode, "default", String(bad));
+	for (const id of logic.MODE_IDS) assert.ok(P.SDK_MODES[id], id);
+});
+
+test("name table: Claude names reach the right category; unmapped names never borrow Pi's lower case names", () => {
+	const kind = (n) => logic.classify(P.logicName(n));
+	for (const n of ["Read", "Grep", "Glob", "LS", "TodoWrite"]) assert.equal(kind(n), "safe", n);
+	for (const n of ["Edit", "Write", "MultiEdit", "NotebookEdit"]) assert.equal(kind(n), "edit", n);
+	for (const n of ["Bash", "PowerShell"]) assert.equal(kind(n), "shell", n);
+	for (const n of ["Task", "Agent"]) assert.equal(kind(n), "subagent", n);
+	for (const n of ["bash", "edit", "read", "subagent", "READ", "Bash ", "", undefined, null, 5, "__proto__", "toString"]) assert.equal(kind(n), "command", String(n));
+});
+
+// --- bypass attempts (from permission-attacks.test.js) through the Bash tool -----------------------------
+const ATTACKS = ["echo x > out.txt", "rg TODO src > out.txt", "ls && rm -rf x", "rg TODO src; del x", "rg TODO src | sh", "cat $(id)", "rg \"`id`\" src", "find src *elete", "rg TODO -*", "git log --output=README.md", "find . -name x -delete", "rg --pre=sh x", "cat ..\\..\\secret.txt > ..\\..\\x", "cat //attacker.example/share/x", "cat http://x/y", "git --version; rm x"];
+for (const c of ATTACKS) {
+	test(`bypass: Bash "${c}" is never allowed unasked`, async () => {
+		for (const mode of ["plan", "ask-edits", "ask-commands"]) {
+			const { can, asked } = rig(mode, "undefined");
+			const r = await can("Bash", { command: c });
+			assert.equal(r.behavior, "deny", `${mode}: ${c}`);
+			if (mode === "plan") assert.equal(asked.length, 0, "plan blocks without asking");
+		}
+	});
+}
+test("bypass: edits that climb out with .. or use URLs and network paths are outside, so they ask in Ask before commands", async () => {
+	for (const p of [path.join(proj, "..", "outside", "x.txt"), "..\\..\\x.txt", "../../x.txt", require("url").pathToFileURL(outP("x.txt")).href, "file://evilhost/share/x"]) {
+		const { can, asked } = rig("ask-commands", "undefined");
+		const r = await can("Write", { file_path: p, content: "x" });
+		assert.equal(r.behavior, "deny", p);
+		assert.equal(asked.length, 1, p);
+		assert.match(asked[0].prompt.title, /OUTSIDE|network/i, p);
+	}
+});
+test("bypass: a hand-picked tool name 'bash' or 'edit' is an unknown tool and asks, in lower case too", async () => {
+	for (const n of ["bash", "edit", "read", "write"]) {
+		const { can, asked } = rig("ask-commands", "undefined");
+		const r = await can(n, { command: "rg x", file_path: inP("a.js"), path: inP("a.js") });
+		assert.equal(r.behavior, "deny", n);
+		assert.equal(asked.length, 1, n);
+	}
+});
+
+// --- scripted answers -------------------------------------------------------------------------------------
+const ASKING = ["Bash", { command: "npm test" }];
+test("answer 'Allow once' allows, with updatedInput and no updatedPermissions", async () => {
+	const { can, asked } = rig("ask-commands", "Allow once");
+	const r = await can(...ASKING);
+	assert.deepEqual(r, { behavior: "allow", updatedInput: { command: "npm test" } });
+	assert.deepEqual(asked[0].prompt.options, ["Allow once", "Allow for this chat", "Deny"]);
+	assert.match(asked[0].prompt.title, /^Allow this command\?/);
+});
+test("each other answer denies: Deny, undefined, a thrown error, junk, wrong case, an option that was not offered", async () => {
+	for (const a of ["Deny", "undefined", "throw", "allow once", "ALLOW ONCE", "Allow once ", "yes", "", null, 1, {}, ["Allow once"]]) {
+		const { can } = rig("ask-commands", a);
+		const r = await can(...ASKING);
+		assert.equal(r.behavior, "deny", String(a));
+		assert.ok(typeof r.message === "string" && r.message.length > 0);
+	}
+	// "Allow for this chat" is not offered for a protected file: it must not allow
+	const { can } = rig("ask-commands", "Allow for this chat");
+	assert.equal((await can("Write", { file_path: inP(".git/config"), content: "x" })).behavior, "deny");
+});
+test("an aborted signal denies: before asking, and while the question is open", async () => {
+	const pre = new AbortController();
+	pre.abort();
+	const a = rig("ask-commands", "Allow once");
+	assert.equal((await a.can(...ASKING, { signal: pre.signal })).behavior, "deny");
+	assert.equal(a.asked.length, 0);
+	const mid = new AbortController();
+	const b = rig("ask-commands", () => new Promise(() => {})); // never answers
+	const p = b.can(...ASKING, { signal: mid.signal });
+	setImmediate(() => mid.abort());
+	assert.equal((await p).behavior, "deny");
+	// an answer that arrives together with the abort does not allow
+	const late = new AbortController();
+	const c = rig("ask-commands", () => {
+		late.abort();
+		return "Allow once";
+	});
+	assert.equal((await c.can(...ASKING, { signal: late.signal })).behavior, "deny");
+});
+test("fail closed: no asker, a throwing mode reader, an unreadable mode, odd tool names and input", async () => {
+	const noAsk = P.makeCanUseTool({ getMode: () => "ask-commands", cwd: proj });
+	assert.equal((await noAsk(...ASKING)).behavior, "deny");
+	const boom = P.makeCanUseTool({
+		getMode: () => {
+			throw new Error("x");
+		},
+		ask: async () => "Allow once",
+		cwd: proj,
+	});
+	assert.equal((await boom("Read", { file_path: inP("a") })).behavior, "deny");
+	for (const m of [undefined, "yolo", 3]) {
+		const r = P.makeCanUseTool({ getMode: () => m, ask: async () => "Allow once", cwd: proj });
+		assert.equal((await r("Write", { file_path: inP("a"), content: "x" })).behavior, "deny", String(m));
+	}
+	const { can } = rig("ask-commands", "undefined");
+	for (const bad of [undefined, null, ""]) assert.equal((await can(bad, {})).behavior, "deny", String(bad));
+	assert.equal((await can("Write", undefined)).behavior, "deny", "an edit with no input is blocked");
+	assert.equal((await can("Bash", null)).behavior, "deny");
+});
+test("a plan-mode block carries a reason the model can read", async () => {
+	const { can } = rig("plan", "Allow once");
+	const r = await can("Edit", { file_path: inP("a.js") });
+	assert.equal(r.behavior, "deny");
+	assert.match(r.message, /plan/i);
+});
+test("the SDK's permission_denials are not needed: the handler works from the call alone", async () => {
+	const { can } = rig("ask-commands", "Deny");
+	const r = await can(...ASKING, { signal: undefined, suggestions: [{ type: "addRules" }] });
+	assert.deepEqual(Object.keys(r).sort(), ["behavior", "message"]);
+});
+
+// --- grants (in memory, per chat) ---------------------------------------------------------------------------
+test("Allow for this chat: the exact command is remembered for that chat only; a different command still asks", async () => {
+	const a = rig("ask-commands", "Allow for this chat");
+	assert.equal((await a.can("Bash", { command: "npm test" })).behavior, "allow");
+	assert.equal(a.asked.length, 1);
+	assert.equal((await a.can("Bash", { command: "npm test" })).behavior, "allow");
+	assert.equal(a.asked.length, 1, "second call did not ask");
+	assert.equal((await a.can("Bash", { command: "npm test -- --watch" })).behavior, "allow");
+	assert.equal(a.asked.length, 2, "another command asks");
+	const other = rig("ask-commands", "Deny"); // another chat, own grants
+	assert.equal((await other.can("Bash", { command: "npm test" })).behavior, "deny");
+	assert.equal(other.asked.length, 1);
+});
+test("Allow for this chat on an edit covers the project, not protected files, and clearing the grants forgets it", async () => {
+	const a = rig("ask-edits", "Allow for this chat");
+	assert.equal((await a.can("Edit", { file_path: inP("src/a.js") })).behavior, "allow");
+	assert.equal((await a.can("Write", { file_path: inP("src/b.js"), content: "x" })).behavior, "allow");
+	assert.equal(a.asked.length, 1);
+	// a protected file is not offered "for this chat", so that scripted answer does not allow it, and it asks again
+	assert.equal((await a.can("Write", { file_path: inP(".git/config"), content: "x" })).behavior, "deny");
+	assert.equal(a.asked.length, 2);
+	logic.clearGrants(a.grants);
+	await a.can("Edit", { file_path: inP("src/a.js") });
+	assert.equal(a.asked.length, 3, "after clearing, it asks again");
+	const noGrant = rig("ask-edits", "Deny");
+	assert.equal((await noGrant.can("Edit", { file_path: inP("src/a.js") })).behavior, "deny");
+});
+test("a grant lives only in the grants object the handler exposes", async () => {
+	const a = rig("ask-commands", "Allow for this chat");
+	await a.can("Bash", { command: "npm test" });
+	assert.equal(a.can.grants, a.grants);
+	assert.ok(a.grants.keys.has("cmd:npm test"));
+});
+test("updatedInput is a copy of the judged input", async () => {
+	const input = { command: "rg TODO src", nested: { a: [1] } };
+	const { can } = rig("ask-commands", "Deny");
+	const r = await can("Bash", input);
+	assert.equal(r.behavior, "allow");
+	assert.notEqual(r.updatedInput, input);
+	assert.notEqual(r.updatedInput.nested, input.nested);
+	assert.deepEqual(r.updatedInput, input);
+});
+test("the mode is read on every call, so a switch mid-chat takes effect at once", async () => {
+	let mode = "ask-commands";
+	const can = P.makeCanUseTool({ getMode: () => mode, ask: async () => undefined, cwd: proj });
+	assert.equal((await can("Edit", { file_path: inP("a.js") })).behavior, "allow");
+	mode = "plan";
+	assert.equal((await can("Edit", { file_path: inP("a.js") })).behavior, "deny");
+});
