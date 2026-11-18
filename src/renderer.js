@@ -1269,6 +1269,11 @@ function handleRecord(r) {
 			addNotice(r.result ? "Conversation compacted." : `Compaction ${r.aborted ? "stopped" : "failed"}${r.errorMessage ? `: ${r.errorMessage}` : ""}.`);
 			return;
 		case "extension_error":
+			// The permission extension failed: nothing is enforced any more, so the selector must say so.
+			if (/permission-modes/i.test(String(r.extensionPath || ""))) {
+				chat.modes = undefined;
+				if (chat === active) syncModeFromStatus(undefined);
+			}
 			toast(`Extension error (${baseName(r.extensionPath)}): ${r.error}`, "error");
 			return;
 		case "extension_ui_request":
@@ -1468,15 +1473,63 @@ function showDialog(spec) {
 	});
 }
 
+// A permission prompt's title: question, reason lines, the exact text, "Mode: ...". The text is plain text, never HTML.
+const PERM_REASON = /^(This file can |This is a network path|The project folder is |Pi Crust could not read |The computer may send |Resolves to )/;
+const PERM_LONG = /^This (command|path|tool call) is [\d,.]+ characters long/;
+function parsePermTitle(title) {
+	const lines = title.split("\n");
+	const question = lines.shift();
+	const mode = lines.length && /^Mode: /.test(lines[lines.length - 1]) ? lines.pop() : "";
+	let longKind = "";
+	const reasons = [];
+	while (lines.length && (PERM_REASON.test(lines[0]) || PERM_LONG.test(lines[0]))) {
+		const m = lines[0].match(PERM_LONG);
+		if (m) longKind = m[1];
+		else reasons.push(lines[0]);
+		lines.shift();
+	}
+	while (lines.length > 1 && (PERM_REASON.test(lines[lines.length - 1]) || PERM_LONG.test(lines[lines.length - 1]))) {
+		const m = lines[lines.length - 1].match(PERM_LONG);
+		if (m) longKind = m[1];
+		else reasons.push(lines[lines.length - 1]);
+		lines.pop();
+	}
+	return { question, reasons, detail: lines.join("\n"), mode, longKind };
+}
+// Text with the visible markers for hidden characters (⟨U+202E⟩, ⟨TAB⟩, ⟨400 spaces⟩) set apart from the rest.
+function markedText(text) {
+	const out = el("pre", "ask-text");
+	let last = 0;
+	for (const m of text.matchAll(/⟨[^⟩\n]{1,40}⟩/g)) {
+		if (m.index > last) out.append(text.slice(last, m.index));
+		out.append(el("span", "ask-mark", m[0]));
+		last = m.index + m[0].length;
+	}
+	if (last < text.length) out.append(text.slice(last));
+	return out;
+}
+
 // Fills `box` with the controls for one dialog spec; `finish(response)` answers it.
 function fillDialog(box, r, finish) {
-	// A permission prompt ("Allow once" ...): the question, the exact thing to approve in a monospace block, the mode below.
-	const lines = r.method === "select" && Array.isArray(r.options) && r.options.includes("Allow once") && typeof r.title === "string" ? r.title.split("\n") : null;
-	if (lines && lines.length > 1) {
-		const modeLine = /^Mode: /.test(lines[lines.length - 1]) ? lines.pop() : "";
-		box.replaceChildren(el("h2", "", lines[0]));
-		box.append(el("pre", "ask-detail", lines.slice(1).join("\n")));
-		if (modeLine) box.append(el("div", "ask-mode", modeLine));
+	// A permission prompt ("Allow once" ...): the question, the exact thing to approve in a scrollable monospace block, the mode below.
+	// It offers only its own answers (no Cancel): Esc, closing and a timeout all count as Deny. Keyboard focus starts on Deny.
+	const perm = r.method === "select" && Array.isArray(r.options) && r.options.includes("Allow once") && r.options.includes("Deny") && typeof r.title === "string";
+	const parts = perm ? parsePermTitle(r.title) : null;
+	box.classList.toggle("perm", !!parts);
+	if (parts && (parts.detail || parts.reasons.length || parts.longKind)) {
+		box.replaceChildren(el("h2", "", parts.question));
+		if (parts.reasons.length) box.append(el("p", "ask-reason", parts.reasons.join("\n")));
+		const detail = el("div", `ask-detail${parts.longKind ? " long" : ""}`);
+		detail.append(markedText(parts.detail));
+		if (parts.longKind) {
+			detail.append(el("div", "ask-end", `End of ${parts.longKind}`));
+			detail.tabIndex = 0; // reachable and scrollable from the keyboard
+			detail.setAttribute("role", "region");
+			detail.setAttribute("aria-label", `Full ${parts.longKind} to approve`);
+		}
+		box.append(detail);
+		if (parts.mode) box.append(el("div", "ask-mode", parts.mode));
+		if (parts.longKind) box.append(el("div", "ask-long", `Long ${parts.longKind}: scroll to read all of it.`));
 	} else box.replaceChildren(el("h2", "", r.title || "Pi asks"));
 	if (r.message) box.append(el("p", "", r.message));
 	const actions = el("div", "modal-actions");
@@ -1490,13 +1543,13 @@ function fillDialog(box, r, finish) {
 	} else if (r.method === "select") {
 		const list = el("div", "options");
 		for (const opt of r.options || []) {
-			const b = el("button", opt === "Allow once" ? "ask-allow" : opt === "Deny" ? "ask-deny" : "", opt);
+			const b = el("button", perm ? (opt === "Allow once" ? "ask-allow" : opt === "Deny" ? "ask-deny" : "ask-alt") : "", opt);
 			b.type = "button";
 			b.onclick = () => finish({ value: opt });
 			list.append(b);
 		}
 		box.append(list);
-		actions.append(cancel);
+		if (!perm) actions.append(cancel);
 	} else if (r.method === "confirm") {
 		const no = el("button", "secondary", r.noLabel || "No");
 		const yes = el("button", r.danger ? "danger" : "", r.yesLabel || "Yes");
@@ -1523,14 +1576,15 @@ function fillDialog(box, r, finish) {
 		box.append(field);
 		actions.append(cancel, ok);
 	}
-	box.append(actions);
+	if (actions.children.length) box.append(actions);
 	box.onkeydown = (e) => {
 		if (e.key === "Escape") {
 			e.stopPropagation();
-			finish({ cancelled: true });
+			finish(perm ? { value: "Deny" } : { cancelled: true });
 		}
 	};
-	(box.querySelector(".options button, .history-item, input, textarea, .modal-actions button:last-child") || box).focus();
+	// A permission prompt starts on Deny, so Enter or Space right after it opens can never allow anything.
+	((perm && box.querySelector(".ask-deny")) || box.querySelector(".options button, .history-item, input, textarea, .modal-actions button:last-child") || box).focus();
 }
 
 function pumpDialogs() {
