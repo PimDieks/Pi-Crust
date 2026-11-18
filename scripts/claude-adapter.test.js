@@ -313,6 +313,19 @@ test("start: inherited variables with secret-looking names are dropped; ordinary
 	assert.ok(o.names.includes("ANTHROPIC_API_KEY"), "the app's own key arrives");
 });
 
+test("start: more secret-looking names (signing keys, webhooks, cookies, auth) are dropped; ordinary look-alikes and SSH_AUTH_SOCK stay", async () => {
+	const t = await rig({});
+	const bad = ["STRIPE_SK", "SLACK_WEBHOOK_URL", "JWT_SIGNING_KEY", "SIGNING_KEY", "SECRET_KEY", "SESSION_COOKIE", "PASSPHRASE", "OPENAI_KEY", "AUTH_KEY", "AUTHORIZATION", "NPM_CONFIG__AUTH", "GPG_PASSPHRASE", "KEY"];
+	const keep = ["PATH", "PATHEXT", "SystemRoot", "ComSpec", "TEMP", "TMP", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "ProgramFiles", "PSModulePath", "GIT_AUTHOR_NAME", "GIT_EDITOR", "SSH_AUTH_SOCK", "TOKENIZERS_PARALLELISM", "KEYBOARD_LAYOUT", "MONKEY_PATCH", "KUBECONFIG", "AWS_PROFILE", "HOMEBREW_PREFIX"];
+	const env = {};
+	for (const n of [...bad, ...keep]) env[n] = "dummy-value-" + n;
+	t.adapter.start({ cwd: t.cwd, env, mode: "plan" }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	const o = t.sdk.calls[0].options.env;
+	for (const n of bad) assert.ok(!o.names.includes(n), `${n} was passed on`);
+	for (const n of keep) assert.ok(o.names.includes(n), `${n} was dropped`);
+});
+
 test("start: dropped secret-looking variables leave no trace in records, stderr or errors", async () => {
 	const t = await rig({});
 	const env = { PATH: "p", OPENAI_API_KEY: "LEAKVALUE1", EXTRA_SECRET_THING_TOKEN: "LEAKVALUE2" };

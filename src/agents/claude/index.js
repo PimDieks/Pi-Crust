@@ -48,8 +48,12 @@ const ENGINE_ENV_DROP = /^(NODE_OPTIONS|BASH_ENV|API_TIMEOUT_MS|USE_BUILTIN_RIPG
 // underscore-separated part, TOKEN, SECRET, PASSWORD, PASSWD, CREDENTIALS, PRIVATE_KEY, ACCESS_KEY or API_KEY; APIKEY anywhere; a trailing PAT
 // (personal access token) or PWD part; and connection strings, which embed a password (DATABASE_URL, REDIS_URL, MONGODB_URI, *_CONNECTION_STRING,
 // *_DSN). That covers GH_TOKEN, NPM_TOKEN, AWS_SESSION_TOKEN, AWS_SECRET_ACCESS_KEY, PGPASSWORD, MYSQL_PWD and GOOGLE_APPLICATION_CREDENTIALS.
-// Not matched, so kept: PATH, PWD (the plain working-directory variable), SSH_AUTH_SOCK (a socket path), proxy and CA variables, AWS_PROFILE.
-const SECRET_ENV_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)$|_(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)_|APIKEY|(?:^|_)(?:PAT|MYSQL_PWD)$|(?:^|_)(?:DATABASE_URL|REDIS_URL|MONGODB_URI|MONGODB_URL|MONGO_URL|AMQP_URL|CONNECTION_STRING|DSN)$/i;
+// A second rule adds: a trailing KEY part (SIGNING_KEY, SECRET_KEY, OPENAI_KEY), PASSPHRASE or COOKIE as a whole part, a trailing _SK (STRIPE_SK),
+// WEBHOOK_URL (it embeds a secret), and AUTH or AUTHORIZATION as a whole part (AUTH_KEY, NPM_CONFIG__AUTH, AUTHORIZATION).
+// Not matched, so kept: PATH, PWD (the plain working-directory variable), proxy and CA variables, AWS_PROFILE, GIT_AUTHOR_NAME, KEYBOARD_LAYOUT.
+// SSH_AUTH_SOCK is kept on purpose: it holds a socket path, not a secret, and ssh and git need it to reach the person's own agent.
+const SECRET_ENV_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)$|_(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)_|APIKEY|(?:^|_)(?:PAT|MYSQL_PWD)$|(?:^|_)(?:DATABASE_URL|REDIS_URL|MONGODB_URI|MONGODB_URL|MONGO_URL|AMQP_URL|WEBHOOK_URL|CONNECTION_STRING|DSN)$/i;
+const SECRET_ENV_NAME_MORE = /(?:^|_)(?:KEY$|(?:PASSPHRASE|COOKIE)(?:_|$))|_SK$|(?:^|_)AUTH(?:ORIZATION)?(?=_|$)(?!_SOCK$)/i;
 const PARENT_GONE_TEXT = (info) => (info && info.parent ? "The chat this one was forked from is gone, so there is nothing to continue. Start a new chat." : "The chat this one continues is gone, so there is nothing to continue. Start a new chat.");
 const NO_CONFIG_DIR = "Claude Agent has no app config folder, so it was not started (it would otherwise use another Claude sign-in).";
 const NO_ENGINE = "The Claude Agent engine is not installed yet.";
@@ -197,7 +201,7 @@ function createClaudeAdapter(deps = {}) {
 		// Other services' keys and tokens, by name. Only the count is kept (for the trial log).
 		secretsDropped = 0;
 		for (const k of Object.keys(env)) {
-			if (SECRET_ENV_NAME.test(k)) {
+			if (SECRET_ENV_NAME.test(k) || SECRET_ENV_NAME_MORE.test(k)) {
 				delete env[k];
 				secretsDropped++;
 			}
