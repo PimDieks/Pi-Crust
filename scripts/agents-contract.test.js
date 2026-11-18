@@ -14,6 +14,7 @@ const good = () => ({
 	locate: () => null,
 	pathExtras: () => [],
 	start() {},
+	canSend: () => true,
 	send: () => true,
 	stop() {},
 	listSessions: () => [],

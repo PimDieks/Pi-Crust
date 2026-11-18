@@ -109,6 +109,8 @@ function send(channel, payload) {
 // ---------------------------------------------------------------------------
 // The process itself (spawn, framing, readiness probe, kill) lives in agents/pi/process.js.
 const piProcess = require("./agents/pi/process");
+const agents = require("./agents/registry").createRegistry();
+const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6; the main-side texts below come from piAgent.strings
 const killPi = (proc) => piProcess.stop(proc);
 
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
@@ -146,7 +148,7 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 			saveOpenChats();
 		}
 		send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, ...hint });
-		send("pi:exit", { chatId, error: "Pi is not installed", errorCode: "ENOENT", notInstalled: true });
+		send("pi:exit", { chatId, error: piAgent.strings.notInstalled, errorCode: "ENOENT", notInstalled: true });
 		return null;
 	}
 	// An old user copy of permission-modes in ~/.pi/agent/extensions would also load: two prompt layers. The app talks to
@@ -167,7 +169,7 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 		},
 		stderr: (p, data) => send("pi:stderr", { chatId, data }),
 		exit: (p, info) => {
-			failMainRequests(p, "Pi stopped"); // before the current check: killed processes are not current any more
+			failMainRequests(p, piAgent.strings.stopped); // before the current check: killed processes are not current any more
 			if (info.kind === "timeout") {
 				send("pi:exit", { chatId, error: info.error });
 				chats.delete(chatId);
@@ -240,10 +242,7 @@ function killAllChats() {
 }
 
 function piSend(chatId, record) {
-	const proc = chats.get(chatId)?.proc;
-	if (!proc || !proc.stdin.writable) return false;
-	proc.stdin.write(JSON.stringify(record) + "\n");
-	return true;
+	return piAgent.send(chats.get(chatId)?.proc, record);
 }
 
 // Requests main itself sends to Pi (Remote): their responses never go to the renderer.
@@ -256,7 +255,7 @@ let mainSeq = 0;
 function piRequest(chatId, type, extra = {}, timeoutMs = 60_000, atSettle = null) {
 	return new Promise((resolve) => {
 		const proc = chats.get(chatId)?.proc;
-		if (!proc || !proc.stdin.writable) return resolve({ success: false, error: "Pi is not running" });
+		if (!piAgent.canSend(proc)) return resolve({ success: false, error: piAgent.strings.notRunning });
 		const id = `${MAIN_ID}${++mainSeq}`;
 		let timer = null;
 		const settle = (result) => {
@@ -269,16 +268,16 @@ function piRequest(chatId, type, extra = {}, timeoutMs = 60_000, atSettle = null
 			}
 			resolve(result);
 		};
-		timer = setTimeout(() => settle({ success: false, error: "Pi did not answer in time" }), timeoutMs);
+		timer = setTimeout(() => settle({ success: false, error: piAgent.strings.noAnswer }), timeoutMs);
 		mainPending.set(id, { id, proc, settle });
-		proc.stdin.write(JSON.stringify({ ...extra, id, type }) + "\n");
+		piAgent.send(proc, { ...extra, id, type });
 	});
 }
 // True when the response is the answer to one of ours (and has been delivered).
 function settleMainRequest(record) {
 	const p = typeof record.id === "string" ? mainPending.get(record.id) : null;
 	if (!p) return false;
-	p.settle(record.success === false ? { success: false, error: record.error || "Pi refused the request" } : { success: true, data: record.data });
+	p.settle(record.success === false ? { success: false, error: record.error || piAgent.strings.refused } : { success: true, data: record.data });
 	return true;
 }
 function failMainRequests(proc, error) {

@@ -11,8 +11,9 @@
 //   capabilities,                       see CAPABILITY_KEYS; use capabilities({...}) to build one
 //   strings,                            main-side error texts only: { notRunning, stopped, noAnswer, refused, ... }
 //   locate(): { installed, command, args, binDir, version? } | null
-//   pathExtras(): string[]              folders to add to PATH for every child
-//   start(opts, sink): Handle           opts = { cwd, sessionRef?, env, settings }
+//   pathExtras(located): string[]       folders to add to PATH for every child, given what locate() returned (or null)
+//   start(opts, sink): Handle           opts = { <the locate() result>, cwd, sessionRef?, env }; the sink is told what happens (below)
+//   canSend(handle): boolean            the handle exists and a record can be written
 //   send(handle, record): boolean       one JSON record in; false when not writable
 //   stop(handle): void                  orderly, then tree kill
 //   listSessions({ cwd }): SessionInfo[]   { path, name, firstPrompt, mtime, size }; path is an opaque string
@@ -20,7 +21,8 @@
 //   mcpConfigPath(): string | null
 //   onAppStart(ctx): void
 // }
-// Sink { ready(data), record(record), stderr(text), exit({ code, signal, error }) }  (called synchronously, in order)
+// Sink (phase 6, Pi): { isCurrent(handle), ready(handle, data), record(handle, record), stderr(handle, text), exit(handle, info) }, called
+// synchronously, in order; info is { kind: "timeout"|"error"|"exit", ... }. See src/agents/pi/process.js for the exact rules.
 // Handle is opaque to core except `pid`. A sessionRef is a plain string and never a path core opens.
 //
 // The record contract below is what the renderer (handleRecord, handleUiRequest), the phone (remote-state.js) and history
@@ -123,7 +125,7 @@ function capabilities(overrides = {}) {
 	return { ...allOn(), ...overrides };
 }
 
-const REQUIRED_FUNCTIONS = Object.freeze(["locate", "pathExtras", "start", "send", "stop", "listSessions", "mcpConfigPath", "onAppStart"]);
+const REQUIRED_FUNCTIONS = Object.freeze(["locate", "pathExtras", "start", "canSend", "send", "stop", "listSessions", "mcpConfigPath", "onAppStart"]);
 
 // Throws a descriptive Error when `a` does not satisfy the contract; returns `a` otherwise.
 function assertAdapter(a) {

@@ -112,4 +112,15 @@ function start(opts, sink) {
 	return proc;
 }
 
-module.exports = { start, stop, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };
+// True when a record can be written (the process exists and its stdin is open).
+function canSend(proc) {
+	return !!proc && proc.stdin.writable;
+}
+// One JSON record to Pi; false when not writable.
+function send(proc, record) {
+	if (!canSend(proc)) return false;
+	proc.stdin.write(JSON.stringify(record) + "\n");
+	return true;
+}
+
+module.exports = { start, stop, send, canSend, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };
