@@ -1413,7 +1413,7 @@ function createWindow() {
 		show: !START_HIDDEN,
 		...(SELFTEST && process.env.PI_CRUST_SELFTEST_OFFSCREEN === "1" ? { x: -4000, y: -4000, focusable: false, skipTaskbar: true } : {}), // selftest only: no window on the user's screen
 		backgroundColor: nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0",
-		webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false },
+		webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: !(SELFTEST && process.env.PI_CRUST_SELFTEST_OFFSCREEN === "1") }, // offscreen selftest: keep painting so captures are current
 	});
 	win.loadFile(path.join(__dirname, "index.html"));
 	for (const ev of ["focus", "blur"]) win.on(ev, () => send("app:focus", ev === "focus"));

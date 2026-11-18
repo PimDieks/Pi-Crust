@@ -36,13 +36,14 @@ function handle(mode, body, res) {
 }
 
 // Starts the stub. Resolves { port, close() }. Mode "closed" listens on nothing.
-function start(mode, port = 0) {
+// opts.delayMs delays every answer (to show the "checking" state).
+function start(mode, port = 0, opts = {}) {
 	if (!MODES.includes(mode)) throw new Error(`unknown mode ${mode}`);
 	if (mode === "closed") return Promise.resolve({ port: null, close: () => Promise.resolve() });
 	const server = http.createServer((req, res) => {
 		let data = "";
 		req.on("data", (c) => (data += c));
-		req.on("end", () => {
+		req.on("end", () => setTimeout(() => {
 			if (mode === "http-403") {
 				res.writeHead(403, { "Content-Type": "text/plain" });
 				return res.end("Forbidden");
@@ -56,7 +57,7 @@ function start(mode, port = 0) {
 				body = JSON.parse(data);
 			} catch {}
 			handle(mode, body, res);
-		});
+		}, opts.delayMs || 0));
 	});
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);

@@ -210,6 +210,103 @@
 		if (name === "design") refresh();
 	});
 
+	// --- selftest: every state, driven by the stub Figma server that runs inside the app (needs PI_CRUST_SELFTEST=1 and
+	// PI_CRUST_FIGMA_STUB=<port> with PI_CRUST_FIGMA_MCP_URL pointing at it; `npm run selftest -- figma-panel` with both set). ---
+	selftestSteps.push(async ({ snap, wait }) => {
+		if (!crust.figma.stubMode) return console.error("SELFTEST figma status: no stub hook -> MISMATCH");
+		const text = (s) => panel.querySelector(s)?.textContent || "";
+		const theme0 = themeSetting();
+		const until = async (fn, ms = 4000) => {
+			for (let t = 0; t < ms && !fn(); t += 50) await wait(50);
+		};
+		const idle = () => !window.crustFigma.state().busy;
+		const cases = [
+			// [name, stub mode, stub options, expected pill, expected panel text]
+			["checking", "ready", { delayMs: 1500 }, "Figma: checking…", "Looking for Figma desktop."],
+			["not-installed", "closed", { proc: { running: false, installed: false } }, "Figma: not connected", "doesn't seem to be installed"],
+			["not-running", "closed", { proc: { running: false, installed: true } }, "Figma: not connected", "isn't running"],
+			["server-off", "closed", { proc: { running: true } }, "Figma: not connected", "MCP server is off"],
+			["unknown", "closed", { proc: {} }, "Figma: not connected", "switch on its MCP server"],
+			["seat", "http-403", {}, "Figma: not connected", "Dev or Full seat"],
+			["no-file", "no-file", {}, "Figma: open a file", "no design file is open"],
+			["wrong-tab", "wrong-tab", {}, "Figma: switch tab", "not a design file"],
+			["no-selection", "no-selection", {}, "Figma: select a frame", "Select a frame in Figma desktop"],
+			["ready", "ready", {}, "Figma: ready", "Selected frame: Stub Card"],
+			["problem", "not-mcp", {}, "Figma: problem", "Something else answers"],
+		];
+		switchTab("design");
+		await wait(400);
+		await crust.figma.stubMode("closed", { clearFile: true });
+		window.crustFigma.openPanel();
+		await until(idle);
+		const shots = async (name) => {
+			for (const th of ["dark", "light"]) {
+				setTheme(th);
+				await wait(900);
+				await snap(`figma-panel-${name}-${th}`);
+			}
+		};
+		for (const [name, mode, opts, pillWant, lineWant] of cases) {
+			await crust.figma.stubMode(mode, opts);
+			window.crustFigma.recheck();
+			await wait(name === "checking" ? 400 : 0);
+			if (name !== "checking") await until(idle);
+			const pillGot = pill.textContent;
+			const got = text(".fp-line");
+			const ok = pillGot === pillWant && got.includes(lineWant) && (pill.classList.contains("on") === (name === "ready"));
+			console.error(`SELFTEST figma status ${name}: "${pillGot}" / "${got}" -> ${ok ? "OK" : "MISMATCH"}`);
+			await shots(name);
+			if (name === "checking") await until(idle);
+			if (name === "no-selection") {
+				// chat pane and window narrow: the same panel in a 340px wide Design pane
+				const pane = document.querySelector('.tab-panel[data-panel="design"]');
+				pane.style.cssText += ";max-width:340px";
+				await shots("narrow");
+				pane.style.maxWidth = "";
+			}
+		}
+		// Test connection: ready (all ticks) and no selection (last tick is a dash)
+		for (const [mode, want] of [["ready", "✓server answers✓design tools found✓selection read"], ["no-selection", "✓server answers✓design tools found–selection read"]]) {
+			await crust.figma.stubMode(mode, {});
+			[...panel.querySelectorAll("button")].find((b) => b.textContent === "Test connection").click();
+			await until(() => !idle() || panel.querySelector(".fp-checks"), 500);
+			await until(idle);
+			const got = [...panel.querySelectorAll(".fp-checks li")].map((li) => li.textContent).join("");
+			console.error(`SELFTEST figma test ${mode}: "${got}" -> ${got === want ? "OK" : "MISMATCH"}`);
+			await shots(`test-${mode}`);
+		}
+		// file link row: empty, then saved ("File: <name>" + Change), then a bad link
+		const unset = !!panel.querySelector(".fp-file input") && text(".fp-file").includes("Figma file link (only for the Figma picker)") && text(".fp-file").includes("Compare and Tokens don't need this.");
+		console.error(`SELFTEST figma file link unset: placeholder="${panel.querySelector(".fp-file input")?.placeholder}" -> ${unset && panel.querySelector(".fp-file input").placeholder === "https://www.figma.com/design/…" ? "OK" : "MISMATCH"}`);
+		await shots("file-unset");
+		const input = panel.querySelector(".fp-file input");
+		input.value = "not a link";
+		[...panel.querySelectorAll(".fp-file button")].find((b) => b.textContent === "Save").click();
+		await wait(300);
+		console.error(`SELFTEST figma file link bad: "${text(".fp-file .fp-hint")}" -> ${/doesn't look like a Figma link/.test(text(".fp-file")) ? "OK" : "MISMATCH"}`);
+		panel.querySelector(".fp-file input").value = "https://www.figma.com/design/AbCdEf123/Stub-Design-File";
+		[...panel.querySelectorAll(".fp-file button")].find((b) => b.textContent === "Save").click();
+		await wait(300);
+		console.error(`SELFTEST figma file link set: "${text(".fp-file .fp-row")}" -> ${/File: Stub-Design-File/.test(text(".fp-file")) && !panel.querySelector(".fp-file input") && /Change/.test(text(".fp-file")) ? "OK" : "MISMATCH"}`);
+		await shots("file-set");
+		// stale green: ready, then Figma quits, then the next check says not connected
+		await crust.figma.stubMode("ready", {});
+		window.crustFigma.recheck();
+		await until(idle);
+		const green = pill.textContent;
+		await crust.figma.stubMode("closed", { proc: { running: false, installed: true } });
+		window.crustFigma.recheck();
+		await until(idle);
+		console.error(`SELFTEST figma stale green: "${green}" then "${pill.textContent}" -> ${green === "Figma: ready" && pill.textContent === "Figma: not connected" ? "OK" : "MISMATCH"}`);
+		// keyboard and screen reader basics: pill is a button, Escape closes the panel, status is announced
+		const announce = live.textContent;
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		await wait(100);
+		console.error(`SELFTEST figma a11y: pill=${pill.tagName} live="${announce}" panelHidden=${panel.hidden} expanded=${pill.getAttribute("aria-expanded")} -> ${pill.tagName === "BUTTON" && announce === "Figma: not connected" && panel.hidden && pill.getAttribute("aria-expanded") === "false" ? "OK" : "MISMATCH"}`);
+		await crust.figma.stubMode("closed", { clearFile: true });
+		setTheme(theme0);
+	});
+
 	window.crustFigma = { recheck: refresh, openPanel: () => (panel.hidden ? open() : refresh()), state: () => ({ res, busy, open: !panel.hidden }) };
 	paintPill();
 })();
