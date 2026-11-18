@@ -190,8 +190,8 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 		},
 		record: (p, record) => {
 			if (record.type === "agent_end") prLookup.invalidatePrefix(); // the agent may have pushed or opened a PR
-			if (record.type === "claude_pending") return setChatPending(chatId, record.pending); // a fork or rewound chat before its next message: kept so a restart restores it
-			if (record.type === "claude_session" && typeof record.sessionId === "string") setChatFile(chatId, record.sessionId); // the session of a Claude Agent chat is only known once it runs (a fork, a rewound chat: its new one)
+			if (record.type === "claude_pending") return chatPendingRecord(chatId, record.pending); // a fork or rewound chat before its next message: kept so a restart restores it
+			if (record.type === "claude_session" && typeof record.sessionId === "string") chatSessionRecord(chatId, record.sessionId); // the session of a Claude Agent chat is only known once it runs (a fork, a rewound chat: its new one)
 			if (record.type === "response" && settleMainRequest(record)) return; // answers to requests main itself sent
 			send("pi:record", { chatId, record });
 		},
@@ -248,22 +248,9 @@ function saveOpenChats() {
 		fs.writeFileSync(OPEN_CHATS_FILE(), JSON.stringify(all, null, 2));
 	} catch {}
 }
-function setChatFile(chatId, file) {
-	const e = openList.find((x) => x.id === chatId);
-	if (!e || typeof file !== "string" || !file || e.file === file) return;
-	e.file = file;
-	saveOpenChats();
-}
-
-// Where a Claude Agent chat stands before its next message (null once it has a session): saved with the tab list.
-function setChatPending(chatId, pending) {
-	const e = openList.find((x) => x.id === chatId);
-	if (!e) return;
-	const next = pending ? chatAgents.cleanPending(pending) : null;
-	if (JSON.stringify(next) === JSON.stringify(e.pending || null)) return;
-	e.pending = next;
-	saveOpenChats();
-}
+// Changes to one entry of the tab list (session file, pending record): src/open-chat-entry.js. A change that touches both is ONE write.
+const chatEntries = require("./open-chat-entry").createEntryWriter({ find: (id) => openList.find((x) => x.id === id), save: () => saveOpenChats(), cleanPending: (p) => chatAgents.cleanPending(p) });
+const { setChatFile, setChatPending, chatPendingRecord, chatSessionRecord } = chatEntries;
 
 function newChatId() {
 	return `chat-${++chatSeq}`;
@@ -1437,13 +1424,9 @@ function buildMenu() {
 const HOTKEY = process.env.PI_CRUST_HOTKEY || (IS_WIN ? "Alt+Ctrl+P" : "Alt+Command+P");
 let quitting = false;
 
-function showWindow() {
-	if (!win) return createWindow();
-	if (SELFTEST) return; // selftest: never bring a window to the front
-	if (win.isMinimized()) win.restore();
-	win.show();
-	win.focus();
-}
+// badge, bounce and showWindow: one module, nothing happens in a selftest run (src/attention-main.js).
+const attention = require("./attention-main").createAttention({ selftest: SELFTEST, getWin: () => win, app, isDarwin: IS_DARWIN, isWin: IS_WIN, badgeIcon: (n) => badgeIcon(n), createWindow: () => createWindow() });
+const showWindow = () => attention.showWindow();
 function toggleWindow() {
 	if (win && win.isVisible() && win.isFocused()) win.hide();
 	else showWindow();
@@ -1482,19 +1465,9 @@ app.on("will-quit", () => globalShortcut.unregisterAll());
 // App-level IPC for notifications (src/notify.js).
 ipcMain.on("app:isSelftestRun", (e) => (e.returnValue = SELFTEST)); // read once by the preload: the renderer cannot change it (src/native-notify.js)
 ipcMain.handle("app:isFocused", () => !!win && !win.isDestroyed() && win.isFocused());
-ipcMain.handle("app:badge", (_e, n) => {
-	if (SELFTEST) return; // selftest: no taskbar overlay or badge
-	const count = Math.max(0, Math.floor(Number(n)) || 0);
-	if (IS_DARWIN) app.dock?.setBadge(count ? String(count) : "");
-	else if (IS_WIN) win?.setOverlayIcon(count ? badgeIcon(count) : null, count ? `${count} unread` : "");
-	else app.setBadgeCount?.(count);
-});
+ipcMain.handle("app:badge", (_e, n) => attention.badge(n));
 ipcMain.handle("app:show", () => showWindow());
-ipcMain.handle("app:bounce", () => {
-	if (SELFTEST) return; // selftest: no taskbar flash or dock bounce
-	if (IS_DARWIN && !(win && win.isFocused())) app.dock?.bounce("informational");
-	if (IS_WIN && win && !win.isFocused()) win.flashFrame(true); // stops by itself once the window comes to the front
-});
+ipcMain.handle("app:bounce", () => attention.bounce());
 
 // Windows taskbar overlay: a red dot with the count ("9+" above 9), drawn as a 32x32 BGRA bitmap (shown at 16 px).
 const GLYPHS = { 0: "111101101101111", 1: "010110010010111", 2: "111001111100111", 3: "111001111001111", 4: "101101111001001", 5: "111100111001111", 6: "111100111101111", 7: "111001001001001", 8: "111101111101111", 9: "111101111001111", "+": "000010111010000" };

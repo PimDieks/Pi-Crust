@@ -200,6 +200,58 @@ test("PI_CRUST_CLAUDE_SDK is honoured only when unpackaged; locate reads a reaso
 	assert.strictEqual(seen[1], "@anthropic-ai/claude-agent-sdk");
 });
 
+// The packaged app as the adapter sees it: no isPackaged injected, so it asks Electron (app.isPackaged), exactly as in the installed app. The
+// electron module is replaced for the length of the test by one that answers like the packaged app, and like the unpackaged one as the control.
+test("packaged app (app.isPackaged true): PI_CRUST_CLAUDE_SDK does nothing, the real SDK is the only one loaded, and without the engine nothing starts", async () => {
+	const key = require.resolve("electron");
+	const had = require.cache[key];
+	const withElectron = async (app, fn) => {
+		require.cache[key] = { id: key, filename: key, loaded: true, exports: { app } };
+		try {
+			return await fn();
+		} finally {
+			if (had) require.cache[key] = had;
+			else delete require.cache[key];
+		}
+	};
+	const seen = [];
+	let queries = 0;
+	const sdk = async () => ({ ...(await standIn()), query: () => (queries++, assert.fail("the engine was started")) });
+	const mk = () => createClaudeAdapter({ configDir: path.join(tmp, "cfg-packaged"), env: { PI_CRUST_CLAUDE_SDK: STAND_IN }, keystore: keystore(), loadSdk: async (spec) => (seen.push(spec), sdk()) });
+	const events = [];
+	const sink = { isCurrent: () => true, ready: () => events.push("ready"), record() {}, stderr() {}, exit: (h, i) => events.push(i) };
+	await withElectron({ isPackaged: true }, async () => {
+		const a = mk();
+		assert.strictEqual(a.locate(), null, "the stand-in is not a program in a packaged app");
+		const h = a.start({ cwd: tmp }, sink);
+		await new Promise((r) => setTimeout(r, 150));
+		a.stop(h);
+	});
+	assert.deepStrictEqual(seen, ["@anthropic-ai/claude-agent-sdk"]);
+	assert.strictEqual(queries, 0);
+	assert.ok(!events.includes("ready"));
+	assert.strictEqual(events[0] && events[0].kind, "error");
+	assert.match(String(events[0].error), /engine is not installed/);
+	// control: the same adapter in an unpackaged app does use the stand-in
+	seen.length = 0;
+	await withElectron({ isPackaged: false }, async () => {
+		const a = mk();
+		assert.strictEqual(a.locate().command, STAND_IN);
+		const h = a.start({ cwd: tmp }, { ...sink, exit() {} });
+		await new Promise((r) => setTimeout(r, 150));
+		a.stop(h);
+	});
+	assert.match(seen[0], /claude-sdk-stand-in\.mjs$/);
+	// and when Electron cannot be asked at all, it counts as packaged
+	require.cache[key] = { id: key, filename: key, loaded: true, exports: {} };
+	try {
+		assert.strictEqual(mk().locate(), null);
+	} finally {
+		if (had) require.cache[key] = had;
+		else delete require.cache[key];
+	}
+});
+
 test("the stand-in log shows 'key present', never the key", async () => {
 	const sdk = await standIn();
 	sdk.reset();
@@ -231,6 +283,20 @@ test("start: the engine's non-essential traffic is off (documented switches), al
 	const o = t.sdk.calls[0].options.env;
 	for (const n of ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER", "DISABLE_UPDATES", "DISABLE_FEEDBACK_COMMAND", "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "CLAUDE_CODE_DISABLE_FEATURE_FLAGS", "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"]) assert.strictEqual(o.switches[n], "1", n);
 	assert.ok(!o.names.includes("CLAUDE_CODE_ENABLE_TELEMETRY"));
+});
+
+test("start: inherited variables that can reconfigure the engine are dropped; proxy and CA variables stay", async () => {
+	const t = await rig({});
+	const bad = ["NODE_OPTIONS", "BASH_ENV", "API_TIMEOUT_MS", "USE_BUILTIN_RIPGREP", "MAX_THINKING_TOKENS", "MAX_MCP_OUTPUT_TOKENS", "MCP_TIMEOUT", "MCP_SERVER_CONNECTION_BATCH_SIZE", "OTEL_EXPORTER_OTLP_ENDPOINT", "ENABLE_TOOL_SEARCH", "DISABLE_COST_WARNINGS", "BETA_TRACING_ENDPOINT", "max_foo", "Node_Options"];
+	const keep = ["PATH", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "HOME", "MAXIMUM", "ENABLED_BY_ME"];
+	const env = {};
+	for (const n of [...bad, ...keep]) env[n] = "x";
+	t.adapter.start({ cwd: t.cwd, env, mode: "plan" }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	const o = t.sdk.calls[0].options.env;
+	for (const n of bad) assert.ok(!o.names.includes(n), `${n} was passed on`);
+	for (const n of keep) assert.ok(o.names.includes(n), `${n} was dropped`);
+	for (const n of ["DISABLE_TELEMETRY", "DISABLE_UPDATES"]) assert.strictEqual(o.switches[n], "1", n); // the app's own DISABLE_* still set
 });
 
 test("no config folder: nothing starts, with a readable error, and check fails too", async () => {

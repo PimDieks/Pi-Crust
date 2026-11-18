@@ -5,6 +5,7 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 const { create } = require("../src/native-notify");
+const { createAttention } = require("../src/attention-main");
 
 const SRC = path.join(__dirname, "..", "src");
 const read = (f) => fs.readFileSync(path.join(SRC, f), "utf8");
@@ -54,11 +55,51 @@ test("every new Notification in src/ is inside src/native-notify.js (the Remote'
 	assert.ok(html.indexOf("native-notify.js") > 0 && html.indexOf("native-notify.js") < html.indexOf("notify.js\""), "native-notify.js loads before notify.js");
 });
 
-test("the main process does nothing for badge, flash, bounce and raising the window in a selftest run", () => {
+// The attention functions of the main process, called with injected fakes: with the selftest flag nothing is created, without it they do.
+function rig({ selftest, isDarwin = false, isWin = false, focused = false, minimized = false, haveWin = true }) {
+	const calls = [];
+	const win = { isFocused: () => focused, isMinimized: () => minimized, restore: () => calls.push("restore"), show: () => calls.push("show"), focus: () => calls.push("focus"), flashFrame: (f) => calls.push(`flash:${f}`), setOverlayIcon: (i, d) => calls.push(`overlay:${i ? "icon" : "none"}:${d}`) };
+	const app = { dock: { setBadge: (t) => calls.push(`dock-badge:${t}`), bounce: (k) => calls.push(`dock-bounce:${k}`) }, setBadgeCount: (n) => calls.push(`badge-count:${n}`) };
+	const created = [];
+	const a = createAttention({ selftest, getWin: () => (haveWin ? win : null), app, isDarwin, isWin, badgeIcon: (n) => (calls.push(`icon:${n}`), { n }), createWindow: () => created.push("window") });
+	return { a, calls, created };
+}
+test("selftest flag: badge, bounce and showWindow create and raise nothing, on every platform", () => {
+	for (const [isDarwin, isWin] of [[true, false], [false, true], [false, false]]) {
+		for (const haveWin of [true, false]) {
+			const r = rig({ selftest: true, isDarwin, isWin, haveWin, minimized: true });
+			r.a.badge(3);
+			r.a.badge(0);
+			r.a.bounce();
+			r.a.showWindow();
+			assert.deepEqual(r.calls, [], `darwin=${isDarwin} win=${isWin}`);
+			if (haveWin) assert.deepEqual(r.created, []);
+		}
+	}
+});
+test("no selftest flag: the same calls do their job (so the test above can tell silence from a broken helper)", () => {
+	let r = rig({ selftest: false, isWin: true });
+	r.a.badge(3);
+	r.a.bounce();
+	r.a.showWindow();
+	assert.deepEqual(r.calls, ["icon:3", "overlay:icon:3 unread", "flash:true", "show", "focus"]);
+	r = rig({ selftest: false, isDarwin: true, minimized: true });
+	r.a.badge(2);
+	r.a.bounce();
+	r.a.showWindow();
+	assert.deepEqual(r.calls, ["dock-badge:2", "dock-bounce:informational", "restore", "show", "focus"]);
+	r = rig({ selftest: false });
+	r.a.badge(4);
+	assert.deepEqual(r.calls, ["badge-count:4"]);
+	r = rig({ selftest: false, haveWin: false });
+	r.a.showWindow();
+	assert.deepEqual(r.created, ["window"]);
+});
+test("main.js hands the selftest flag to the attention module and keeps no raw attention call of its own", () => {
 	const main = read("main.js");
-	for (const re of [/ipcMain\.handle\("app:badge", \(_e, n\) => \{\s*\n\s*if \(SELFTEST\) return;/, /ipcMain\.handle\("app:bounce", \(\) => \{\s*\n\s*if \(SELFTEST\) return;/, /function showWindow\(\) \{\s*\n\s*if \(!win\) return createWindow\(\);\s*\n\s*if \(SELFTEST\) return;/])
-		assert.match(main, re);
-	// flashFrame, setOverlayIcon and dock calls live only in those guarded handlers
-	for (const call of ["flashFrame(", "setOverlayIcon(", "dock?.bounce(", "dock?.setBadge("]) assert.equal(main.split(call).length - 1, 1, `${call} appears once`);
+	assert.match(main, /createAttention\(\{ selftest: SELFTEST,/);
+	assert.match(main, /ipcMain\.handle\("app:badge", \(_e, n\) => attention\.badge\(n\)\)/);
+	assert.match(main, /ipcMain\.handle\("app:bounce", \(\) => attention\.bounce\(\)\)/);
+	for (const call of ["flashFrame(", "setOverlayIcon(", "dock?.bounce(", "dock?.setBadge(", "win.show("]) assert.equal(main.split(call).length - 1, 0, `${call} is not called in main.js`);
 	assert.match(read("preload.js"), /selftestRun: ipcRenderer\.sendSync\("app:isSelftestRun"\) === true/);
 });

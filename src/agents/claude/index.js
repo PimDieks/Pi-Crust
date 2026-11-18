@@ -42,6 +42,8 @@ const PRIVACY_SWITCHES = [
 	"CLAUDE_CODE_DISABLE_FEATURE_FLAGS",
 	"CLAUDE_CODE_DISABLE_BUNDLED_SKILLS",
 ];
+const ENGINE_ENV_DROP = /^(NODE_OPTIONS|BASH_ENV|API_TIMEOUT_MS|USE_BUILTIN_RIPGREP|MAX_.*|MCP_.*|OTEL_.*|ENABLE_.*|DISABLE_.*|BETA_TRACING_.*)$/i;
+const PARENT_GONE_TEXT = (info) => (info && info.parent ? "The chat this one was forked from is gone, so there is nothing to continue. Start a new chat." : "The chat this one continues is gone, so there is nothing to continue. Start a new chat.");
 const NO_CONFIG_DIR = "Claude Agent has no app config folder, so it was not started (it would otherwise use another Claude sign-in).";
 const NO_ENGINE = "The Claude Agent engine is not installed yet.";
 // Slash commands the SDK would run itself when a message starts with "/" (they can change settings, add folders, plugins, MCP servers or hooks,
@@ -181,6 +183,9 @@ function createClaudeAdapter(deps = {}) {
 		// Every ANTHROPIC_* and CLAUDE_CODE_* variable (base URL, tokens, flags) and CLAUDE_CONFIG_DIR is dropped; only the ones set below
 		// survive. Proxy variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY ...) are deliberately kept, so a company proxy keeps working.
 		for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_)/i.test(k) || /^CLAUDE_CONFIG_DIR$/i.test(k)) delete env[k];
+		// Inherited variables that can reconfigure the engine (node options, a shell startup file, timeouts, the search tool, tracing, MCP and
+		// feature switches) are dropped too; the app's own are set below. NODE_EXTRA_CA_CERTS and the proxy variables stay.
+		for (const k of Object.keys(env)) if (ENGINE_ENV_DROP.test(k)) delete env[k];
 		env.ANTHROPIC_API_KEY = key;
 		env.CLAUDE_CONFIG_DIR = cfg.configDir;
 		// Documented (code.claude.com/docs/en/env-vars): strips credentials such as ANTHROPIC_API_KEY from the environments of Bash
@@ -343,13 +348,16 @@ function createClaudeAdapter(deps = {}) {
 				const view = handle.pendingFork.view;
 				const stored = stores.loadTurns(from);
 				if (stored) handle.turns = turnsLib.cutTurns(stored, view);
-				else
-					handle.turnsLoading = history
-						.loadRows(from, { cwd: opts.cwd })
-						.then((rows) => {
-							handle.turns = turnsLib.cutTurns(turnsLib.turnsFromRows(rows), view);
-						})
-						.catch(() => {});
+				// The session it was forked from (or the one a rewind cut) may be gone since (deleted, another config folder): the SDK has no rows for it.
+				// Empty rows = gone. A failed read says nothing, so it never counts as gone. Checked before the engine starts: resuming a missing session fails.
+				handle.parentCheck = history
+					.loadRows(from, { cwd: opts.cwd })
+					.then((rows) => {
+						if (Array.isArray(rows) && rows.length === 0) handle.parentGone = true;
+						else if (!stored) handle.turns = turnsLib.cutTurns(turnsLib.turnsFromRows(rows), view);
+					})
+					.catch(() => {});
+				if (!stored) handle.turnsLoading = handle.parentCheck;
 			}
 			handle.forkInfo = { parent: typeof fk.parent === "string" ? fk.parent : null, at: handle.pendingFork.at, title: typeof fk.title === "string" ? fk.title : null };
 		} else if (opts.sessionRef) {
@@ -441,7 +449,8 @@ function createClaudeAdapter(deps = {}) {
 						if (gen !== handle.gen) return "superseded";
 						if (init && Array.isArray(init.commands)) handle.meta.commands = init.commands;
 						onReady(init || {});
-						if (gen === 1 && handle.pendingFork) sink.record(handle, pendingRecord(handle)); // a fork, or a chat restored as one: the app keeps where it stands
+						if (gen === 1 && handle.pendingFork && !handle.parentGone) sink.record(handle, pendingRecord(handle)); // a fork, or a chat restored as one: the app keeps where it stands
+						if (gen === 1 && handle.parentGone) sink.record(handle, { type: "claude_fork_gone", message: PARENT_GONE_TEXT(handle.forkInfo) });
 						for await (const message of q) {
 							if (gen !== handle.gen) return "superseded";
 							if (sink.isCurrent && !sink.isCurrent(handle)) continue;
@@ -491,6 +500,8 @@ function createClaudeAdapter(deps = {}) {
 							},
 						);
 					});
+				if (handle.parentCheck) await handle.parentCheck;
+				if (handle.parentGone) handle.pendingFork = { ...handle.pendingFork, from: null }; // nothing to resume: a fresh engine, only for the reason and the lists; no message goes to it
 				const first = fk ? { resume: handle.pendingFork.from, fork: !!handle.pendingFork.from, at: handle.pendingFork.at } : {};
 				const how = await runQuery(first, (init) => {
 					if (!sink.isCurrent || sink.isCurrent(handle)) sink.ready(handle, scrubDeep(init, handle.key));
@@ -648,6 +659,10 @@ function createClaudeAdapter(deps = {}) {
 		if (!canSend(h) || !record) return false;
 		if (record.type === "prompt" && MODE_COMMAND.test(String(record.message == null ? "" : record.message))) {
 			switchMode(h, record);
+			return true;
+		}
+		if (record.type === "prompt" && h.parentGone) {
+			if (record.id !== undefined) h.sink.record(h, { type: "response", id: record.id, command: "prompt", success: false, error: PARENT_GONE_TEXT(h.forkInfo) });
 			return true;
 		}
 		if (record.type === "prompt") {

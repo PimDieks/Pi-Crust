@@ -46,6 +46,16 @@ test("names the engine reports are kept only when plain and short, and never a k
 	for (const bad of [KEY, "x".repeat(61), "a\nb", "C:\\Users\\x", "<script>", "", null, {}, 5]) assert.equal(safeName(bad), null, String(bad));
 });
 
+test("the chat id in a chat_start line is a number, or a name of letters, digits, - and _ only", () => {
+	const f = path.join(tmp, "ids.jsonl");
+	const log = createTrialLog({ file: f });
+	const ids = [7, "chat-12_a", "a b", "C:\\secret\\folder", "x/y", "k" + KEY, { path: "C:\\private" }, ["a"], null, undefined, NaN, Infinity, true, "a.b", "é", "x".repeat(81)];
+	for (const id of ids) log.chatStart(id, {}, "plan", false);
+	const rows = fs.readFileSync(f, "utf8").trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l));
+	assert.deepEqual(rows.map((r) => r.chat ?? null), [7, "chat-12_a", ...Array(14).fill(null)]);
+	assert.ok(!fs.readFileSync(f, "utf8").includes("secret"));
+});
+
 test("chat_start lines carry counts and names, and nothing else from the init message", () => {
 	const f = path.join(tmp, "a.jsonl");
 	const log = createTrialLog({ file: f, now: () => new Date("2026-01-01T00:00:00Z") });

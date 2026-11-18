@@ -31,6 +31,11 @@ function safeName(v, max = 60) {
 	if (!t || t.length > max || !/^[A-Za-z0-9 _:.@/+-]+$/.test(t) || /sk-ant/i.test(t)) return null;
 	return t;
 }
+// The chat id: a number, or a name of letters, digits, - and _ (at most 80). Anything else (an object, a path, a sentence) is dropped.
+function chatId(v) {
+	if (typeof v === "number") return Number.isFinite(v) ? v : null;
+	return typeof v === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(v) && !/sk-ant/i.test(v) ? v : null;
+}
 function names(list, max = 40) {
 	if (!Array.isArray(list)) return { count: 0, names: [] };
 	const out = [];
@@ -63,7 +68,7 @@ function createTrialLog({ file, fsApi = fs, now = () => new Date() } = {}) {
 			const m = init && typeof init === "object" ? init : {};
 			write({
 				ev: "chat_start",
-				chat: typeof chatNo === "string" ? safeName(chatNo, 80) : chatNo,
+				chat: chatId(chatNo),
 				again: !!again,
 				engineVersion: safeName(m.claude_code_version, 40),
 				keySource: safeName(m.apiKeySource, 40),

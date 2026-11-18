@@ -1178,6 +1178,9 @@ function handleRecord(r) {
 		case "claude_paused":
 			window.claudeSetupUi?.pauseCard(chat, r); // the pause card at the end of the conversation
 			return;
+		case "claude_fork_gone":
+			window.claudeSetupUi?.forkGoneCard(chat, r); // a restored fork whose parent chat no longer exists: said plainly, the message box disabled
+			return;
 		case "queue_update":
 			state.queue = { steering: r.steering || [], followUp: r.followUp || [] };
 			if (chat === active) renderQueue();

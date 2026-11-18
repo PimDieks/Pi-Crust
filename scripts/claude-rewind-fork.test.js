@@ -389,10 +389,10 @@ test("pending: a new fork says where it stands, and a restart from that record i
 	const saved = JSON.parse(JSON.stringify(pendingRecords(c)[0].pending)); // what open-chats.json holds
 	assert.ok(!("turns" in saved));
 	c.stop();
-	// the app closes and opens again: a new adapter, the stored record only
+	// the app closes and opens again: a new adapter, the stored record only (the old session is still there to read)
+	t.sdk.setSessionMessages({ [parent]: rowsOf("fork-original") });
 	const r = await rig({ configDir: t.configDir, fork: saved, cwd: t.cwd });
 	rig.keep = false;
-	r.sdk.setSessionMessages({ [parent]: rowsOf("fork-original") });
 	assert.equal((await r.ask("get_state")).data.sessionName, "Fork of Sky chat");
 	assert.equal((await r.ask("get_state")).data.sessionFile, null, "still no session of its own");
 	assert.deepEqual((await r.ask("get_messages")).data.messages.filter((m) => m.role === "user").map((m) => m.uuid), [FORK[0].uuid], "shows the same part of the old chat");
@@ -422,9 +422,9 @@ test("pending: a rewind in the chat's own tab says so, and a restart from that r
 	assert.deepEqual(pendingRecords(t).at(-1).pending, { from: parent, at: null, view: "none", parent: null, title: null });
 	t.stop();
 	rig.keep = true;
+	t.sdk.setSessionMessages({ [parent]: rowsOf("fork-original") });
 	const r = await rig({ configDir: t.configDir, fork: saved, cwd: t.cwd });
 	rig.keep = false;
-	r.sdk.setSessionMessages({ [parent]: rowsOf("fork-original") });
 	assert.deepEqual((await r.ask("get_messages")).data.messages.filter((m) => m.role === "user").map((m) => m.uuid), [FORK[0].uuid], "rewound: only turn 1 is shown, not both");
 	assert.equal((await r.ask("get_state")).data.sessionFile, null);
 	r.stop();
@@ -437,6 +437,53 @@ test("pending: cutTurns keeps the turns up to the answer the cut ends at", () =>
 	assert.deepEqual(turnsLib.cutTurns(turns, "all").map((x) => x.uuid), ["u1", "u2", "u3"]);
 	assert.deepEqual(turnsLib.cutTurns(turns, "none"), []);
 	assert.deepEqual(turnsLib.cutTurns(turns, "zzz").map((x) => x.uuid), ["u1", "u2", "u3"], "a cut that cannot be found shows everything rather than nothing");
+});
+
+test("pending: a restored fork whose parent session is gone says so, resumes nothing, refuses messages, and keeps its record", async () => {
+	const t = await parentChat();
+	const parent = sidOf("fork-original");
+	const spec = await t.adapter.forkSpec(t.h, { entryId: FORK[1].uuid, title: "Sky chat" });
+	rig.keep = true;
+	const c = await rig({ configDir: t.configDir, fork: spec.start, cwd: t.cwd });
+	const saved = JSON.parse(JSON.stringify(pendingRecords(c)[0].pending));
+	c.stop();
+	t.stop();
+	// the app opens again; the parent session has no rows any more (deleted) and the app's own turn list for it is gone too
+	t.sdk.setSessionMessages({});
+	const r = await rig({ configDir: path.join(tmp, "cfg-elsewhere"), fork: saved, cwd: t.cwd });
+	rig.keep = false;
+	const gone = r.events.records.filter((x) => x.type === "claude_fork_gone");
+	assert.equal(gone.length, 1);
+	assert.match(gone[0].message, /forked from is gone/);
+	assert.deepEqual(pendingRecords(r), [], "the pending record is left as it is on disk, not cleared");
+	const last = r.sdk.calls[r.sdk.calls.length - 1];
+	assert.equal(last.options.resume, undefined, "a missing session is not resumed");
+	assert.notEqual(last.options.forkSession, true);
+	const before = r.sdk.calls.length;
+	const id = "gone-1";
+	r.adapter.send(r.h, { id, type: "prompt", message: "hello?" });
+	await r.until(() => r.events.records.some((x) => x.type === "response" && x.id === id));
+	const resp = r.events.records.find((x) => x.type === "response" && x.id === id);
+	assert.equal(resp.success, false);
+	assert.match(resp.error, /gone/);
+	assert.equal(r.events.records.some((x) => x.type === "message_start"), false, "nothing was sent to the engine");
+	assert.equal(r.sdk.calls.length, before);
+	r.stop();
+});
+test("pending: a restored fork whose parent is still there is not reported gone", async () => {
+	const t = await parentChat();
+	const parent = sidOf("fork-original");
+	const spec = await t.adapter.forkSpec(t.h, { entryId: FORK[1].uuid, title: "Sky chat" });
+	const saved = JSON.parse(JSON.stringify(spec.start));
+	delete saved.turns;
+	rig.keep = true;
+	t.sdk.setSessionMessages({ [parent]: rowsOf("fork-original") });
+	const r = await rig({ configDir: t.configDir, fork: saved, cwd: t.cwd });
+	rig.keep = false;
+	assert.deepEqual(r.events.records.filter((x) => x.type === "claude_fork_gone"), []);
+	assert.equal(pendingRecords(r).length, 1);
+	r.stop();
+	t.stop();
 });
 
 test("pending: the whole way main takes it - fork, the record into open-chats.json, the app closes, restore, the same empty fork tab", async () => {
@@ -454,9 +501,9 @@ test("pending: the whole way main takes it - fork, the record into open-chats.js
 	const entries = CA.restoreEntries(saved, () => true);
 	assert.deepEqual(entries.map((e) => [e.file, !!e.pending]), [[parent, false], [null, true]]);
 	assert.equal(CA.activeOf(saved, entries), entries[1], "the empty fork tab was the active one");
+	t.sdk.setSessionMessages({ [parent]: rowsOf("fork-original") });
 	const r = await rig({ configDir: t.configDir, fork: entries[1].pending, cwd: t.cwd });
 	rig.keep = false;
-	r.sdk.setSessionMessages({ [parent]: rowsOf("fork-original") });
 	assert.equal((await r.ask("get_state")).data.sessionName, "Fork of Sky chat");
 	assert.deepEqual((await r.ask("get_messages")).data.messages.filter((m) => m.role === "user").map((m) => m.uuid), FORK.map((x) => x.uuid), "a fork from the end shows the whole old chat");
 	r.stop();
