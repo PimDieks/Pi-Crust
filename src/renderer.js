@@ -1474,7 +1474,7 @@ function showDialog(spec) {
 }
 
 // A permission prompt's title: question, reason lines, the exact text, "Mode: ...". The text is plain text, never HTML.
-const PERM_REASON = /^(This file can |This is a network path|The project folder is |Pi Crust could not read |The computer may send |Resolves to )/;
+const PERM_REASON = /^(This file can |This name is a Windows device name|This text has hidden characters|This is a network path|The project folder is |Pi Crust could not read |The computer may send |Resolves to )/;
 const PERM_LONG = /^This (command|path|tool call) is [\d,.]+ characters long/;
 const PERM_KEY_GUARD_MS = 500;
 function parsePermTitle(title) {

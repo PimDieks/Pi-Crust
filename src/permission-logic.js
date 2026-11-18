@@ -108,7 +108,23 @@ function protectedName(comp) {
 	const c = canonName(comp);
 	return PROTECTED_NAMES.has(c) || /^git\w*~\d+$/.test(c);
 }
+// DOS device names (NUL, CON, PRN, AUX, COM1-9, LPT1-9, CONIN$, CONOUT$): Windows resolves them to a device whatever the
+// extension ("nul.txt", "NUL.tar.gz"), trailing dots and spaces ("NUL. ") or stream ("NUL:x"). Node can still create a real
+// folder with that name below the project through a \\?\ path, where git then finds hooks that it cannot start: that breaks
+// git's safety settings and the app's checkpoints. No project needs one, so a write to one always asks (blocked in Plan).
+function deviceName(comp) {
+	const stem = canonName(comp).split(".")[0].replace(/ +$/, "");
+	return /^(nul|con|prn|aux|conin\$|conout\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])$/.test(stem);
+}
 const PROTECTED_WHY = "This file can change what git or Pi runs.";
+const DEVICE_WHY = "This name is a Windows device name (NUL, CON, COM1 ...). A file or folder called that can break git's safety settings.";
+const HIDDEN_WHY = "This text has hidden characters or a long run of spaces. Check every character before you allow it.";
+// The characters vis() turns into markers (a newline is not one: a command may have lines), and a run of 3+ spaces or tabs.
+const HIDDEN_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\p{Cn}\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u115F\u1160\u3164\uFFA0\u2800\u180E\uFE00-\uFE0F]/u;
+function hasHidden(s) {
+	const t = String(s ?? "").replace(/\r?\n/g, " ");
+	return /[ \t]{3,}/.test(t) || HIDDEN_CHARS.test(t);
+}
 const PROGRAM_WHY = "This file can change which program a command runs.";
 const UNKNOWN_GIT_WHY = "Pi Crust could not read git's settings for this project, so every edit asks.";
 
@@ -210,6 +226,7 @@ function checkOne(rawPath, cwd, opts) {
 			const why = [];
 			if (protectedName(first) || first === "head") why.push("git");
 			if (shadowName(first)) why.push("program");
+			if (deviceName(first)) why.push("device");
 			return res({ why, protected: why.length > 0 });
 		}
 		if (win) {
@@ -277,6 +294,7 @@ function checkOne(rawPath, cwd, opts) {
 			const b = bases.find((x) => underParts(t, x) && t.length > x.length);
 			const comps = b ? t.slice(b.length) : t.slice(1);
 			if (comps.some(protectedName)) why.add("git");
+			if (comps.some(deviceName)) why.add("device");
 			if (b && comps.length === 1 && comps[0] === "head") why.add("git"); // root-level HEAD (a bare repository)
 			if (b && comps.length === 1 && win && shadowName(comps[0])) why.add("program"); // Windows searches the current folder
 		}
@@ -441,6 +459,11 @@ function isReadOnlyCommand(command, shell) {
 		if (typeof command !== "string") return false;
 		const line = command.trim();
 		if (!line || line.length > MAX_SHOWN || vis(line).length > MAX_SHOWN) return false; // longer: never without a question
+		// Outside bash (PowerShell, cmd, an unknown shell, WSL) the shell's own rules for splitting arguments are not the
+		// ones tokenize() knows: PowerShell splits on U+00A0, U+2000-U+200A, U+0085, U+2028 and reads curly quotes as quotes
+		// (R1: `git log x<NBSP>--output=README.md` truncated a file). So a command there is read-only only when it is
+		// printable ASCII, spaces and tabs (blanks and line ends around it are trimmed); anything else asks, or is blocked in Plan.
+		if (shell !== "bash" && /[^\x20-\x7e\t]/.test(command.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, ""))) return false;
 		const tokens = tokenize(line, shell);
 		if (!tokens || !tokens.length) return false;
 		const name = tokens[0].raw.toLowerCase();
@@ -505,6 +528,8 @@ function askEdit(mode, toolName, shown, resolved, flags) {
 	const why = new Set(flags.why || []);
 	if (why.has("git") || why.has("pi") || why.has("home")) lines.push(PROTECTED_WHY);
 	if (why.has("program")) lines.push(PROGRAM_WHY);
+	if (why.has("device")) lines.push(DEVICE_WHY);
+	if (why.has("hidden")) lines.push(HIDDEN_WHY);
 	if (why.has("unknown")) lines.push(UNKNOWN_GIT_WHY);
 	if (flags.long) lines.push(longLine("path", flags.long));
 	if (flags.unc) lines.push("This is a network path.");
@@ -522,7 +547,13 @@ function askEdit(mode, toolName, shown, resolved, flags) {
 // ---------------------------------------------------------------------------
 const allow = () => ({ action: "allow" });
 const block = (reason) => ({ action: "block", reason });
-const ask = (title, grant, deniedWhat, options) => ({ action: "ask", prompt: { title, options: (options || OPTIONS).slice() }, grant, deniedReason: DENIED(deniedWhat) });
+// prompt.risky: the prompt offers only "Allow once" and "Deny" and opens on "Deny" (protected files, network paths, text that is
+// not fully shown, hidden characters). The UIs (renderer.js, remote/app.js) read it from the prompt itself: no "Allow for this
+// chat" among the options, or one of the warning lines (PERM_REASON). Both are always set together here.
+const ask = (title, grant, deniedWhat, options) => {
+	const o = (options || OPTIONS).slice();
+	return { action: "ask", prompt: { title, options: o, risky: !o.includes(OPTIONS[1]) }, grant, deniedReason: DENIED(deniedWhat) };
+};
 const askOnce = (title, deniedWhat) => ask(title, undefined, deniedWhat, OPTIONS_ONCE);
 
 function decide(args) {
@@ -558,6 +589,7 @@ function decide(args) {
 			const wheres = targets.map((t) => checkPath(t, cwd, pathOpts));
 			const why = [...new Set(wheres.flatMap((w) => w.why || []))];
 			if (gitUnknown) why.push("unknown");
+			if (targets.some(hasHidden)) why.push("hidden");
 			const flags = { outside: wheres.some((w) => !w.inside), protected: why.length > 0, unc: wheres.some((w) => w.unc), broad: wheres.some((w) => w.broad), why, long: longest > MAX_SHOWN ? longest : 0 };
 			// Show where the path really goes when it is outside, or spelled in a way that hides it (URL, ~, @, .., Git Bash drive, non-ASCII).
 			const odd = (t) => /^(file:|~|@)|\.\.|^\/(mnt\/|cygdrive\/)?[a-zA-Z](\/|$)|[^\x20-\x7e]/.test(t.trim());
@@ -584,14 +616,16 @@ function decide(args) {
 				if (name !== "git") return allow();
 				// git reads settings and hooks from the project. Allowed without a question only in its hardened form
 				// (git-harden.js), and only while git's settings for this project are known.
-				const hardened = gitUnknown ? null : hardenGitCommand(command);
+				const hardened = gitUnknown ? null : hardenGitCommand(command, { extras: pathOpts.protect && pathOpts.protect.extras });
 				if (hardened) return { action: "allow", rewrite: hardened };
 			}
 			if (mode === "plan") return block(planBlock("This command") + " Only read-only commands run in Plan mode.");
 			if (typeof command !== "string" || command.trim() === "") return block("The command is empty or unreadable, so it was blocked.");
 			const shown = vis(command.trim());
 			if (shown.length > MAX_ASKABLE) return block(tooLong("command", shown.length));
-			if (shown.length > MAX_SHOWN) return askOnce(`Allow this command?\n${longLine("command", shown.length)}\n${shown}\n${statusText(mode)}`, "command");
+			const hidden = hasHidden(command.trim()) ? HIDDEN_WHY + "\n" : "";
+			if (shown.length > MAX_SHOWN) return askOnce(`Allow this command?\n${hidden}${longLine("command", shown.length)}\n${shown}\n${statusText(mode)}`, "command");
+			if (hidden) return askOnce(`Allow this command?\n${hidden}${shown}\n${statusText(mode)}`, "command");
 			const key = "cmd:" + command;
 			if (grants.keys.has(key)) return allow();
 			return ask(`Allow this command?\n${shown}\n${statusText(mode)}`, { type: "key", key }, "command");
@@ -601,6 +635,7 @@ function decide(args) {
 			if (mode === "plan") return block(planBlock("A subagent") + " A subagent runs as a separate Pi that does not follow the mode.");
 			const task = input && typeof input === "object" ? (input.task ?? input.prompt ?? input.description ?? "") : "";
 			const key = "sub:" + stable(input);
+			if (hasHidden(stable(input))) return askOnce(`Allow a subagent?\n${HIDDEN_WHY}\n${task ? `Task: ${brief(task)}\n` : ""}Its own tools are not controlled by the permission mode.\n${statusText(mode)}`, "subagent");
 			if (grants.keys.has(key)) return allow();
 			const head = task ? `Task: ${brief(task)}\n` : "";
 			return ask(`Allow a subagent?\n${head}Its own tools are not controlled by the permission mode.\n${statusText(mode)}`, { type: "key", key }, "subagent");
@@ -610,7 +645,9 @@ function decide(args) {
 		if (mode === "plan") return block(planBlock(`The tool "${brief(toolName, 80)}"`) + " Unknown and MCP tools count as commands.");
 		const detail = vis(stable(input));
 		if (detail.length > MAX_ASKABLE) return block(tooLong("tool call", detail.length));
-		if (detail.length > MAX_SHOWN) return askOnce(`Allow this tool call?\n${longLine("tool call", detail.length)}\n${brief(toolName, 80)}  ${detail}\n${statusText(mode)}`, "tool call");
+		const hiddenTool = hasHidden(stable(input)) || hasHidden(toolName) ? HIDDEN_WHY + "\n" : "";
+		if (detail.length > MAX_SHOWN) return askOnce(`Allow this tool call?\n${hiddenTool}${longLine("tool call", detail.length)}\n${brief(toolName, 80)}  ${detail}\n${statusText(mode)}`, "tool call");
+		if (hiddenTool) return askOnce(`Allow this tool call?\n${hiddenTool}${brief(toolName, 80)}  ${detail}\n${statusText(mode)}`, "tool call");
 		const key = "tool:" + toolName + ":" + stable(input);
 		if (grants.keys.has(key)) return allow();
 		return ask(`Allow this tool call?\n${brief(toolName, 80)}  ${detail}\n${statusText(mode)}`, { type: "key", key }, "tool call");
@@ -656,6 +693,30 @@ function pinKeys(toolName) {
 	return "all";
 }
 
+// Which shell a bash tool call really runs in, from the shellPath settings Pi would use (none, one or two; "" / null / undefined
+// count as unset) and the machine. "bash" only for a Git Bash or a real bash; "unknown" (strict rules, like PowerShell) for
+// anything else, and for WSL's bash.exe (System32 / Sysnative / the WindowsApps launcher): it is a Linux shell with its own
+// quoting, and the git it runs is not Windows git. On Windows with no shellPath, Pi uses Git Bash from Program Files, else any
+// bash.exe on PATH (could be WSL): only the first is known.
+function bashShellKind({ platform = process.platform, shellPaths = [], env = process.env, exists = (p) => fs.existsSync(p) } = {}) {
+	try {
+		const win = platform === "win32";
+		const set = shellPaths.filter((p) => p !== undefined && p !== null && p !== "");
+		for (const sp of set) {
+			if (typeof sp !== "string") return "unknown";
+			const s = sp.trim();
+			if (!/^bash(\.exe)?$/i.test((win ? nodePath.win32 : nodePath.posix).basename(s))) return "unknown";
+			if (win && /[\\/](system32|sysnative|windowsapps)[\\/]/i.test(s)) return "unknown";
+		}
+		if (set.length) return "bash";
+		if (!win) return "bash";
+		for (const pf of [env.ProgramFiles, env["ProgramFiles(x86)"]]) if (pf && exists(nodePath.win32.join(pf, "Git", "bin", "bash.exe"))) return "bash";
+		return "unknown";
+	} catch {
+		return "unknown";
+	}
+}
+
 // An older copy of this extension in the user's Pi extensions folder (read only, to warn about the clash).
 // Returns the file name found or null.
 function findOldCopy(agentDir) {
@@ -676,5 +737,5 @@ function findOldCopy(agentDir) {
 module.exports = {
 	MODE_IDS, MODE_LABELS, DEFAULT_MODE, STATUS_KEY, ENTRY_TYPE, COMMAND_NAMES, OPTIONS, READ_ONLY_NAMES, MAX_SHOWN, MAX_ASKABLE, PROTECTED_WHY, PROGRAM_WHY,
 	isMode, statusText, parseMode, restoreMode, parseLastMode, canonName,
-	createGrants, clearGrants, classify, checkPath, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, pinKeys,
+	createGrants, clearGrants, classify, checkPath, bashShellKind, hasHidden, deviceName, DEVICE_WHY, HIDDEN_WHY, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, pinKeys,
 };

@@ -1229,7 +1229,7 @@
 			const lines = req.title.split("\n");
 			const question = lines.shift();
 			const mode = lines.length && /^Mode: /.test(lines[lines.length - 1]) ? lines.pop() : "";
-			const reasonRe = /^(This file can |This is a network path|The project folder is |Pi Crust could not read |The computer may send |Resolves to )/;
+			const reasonRe = /^(This file can |This name is a Windows device name|This text has hidden characters|This is a network path|The project folder is |Pi Crust could not read |The computer may send |Resolves to )/;
 			const longRe = /^This (command|path|tool call) is [\d,.]+ characters long/;
 			let longKind = "";
 			const reasons = [];

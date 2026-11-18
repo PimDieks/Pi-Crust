@@ -56,9 +56,11 @@ function pin(input: any, keys: string[] | "all") {
 }
 
 // Which shell the bash tool really runs. Pi uses settings.shellPath when it is set (global or project settings),
-// otherwise bash (Git Bash on Windows). Anything else, or settings that can't be read: unknown (strictest rules).
+// otherwise Git Bash on Windows (or whatever bash.exe is on PATH: that may be WSL) or bash elsewhere. Only a Git Bash or a real
+// bash counts as "bash"; a WSL bash.exe, any other shell, or settings that can't be read: "unknown" (strictest rules).
 function bashToolShell(cwd: string): string {
 	const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+	const shellPaths: unknown[] = [];
 	for (const f of [path.join(agentDir, "settings.json"), path.join(cwd || ".", ".pi", "settings.json")]) {
 		let text: string;
 		try {
@@ -68,14 +70,12 @@ function bashToolShell(cwd: string): string {
 			return "unknown";
 		}
 		try {
-			const sp = JSON.parse(text).shellPath;
-			if (sp === undefined || sp === null || sp === "") continue;
-			if (typeof sp !== "string" || !/^bash(\.exe)?$/i.test(path.basename(sp.trim()))) return "unknown";
+			shellPaths.push(JSON.parse(text).shellPath);
 		} catch {
 			return "unknown";
 		}
 	}
-	return "bash";
+	return logic.bashShellKind({ shellPaths });
 }
 
 export default function (pi: ExtensionAPI) {
