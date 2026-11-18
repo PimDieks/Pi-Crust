@@ -756,12 +756,21 @@ function placeToasts() {
 		const r = $(s)?.getBoundingClientRect();
 		if (r?.height) top = Math.min(top, r.top);
 	}
+	// Menus open in the toast column (slash, @, worktree, view, remote) sit in the chat pane's own stacking context or under the
+	// toasts: the toasts stay above their top edge instead of over them, so a menu is never covered.
+	const col = { left: pane.right - 16 - Math.min(420, pane.width - 32), right: pane.right - 16 };
+	for (const m of document.querySelectorAll(".slash-menu:not([hidden])")) {
+		const r = m.getBoundingClientRect();
+		if (r.height && r.right > col.left && r.left < col.right && ($("#composer").contains(m) || r.top > innerHeight / 2)) top = Math.min(top, r.top); // a menu under the header button never pushes them off the top
+	}
 	Object.assign(box.style, { right: `${Math.max(8, innerWidth - pane.right + 16)}px`, bottom: `${Math.max(8, innerHeight - top + 8)}px`, maxWidth: `${Math.max(200, Math.min(420, pane.width - 32))}px` });
 }
 {
 	const ro = new ResizeObserver(() => placeToasts());
 	for (const s of ["#chat-pane", "#composer", "#todo-panel", "#ask", "#queue"]) if ($(s)) ro.observe($(s));
 	if ($("#toasts")) new MutationObserver(() => placeToasts()).observe($("#toasts"), { childList: true });
+	new MutationObserver(() => placeToasts()).observe(document.body, { childList: true }); // menus are added to the page and removed again
+	if ($("#composer")) new MutationObserver(() => placeToasts()).observe($("#composer"), { childList: true, subtree: true, attributeFilter: ["hidden"] });
 	addEventListener("resize", placeToasts);
 	placeToasts();
 }
@@ -1578,6 +1587,7 @@ function renderAsk() {
 	if (box.dataset.askId === ask.spec.id && !box.hidden) return; // already shown
 	box.dataset.askId = ask.spec.id;
 	box.hidden = false;
+	closeContextPanel(); // its panel is above the chat pane and would cover the question
 	fillDialog(box, ask.spec, ask.finish);
 	if (active.asks.length > 1) box.querySelector("h2")?.append(el("span", "ask-more", ` (+${active.asks.length - 1} more)`));
 	active.el.scrollTop = active.el.scrollHeight;
