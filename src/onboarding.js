@@ -382,6 +382,7 @@
 			return true;
 		}
 		refresh({ fresh: false, figma: false }); // for the pill
+		window.crustFirstTask?.restore(onb);
 		return false;
 	}
 

@@ -78,7 +78,8 @@ let info = { repo: "", devUrl: "" };
 // Hook bus: feature scripts (notify.js, chat-find.js, ...) subscribe with onCrust(name, fn); renderer.js and
 // sessions.js only emit. Events: turn:start(chat), turn:settled(chat,{aborted}), user:rendered(chat,node,message,history),
 // assistant:turn(chat,root), text:final(chat,blockEl,raw), tool:end(chat,{toolName,toolCallId,args,result,isError,history}),
-// chat:cleared(chat), chat:activated(chat), chat:closed(chat), models:loaded(chat,stateData), ask:added(chat,spec).
+// chat:cleared(chat), chat:activated(chat), chat:closed(chat), models:loaded(chat,stateData), ask:added(chat,spec),
+// changes:loaded(count,chatId), rewind:restored(chat,{files}).
 // ===========================================================================
 const crustHooks = new Map();
 function onCrust(name, fn) {
@@ -763,7 +764,7 @@ function placeToasts() {
 	if (!box) return;
 	if (!pane?.width) return Object.assign(box.style, { right: "16px", bottom: "16px", maxWidth: "420px" });
 	let top = $("#composer").getBoundingClientRect().top;
-	for (const s of ["#todo-panel", "#ask", "#queue"]) {
+	for (const s of ["#todo-panel", "#ask", "#queue", "#first-task"]) {
 		const r = $(s)?.getBoundingClientRect();
 		if (r?.height) top = Math.min(top, r.top);
 	}
@@ -778,7 +779,7 @@ function placeToasts() {
 }
 {
 	const ro = new ResizeObserver(() => placeToasts());
-	for (const s of ["#chat-pane", "#composer", "#todo-panel", "#ask", "#queue"]) if ($(s)) ro.observe($(s));
+	for (const s of ["#chat-pane", "#composer", "#todo-panel", "#ask", "#queue", "#first-task"]) if ($(s)) ro.observe($(s));
 	if ($("#toasts")) new MutationObserver(() => placeToasts()).observe($("#toasts"), { childList: true });
 	new MutationObserver(() => placeToasts()).observe(document.body, { childList: true }); // menus are added to the page and removed again
 	if ($("#composer")) new MutationObserver(() => placeToasts()).observe($("#composer"), { childList: true, subtree: true, attributeFilter: ["hidden"] });
