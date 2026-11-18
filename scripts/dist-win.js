@@ -24,4 +24,9 @@ delete env.ELECTRON_RUN_AS_NODE;
 const node = process.versions.electron ? "node" : process.execPath;
 const r = spawnSync(node, args, { cwd: root, stdio: "inherit", env, windowsHide: true });
 if (r.error) console.error(r.error.code === "ENOENT" ? "Node.js was not found on PATH (needed to build the installer)." : r.error.message);
+// TRANSITION (see scripts/legacy-installer-name.js): local builds only, so old 0.1.x apps can finish their update.
+if (r.status === 0 && !release) {
+	const version = JSON.parse(require("fs").readFileSync(path.join(root, "package.json"), "utf8")).version;
+	require("./legacy-installer-name.js").linkLegacyInstaller(path.join(root, "dist"), version);
+}
 process.exit(r.status === null ? 1 : r.status);

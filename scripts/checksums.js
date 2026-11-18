@@ -9,10 +9,11 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
+const { isLegacyName } = require("./legacy-installer-name.js");
 const INSTALLER = /\.(exe|zip|dmg)$/i;
 
 function listInstallers(dir) {
-	return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && INSTALLER.test(e.name)).map((e) => e.name).sort();
+	return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && INSTALLER.test(e.name) && !isLegacyName(e.name)).map((e) => e.name).sort();
 }
 function sha256(file) {
 	const h = crypto.createHash("sha256");
