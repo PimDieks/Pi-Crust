@@ -34,6 +34,13 @@ function writeLastMode(mode: string) {
 	}
 }
 
+function deepFreeze(v: any, seen = new Set<any>()) {
+	if (v === null || typeof v !== "object" || seen.has(v)) return;
+	seen.add(v);
+	Object.freeze(v);
+	for (const k of Object.keys(v)) deepFreeze(v[k], seen);
+}
+
 export default function (pi: ExtensionAPI) {
 	if (typeof (pi as any).on !== "function" || typeof (pi as any).registerCommand !== "function") return; // old Pi: stay inactive, the app shows why
 
@@ -59,8 +66,22 @@ export default function (pi: ExtensionAPI) {
 		show(ctx);
 	});
 
+	// Open approval dialogs. A mode change cancels them (they count as denied) and bumps the generation,
+	// so an answer that arrives late can neither allow a call nor leave a grant in the new mode.
+	let generation = 0;
+	const pending = new Set<AbortController>();
+
 	function setMode(next: string, ctx: any) {
 		mode = next;
+		generation++;
+		for (const c of pending) {
+			try {
+				c.abort();
+			} catch {
+				// the answer is discarded by the generation check anyway
+			}
+		}
+		pending.clear();
 		logic.clearGrants(grants); // "Allow for this chat" is forgotten when the mode changes
 		try {
 			pi.appendEntry(logic.ENTRY_TYPE, { mode: next });
@@ -76,7 +97,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	pi.registerCommand("mode", {
+	const modeCommand = {
 		description: "Set the permission mode: plan, ask-edits, ask-commands or trusted",
 		getArgumentCompletions: (prefix: string) => {
 			const items = logic.MODE_IDS.filter((id: string) => id.startsWith((prefix || "").trim().toLowerCase())).map((id: string) => ({ value: id, label: id, description: logic.MODE_LABELS[id] }));
@@ -97,7 +118,9 @@ export default function (pi: ExtensionAPI) {
 			}
 			setMode(next, ctx);
 		},
-	});
+	};
+	// "/crust-mode" is what the app sends: another extension's own "/mode" cannot make it ambiguous. "/mode" stays for the terminal.
+	for (const name of logic.COMMAND_NAMES) pi.registerCommand(name, modeCommand);
 
 	// One question at a time. Parallel tool calls wait their turn and are decided again afterwards, so an
 	// "Allow for this chat" answer covers the calls queued behind it.
@@ -108,9 +131,27 @@ export default function (pi: ExtensionAPI) {
 		if (d.action === "allow") return undefined;
 		if (d.action === "block") return { block: true, reason: d.reason };
 		if (!ctx.hasUI) return { block: true, reason: "This needs the user's approval, but there is no way to ask here. Nothing was run." };
-		const answer = await ctx.ui.select(d.prompt.title, d.prompt.options);
+		const gen = generation;
+		const ctl = new AbortController();
+		pending.add(ctl);
+		let answer: unknown;
+		try {
+			answer = await ctx.ui.select(d.prompt.title, d.prompt.options, { signal: ctl.signal });
+		} finally {
+			pending.delete(ctl);
+		}
+		if (gen !== generation) return { block: true, reason: "The permission mode changed while this was waiting for approval, so the call was cancelled. Nothing was run. Try again." };
 		const r = logic.applyAnswer(d, answer, grants);
 		return r.action === "allow" ? undefined : { block: true, reason: r.reason };
+	}
+
+	// Pi runs the call with the SAME input object, and extensions loaded after this one (user and project extensions
+	// come after the app's -e list) still see it. Freezing it after the decision makes a later change throw, which
+	// blocks the call, so what was approved is what runs.
+	function sealed(event: any, result?: Block): Block | undefined {
+		if (result) return result;
+		deepFreeze(event.input);
+		return undefined;
 	}
 
 	pi.on("tool_call", async (event: any, ctx: any): Promise<Block | undefined> => {
@@ -118,10 +159,11 @@ export default function (pi: ExtensionAPI) {
 		try {
 			// Calls that need no question skip the queue.
 			const first = logic.decide({ mode, toolName: event.toolName, input: event.input, cwd: ctx.cwd, grants });
-			if (first.action !== "ask") return first.action === "allow" ? undefined : { block: true, reason: first.reason };
+			if (first.action === "block") return { block: true, reason: first.reason };
+			if (first.action === "allow") return sealed(event);
 			const run = queue.then(() => review(event, ctx));
 			queue = run.catch(() => undefined);
-			return await run;
+			return sealed(event, await run);
 		} catch {
 			return fail; // any error, including a dialog that cannot be shown
 		}
