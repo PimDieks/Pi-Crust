@@ -212,7 +212,7 @@ The buttons in the browser bar (also in the palette):
 | **Element states** | Checkmark button | A row to force `:hover`, `:focus`, `:focus-visible`, `:active` or disabled on the last picked/tweaked element (or its button/link/input ancestor). Besides the CSS state it really hovers and focuses the element, so JS states like MUI's `.Mui-focused` / `.Mui-focusVisible` follow; disabled also adds `.Mui-disabled` on MUI components. Moving the mouse into the page undoes hover. Cleared on navigation or with **Clear**. |
 | **Annotate** | Pen button | A drawing overlay (pen P, arrow A, box B, text T, undo ⌘Z) on a screenshot; **Add to chat** attaches the marked-up image. |
 
-The Figma picker and Design compare talk to the Figma desktop MCP server (`http://127.0.0.1:3845/mcp`), so Figma desktop must be open with that server on. The MCP server doesn't expose the file key: paste a `figma.com/design/<key>/<name>` link into the chat input once to set it.
+The Figma picker and Design compare talk to the Figma desktop MCP server (`http://127.0.0.1:3845/mcp`), so Figma desktop must be open with that server on. The **Figma status** pill at the top of the Design tab shows whether that works (*Figma: ready*, *not connected*, *open a file*, *switch tab*, *select a frame*, *problem*). Click it for a short checklist and a **Test connection** button; it checks when you open the Design tab or the panel, and after a Figma action fails, never on a timer. The desktop server needs a Dev or Full seat. Only the Figma picker needs the file link (the server doesn't expose the file key): save a `figma.com/design/<key>/<name>` link in the panel, once per project, or paste it into the chat input. Compare and Tokens don't need it.
 
 | Tweak | Annotate |
 |---|---|
@@ -290,14 +290,14 @@ Turn it on with *Remote access…* in the command palette, `/remote`, or the �
 |---|---|
 | `PI_CRUST_CWD` | unset: the repo picker is shown |
 | `PI_CRUST_URL` | `http://localhost:3000/` |
-| `PI_CRUST_FIGMA_FILE_KEY` | unset; `figmaFileKey` in `settings.json` (set by pasting a Figma link) wins |
+| `PI_CRUST_FIGMA_FILE_KEY` | unset; `figmaFiles` (per project) or `figmaFileKey` in `settings.json` wins |
 | `PI_CRUST_PI` | found automatically: nvm's default Node, then other nvm versions, then Homebrew / `~/.local/bin` |
 
 **`settings.json`** (in the app's data folder, `~/Library/Application Support/pi-crust/`; on Windows `%APPDATA%\pi-crust`)
 
 | Key | Purpose |
 |---|---|
-| `figmaFileKey`, `figmaFileName` | The Figma file for the Figma picker (set by pasting a link) |
+| `figmaFiles` | The Figma file for the Figma picker, per project (saved in Design › Figma status or by pasting a link); `figmaFileKey` and `figmaFileName` are the older app-wide value, used when a project has none |
 | `storybookUrl` | Storybook address; empty means auto-detect |
 | `designTokensFile` | JSON with `colors`, `spacing`, `radii`, `typography`, relative to the repo |
 | `toolCallCheckIn` | Ask "Keep going?" after this many tool calls in one run (default 40, `0` = off). Applies to chats started afterwards |
@@ -342,7 +342,8 @@ Main process (`*-main.js` modules export `register(ctx)` and get one line in `ma
 | `checkpoints-main.js` | Checkpoints and restore |
 | `snap-main.js` | Screenshots of the dev browser and offscreen pages, shot storage |
 | `watch-tree.js` | Recursive folder watching; on Linux a pruned, asynchronous walk instead of Node's full one |
-| `design-main.js`, `figma-mcp.js` | Figma desktop MCP: selection, screenshots, variables |
+| `design-main.js`, `figma-mcp.js` | Figma desktop MCP: selection, screenshots, variables, connection probe |
+| `figma-status.js`, `figma-main.js`, `figma-panel.js` | Figma connection status: states and words, IPC with the per-project file link, the Design tab pill and checklist (selftest: `figma-panel`, with `scripts/figma-stub-server.js`) |
 | `figma-bridge-main.js`, `figma-match.js` | figma-console Desktop Bridge server, matching components to stories |
 | `storybook-main.js` | Finding, starting and reading Storybook |
 | `mendix-main.js`, `mendix-logic.js` | Running a Mendix app: Docker build and run, state machine; the pure parts (detection, names, docker arguments, errors) |
