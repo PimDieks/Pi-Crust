@@ -44,6 +44,7 @@ let chatSeq = 0;
 // ---------------------------------------------------------------------------
 const { pathKey, nvmWinHome, onPath } = require("./env-path");
 const piLocator = require("./agents/pi/locate");
+const piSessions = require("./agents/pi/sessions");
 function buildEnvWin() {
 	const extra = [];
 	const home = nvmWinHome();
@@ -1151,69 +1152,14 @@ const realOf = (p) => {
 		return p;
 	}
 };
-const sessionsDirFor = (cwd) => path.join(os.homedir(), ".pi", "agent", "sessions", `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`); // as Pi names it (also C:\ paths)
-const sessionsDir = () => sessionsDirFor(REPO);
-
-async function sessionSummary(file) {
-	// Read until the first user message; system messages can be huge, so stream and stop early.
-	const info = { path: file, name: null, firstPrompt: null, messages: 0 };
-	await new Promise((resolve) => {
-		const stream = fs.createReadStream(file, { encoding: "utf8", highWaterMark: 256 * 1024 });
-		let buf = "";
-		let read = 0;
-		stream.on("data", (chunk) => {
-			read += chunk.length;
-			buf += chunk;
-			let nl;
-			while ((nl = buf.indexOf("\n")) >= 0) {
-				const line = buf.slice(0, nl);
-				buf = buf.slice(nl + 1);
-				if (line.startsWith('{"type":"session_info"')) {
-					try {
-						info.name = JSON.parse(line).name || info.name;
-					} catch {}
-				} else if (line.startsWith('{"type":"message"') && line.includes('"role":"user"') && !info.firstPrompt) {
-					try {
-						const c = JSON.parse(line).message.content;
-						info.firstPrompt = (typeof c === "string" ? c : (c || []).filter((x) => x.type === "text").map((x) => x.text).join(" ")).slice(0, 200);
-					} catch {}
-				}
-			}
-			if (info.firstPrompt || read > 4e6) stream.destroy();
-		});
-		stream.on("close", resolve);
-		stream.on("error", resolve);
-	});
-	return info;
-}
-
 ipcMain.handle("sessions:list", async () => {
 	if (!REPO) return [];
 	// The repo's own sessions, plus those of its existing worktrees (chats started with "New chat in worktree").
-	const sources = [{ dir: sessionsDir(), cwd: null }];
+	const worktrees = [];
 	try {
-		for (const wt of await require("./worktree-main").listWorktrees(REPO, ENV)) if (realOf(wt.path) !== REPO_REAL && fs.existsSync(wt.path)) sources.push({ dir: sessionsDirFor(wt.path), cwd: wt.path, branch: wt.branch });
+		for (const wt of await require("./worktree-main").listWorktrees(REPO, ENV)) if (realOf(wt.path) !== REPO_REAL && fs.existsSync(wt.path)) worktrees.push({ cwd: wt.path, branch: wt.branch });
 	} catch {}
-	const withTime = [];
-	for (const src of sources) {
-		let files;
-		try {
-			files = (await fs.promises.readdir(src.dir)).filter((f) => f.endsWith(".jsonl"));
-		} catch {
-			continue;
-		}
-		for (const f of files) {
-			const p = path.join(src.dir, f);
-			try {
-				const st = await fs.promises.stat(p);
-				withTime.push({ p, mtime: st.mtimeMs, size: st.size, cwd: src.cwd, branch: src.branch || null });
-			} catch {}
-		}
-	}
-	withTime.sort((a, b) => b.mtime - a.mtime);
-	const recent = withTime.slice(0, 60);
-	const summaries = await Promise.all(recent.map((s) => sessionSummary(s.p)));
-	return summaries.map((s, i) => ({ ...s, mtime: recent[i].mtime, size: recent[i].size, cwd: recent[i].cwd, branch: recent[i].branch })).filter((s) => s.firstPrompt);
+	return piSessions.listSessions({ repo: REPO, worktrees });
 });
 
 // ---------------------------------------------------------------------------
