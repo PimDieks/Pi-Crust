@@ -1,0 +1,137 @@
+{
+	"name": "ask",
+	"description": "Extension UI requests: a select answered from the phone, a duplicate answer, a confirm answered on the desktop, plus statuses.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "prompt"
+			},
+			"emit": [
+				{
+					"type": "agent_start"
+				},
+				{
+					"type": "extension_ui_request",
+					"id": "ui-n",
+					"method": "notify",
+					"message": "Heads up",
+					"notifyType": "info"
+				},
+				{
+					"type": "extension_ui_request",
+					"id": "ui-s",
+					"method": "setStatus",
+					"statusKey": "permission-mode",
+					"statusText": "ask-edits"
+				},
+				{
+					"type": "extension_ui_request",
+					"id": "ui-1",
+					"method": "select",
+					"title": "Pick one",
+					"options": [
+						"Alpha",
+						"Beta"
+					]
+				},
+				{
+					"wait_ui": "ui-1"
+				},
+				{
+					"type": "extension_ui_request",
+					"id": "ui-2",
+					"method": "confirm",
+					"title": "Continue?",
+					"message": "Tool call 40 reached"
+				},
+				{
+					"wait_ui": "ui-2"
+				},
+				{
+					"type": "agent_end",
+					"messages": []
+				},
+				{
+					"type": "agent_settled"
+				}
+			]
+		}
+	],
+	"drive": [
+		{
+			"do": "send",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "Ask me things"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:record",
+				"payload.record.id": "ui-1"
+			}
+		},
+		{
+			"do": "answerUi",
+			"by": "phone",
+			"response": {
+				"type": "extension_ui_response",
+				"id": "ui-1",
+				"value": "Beta"
+			}
+		},
+		{
+			"do": "answerUi",
+			"by": "desktop",
+			"response": {
+				"type": "extension_ui_response",
+				"id": "ui-1",
+				"value": "Alpha"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:record",
+				"payload.record.id": "ui-2"
+			}
+		},
+		{
+			"do": "answerUi",
+			"by": "desktop",
+			"response": {
+				"type": "extension_ui_response",
+				"id": "ui-2",
+				"confirmed": true
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:record",
+				"payload.record.type": "agent_settled"
+			}
+		}
+	]
+}

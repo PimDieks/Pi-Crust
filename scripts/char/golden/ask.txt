@@ -1,0 +1,46 @@
+E {"src":"main","channel":"pi:started","payload":{"chatId":"chat-1","cwd":"<REPO>","worktree":null,"sessionFile":null}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-1","command":"get_state","success":true,"data":{"model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}}}
+E {"src":"main","channel":"pi:ready","payload":{"chatId":"chat-1","model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-2","command":"get_state","success":true,"data":{"model":{"provider":"char","id":"char-1","name":"Char One"},"thinkingLevel":"off","isStreaming":false,"sessionFile":"/char/session.jsonl","messageCount":0}}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-3","command":"get_available_models","success":true,"data":{"models":[{"provider":"char","id":"char-1","name":"Char One"}]}}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"ui-4","command":"get_available_thinking_levels","success":true,"data":null}}}
+E {"src":"drive","i":0,"do":"send","sent":true}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"response","id":"drv-1","command":"prompt","success":true,"data":null}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"agent_start"}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"extension_ui_request","id":"ui-n","method":"notify","message":"Heads up","notifyType":"info"}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"extension_ui_request","id":"ui-s","method":"setStatus","statusKey":"permission-mode","statusText":"ask-edits"}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"extension_ui_request","id":"ui-1","method":"select","title":"Pick one","options":["Alpha","Beta"]}}}
+E {"src":"drive","i":1,"do":"waitEmit","matched":true}
+E {"src":"main","channel":"pi:uiResolved","payload":{"chatId":"chat-1","id":"ui-1","by":"phone"}}
+E {"src":"drive","i":2,"do":"answerUi","accepted":true}
+E {"src":"drive","i":3,"do":"answerUi","accepted":false}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"extension_ui_request","id":"ui-2","method":"confirm","title":"Continue?","message":"Tool call 40 reached"}}}
+E {"src":"drive","i":4,"do":"waitEmit","matched":true}
+E {"src":"main","channel":"pi:uiResolved","payload":{"chatId":"chat-1","id":"ui-2","by":"desktop"}}
+E {"src":"drive","i":5,"do":"answerUi","accepted":true}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"agent_end","messages":[]}}}
+E {"src":"main","channel":"pi:record","payload":{"chatId":"chat-1","record":{"type":"agent_settled"}}}
+E {"src":"drive","i":6,"do":"waitEmit","matched":true}
+P1 {"seq":1,"dir":"meta","argv":["--mode","rpc","-e","<APP>/src/pi-extension/crust-context.ts","-e","<APP>/src/pi-extension/crust-guard.ts","-e","<APP>/src/pi-extension/advisor.ts"],"cwd":"<REPO>","env":{"PI_CRUST_TOOL_CHECKIN":"40","PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+P1 {"seq":2,"dir":"in","data":{"id":"ui-1","type":"get_state"}}
+P1 {"seq":3,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-1\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P1 {"seq":4,"dir":"in","data":{"id":"__ready_probe__","type":"get_state"}}
+P1 {"seq":5,"dir":"out","data":"{\"type\":\"response\",\"id\":\"__ready_probe__\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P1 {"seq":6,"dir":"in","data":{"id":"ui-2","type":"get_state"}}
+P1 {"seq":7,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-2\",\"command\":\"get_state\",\"success\":true,\"data\":{\"model\":{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"},\"thinkingLevel\":\"off\",\"isStreaming\":false,\"sessionFile\":\"/char/session.jsonl\",\"messageCount\":0}}\n"}
+P1 {"seq":8,"dir":"in","data":{"id":"ui-3","type":"get_available_models"}}
+P1 {"seq":9,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-3\",\"command\":\"get_available_models\",\"success\":true,\"data\":{\"models\":[{\"provider\":\"char\",\"id\":\"char-1\",\"name\":\"Char One\"}]}}\n"}
+P1 {"seq":10,"dir":"in","data":{"id":"ui-4","type":"get_available_thinking_levels"}}
+P1 {"seq":11,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-4\",\"command\":\"get_available_thinking_levels\",\"success\":true,\"data\":null}\n"}
+P1 {"seq":12,"dir":"in","data":{"id":"drv-1","type":"prompt","message":"Ask me things"}}
+P1 {"seq":13,"dir":"out","data":"{\"type\":\"response\",\"id\":\"drv-1\",\"command\":\"prompt\",\"success\":true,\"data\":null}\n"}
+P1 {"seq":14,"dir":"out","data":"{\"type\":\"agent_start\"}\n"}
+P1 {"seq":15,"dir":"out","data":"{\"type\":\"extension_ui_request\",\"id\":\"ui-n\",\"method\":\"notify\",\"message\":\"Heads up\",\"notifyType\":\"info\"}\n"}
+P1 {"seq":16,"dir":"out","data":"{\"type\":\"extension_ui_request\",\"id\":\"ui-s\",\"method\":\"setStatus\",\"statusKey\":\"permission-mode\",\"statusText\":\"ask-edits\"}\n"}
+P1 {"seq":17,"dir":"out","data":"{\"type\":\"extension_ui_request\",\"id\":\"ui-1\",\"method\":\"select\",\"title\":\"Pick one\",\"options\":[\"Alpha\",\"Beta\"]}\n"}
+P1 {"seq":18,"dir":"in","data":{"type":"extension_ui_response","id":"ui-1","value":"Beta"}}
+P1 {"seq":19,"dir":"out","data":"{\"type\":\"extension_ui_request\",\"id\":\"ui-2\",\"method\":\"confirm\",\"title\":\"Continue?\",\"message\":\"Tool call 40 reached\"}\n"}
+P1 {"seq":20,"dir":"in","data":{"type":"extension_ui_response","id":"ui-2","confirmed":true}}
+P1 {"seq":21,"dir":"out","data":"{\"type\":\"agent_end\",\"messages\":[]}\n"}
+P1 {"seq":22,"dir":"out","data":"{\"type\":\"agent_settled\"}\n"}
+P1 {"seq":23,"dir":"meta","stdinClosed":true}

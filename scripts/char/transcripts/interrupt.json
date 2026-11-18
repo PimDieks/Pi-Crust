@@ -1,0 +1,163 @@
+{
+	"name": "interrupt",
+	"description": "Stop mid-run with a queue: clear_queue then abort, held messages, aborted turn end.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "prompt",
+				"id": "drv-1"
+			},
+			"emit": [
+				{
+					"type": "agent_start"
+				},
+				{
+					"type": "message_start",
+					"message": {
+						"role": "user",
+						"content": [
+							{
+								"type": "text",
+								"text": "Long job"
+							}
+						]
+					}
+				},
+				{
+					"type": "message_end",
+					"message": {
+						"role": "user",
+						"content": [
+							{
+								"type": "text",
+								"text": "Long job"
+							}
+						]
+					}
+				},
+				{
+					"type": "message_start",
+					"message": {
+						"role": "assistant",
+						"content": [],
+						"stopReason": "stop"
+					}
+				},
+				{
+					"type": "message_update",
+					"assistantMessageEvent": {
+						"type": "text_delta",
+						"contentIndex": 0,
+						"delta": "Working"
+					}
+				},
+				{
+					"type": "queue_update",
+					"steering": [
+						"steer me"
+					],
+					"followUp": [
+						"later"
+					]
+				}
+			]
+		},
+		{
+			"on": {
+				"type": "clear_queue"
+			},
+			"data": {
+				"steering": [
+					"steer me"
+				],
+				"followUp": [
+					"later"
+				]
+			},
+			"emit": [
+				{
+					"type": "queue_update",
+					"steering": [],
+					"followUp": []
+				}
+			]
+		},
+		{
+			"on": {
+				"type": "abort"
+			},
+			"emit": [
+				{
+					"type": "message_end",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "Working"
+							}
+						],
+						"stopReason": "aborted"
+					}
+				},
+				{
+					"type": "agent_end",
+					"messages": []
+				},
+				{
+					"type": "agent_settled"
+				}
+			]
+		}
+	],
+	"drive": [
+		{
+			"do": "send",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "Long job"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:record",
+				"payload.record.type": "queue_update"
+			}
+		},
+		{
+			"do": "stop"
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:record",
+				"payload.record.type": "agent_settled"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 500
+		}
+	]
+}

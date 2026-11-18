@@ -1,0 +1,142 @@
+{
+	"name": "error-exit",
+	"description": "A model error, stderr, exit code 3, a restart, then a main-side request that dies with the process (exit 4).",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "prompt"
+			},
+			"emit": [
+				{
+					"type": "agent_start"
+				},
+				{
+					"type": "message_start",
+					"message": {
+						"role": "user",
+						"content": [
+							{
+								"type": "text",
+								"text": "Fail please"
+							}
+						]
+					}
+				},
+				{
+					"type": "message_end",
+					"message": {
+						"role": "user",
+						"content": [
+							{
+								"type": "text",
+								"text": "Fail please"
+							}
+						]
+					}
+				},
+				{
+					"type": "message_start",
+					"message": {
+						"role": "assistant",
+						"content": [],
+						"stopReason": "stop"
+					}
+				},
+				{
+					"stderr": "char: simulated crash\n"
+				},
+				{
+					"type": "message_end",
+					"message": {
+						"role": "assistant",
+						"content": [],
+						"stopReason": "error",
+						"errorMessage": "Model exploded"
+					}
+				},
+				{
+					"type": "agent_end",
+					"messages": []
+				},
+				{
+					"exit": 3
+				}
+			]
+		},
+		{
+			"on": {
+				"type": "get_session_stats"
+			},
+			"respond": false,
+			"emit": [
+				{
+					"delay": 50
+				},
+				{
+					"stderr": "char: dying\n"
+				},
+				{
+					"exit": 4
+				}
+			]
+		}
+	],
+	"drive": [
+		{
+			"do": "send",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "Fail please"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:exit"
+			}
+		},
+		{
+			"do": "restart"
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:ready"
+			}
+		},
+		{
+			"do": "settle",
+			"ms": 800
+		},
+		{
+			"do": "request",
+			"type": "get_session_stats"
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:exit"
+			}
+		}
+	]
+}

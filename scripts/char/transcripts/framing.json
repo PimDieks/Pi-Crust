@@ -1,0 +1,76 @@
+{
+	"name": "framing",
+	"description": "Line framing: a record split across writes, a CRLF line, a blank line, an unparseable line.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "prompt"
+			},
+			"emit": [
+				{
+					"raw": "{\"type\""
+				},
+				{
+					"delay": 60
+				},
+				{
+					"raw": ":\"agent_start\"}\n"
+				},
+				{
+					"raw": "{\"type\":\"message_start\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"split\"}]}}\r\n"
+				},
+				{
+					"raw": "\n"
+				},
+				{
+					"raw": "{not json\n"
+				},
+				{
+					"raw": "{\"type\":\"message_end\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"split\"}]}}\n{\"type\":\"agent_end\",\"messages\":[]}\n"
+				},
+				{
+					"delay": 60
+				},
+				{
+					"raw": "{\"type\":\"agent_settled\"}\n"
+				}
+			]
+		}
+	],
+	"drive": [
+		{
+			"do": "send",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "split"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:record",
+				"payload.record.type": "agent_settled"
+			}
+		}
+	]
+}

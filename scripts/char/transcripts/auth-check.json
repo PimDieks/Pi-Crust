@@ -1,0 +1,52 @@
+{
+	"name": "auth-check",
+	"description": "Subscriptions: `pi auth check` arguments (logged by the stand-in), and login/logout refusing without Pi's package folder.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [],
+	"drive": [
+		{
+			"do": "ipc",
+			"channel": "subs:status",
+			"summary": "subs-status"
+		},
+		{
+			"do": "ipc",
+			"channel": "subs:login",
+			"args": [
+				"anthropic"
+			]
+		},
+		{
+			"do": "ipc",
+			"channel": "subs:logout",
+			"args": [
+				"anthropic"
+			]
+		},
+		{
+			"do": "ipc",
+			"channel": "subs:login",
+			"args": [
+				"nonsense"
+			]
+		}
+	]
+}

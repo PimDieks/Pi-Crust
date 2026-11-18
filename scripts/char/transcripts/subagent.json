@@ -1,0 +1,215 @@
+{
+	"name": "subagent",
+	"description": "A subagent tool call: streamed details.results, then the final result.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "prompt"
+			},
+			"emit": [
+				{
+					"type": "agent_start"
+				},
+				{
+					"type": "message_start",
+					"message": {
+						"role": "user",
+						"content": [
+							{
+								"type": "text",
+								"text": "Use a subagent"
+							}
+						]
+					}
+				},
+				{
+					"type": "message_end",
+					"message": {
+						"role": "user",
+						"content": [
+							{
+								"type": "text",
+								"text": "Use a subagent"
+							}
+						]
+					}
+				},
+				{
+					"type": "message_start",
+					"message": {
+						"role": "assistant",
+						"content": [],
+						"stopReason": "stop"
+					}
+				},
+				{
+					"type": "tool_execution_start",
+					"toolCallId": "tc-s",
+					"toolName": "subagent",
+					"args": {
+						"agent": "scout",
+						"task": "Look around"
+					}
+				},
+				{
+					"type": "tool_execution_update",
+					"toolCallId": "tc-s",
+					"toolName": "subagent",
+					"args": {
+						"agent": "scout",
+						"task": "Look around"
+					},
+					"partialResult": {
+						"details": {
+							"mode": "single",
+							"results": [
+								{
+									"agent": "scout",
+									"task": "Look around",
+									"model": "char/char-1",
+									"exitCode": -1,
+									"stopReason": "toolUse",
+									"usage": {
+										"turns": 1
+									},
+									"messages": [
+										{
+											"role": "assistant",
+											"content": [
+												{
+													"type": "toolCall",
+													"id": "s-1",
+													"name": "read",
+													"arguments": {
+														"path": "a.txt"
+													}
+												}
+											],
+											"stopReason": "toolUse"
+										}
+									]
+								}
+							]
+						}
+					}
+				},
+				{
+					"type": "tool_execution_end",
+					"toolCallId": "tc-s",
+					"toolName": "subagent",
+					"args": {
+						"agent": "scout",
+						"task": "Look around"
+					},
+					"result": {
+						"content": [
+							{
+								"type": "text",
+								"text": "Found a.txt."
+							}
+						],
+						"details": {
+							"mode": "single",
+							"results": [
+								{
+									"agent": "scout",
+									"task": "Look around",
+									"model": "char/char-1",
+									"exitCode": 0,
+									"stopReason": "stop",
+									"usage": {
+										"turns": 2
+									},
+									"messages": [
+										{
+											"role": "assistant",
+											"content": [
+												{
+													"type": "toolCall",
+													"id": "s-1",
+													"name": "read",
+													"arguments": {
+														"path": "a.txt"
+													}
+												}
+											],
+											"stopReason": "toolUse"
+										},
+										{
+											"role": "assistant",
+											"content": [
+												{
+													"type": "text",
+													"text": "Found a.txt."
+												}
+											],
+											"stopReason": "stop"
+										}
+									]
+								}
+							]
+						}
+					},
+					"isError": false,
+					"durationMs": 400
+				},
+				{
+					"type": "message_end",
+					"message": {
+						"role": "assistant",
+						"content": [
+							{
+								"type": "text",
+								"text": "The scout found a.txt."
+							}
+						],
+						"stopReason": "stop"
+					}
+				},
+				{
+					"type": "agent_end",
+					"messages": []
+				},
+				{
+					"type": "agent_settled"
+				}
+			]
+		}
+	],
+	"drive": [
+		{
+			"do": "send",
+			"record": {
+				"id": "drv-1",
+				"type": "prompt",
+				"message": "Use a subagent"
+			}
+		},
+		{
+			"do": "waitEmit",
+			"match": {
+				"channel": "pi:record",
+				"payload.record.type": "agent_settled"
+			}
+		}
+	]
+}
