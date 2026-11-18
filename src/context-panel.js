@@ -304,6 +304,10 @@ function positionContextPanel() {
 	panel.style.maxWidth = `${Math.max(220, pane.width - 16)}px`;
 	const width = panel.offsetWidth;
 	panel.style.top = `${r.bottom + 6}px`;
+	// Pi's question is docked in the chat pane and needs an answer: the panel ends above its top edge instead of covering it.
+	const ask = $("#ask");
+	const ar = ask && !ask.hidden ? ask.getBoundingClientRect() : null;
+	panel.style.maxHeight = ar?.height ? `${Math.max(120, Math.min(innerHeight - 70, ar.top - 8 - (r.bottom + 6)))}px` : "";
 	panel.style.left = `${Math.max(pane.left + 8, Math.min(r.left, pane.right - width - 8))}px`;
 }
 
@@ -340,3 +344,5 @@ document.addEventListener("keydown", (e) => {
 	}
 });
 window.addEventListener("resize", () => ctxOpen && positionContextPanel());
+// The question appears, grows or goes away while the panel is open (it is closed when a new one shows; this covers the rest).
+if ($("#ask")) new ResizeObserver(() => ctxOpen && positionContextPanel()).observe($("#ask"));

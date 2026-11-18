@@ -4,7 +4,8 @@
 // Each case opens the overlay with stubbed state (nothing is sent to Pi, nothing is switched), alone and then on top of
 // every lower overlay. The test is document.elementFromPoint at the centre of each control: it must return the control
 // or a child of it. A higher overlay must never be hidden by a lower one; two overlays that are not blocking
-// (menus, popovers, toasts, Pi's question) must not cover each other's controls either.
+// (menus, popovers, toasts, Pi's question) must not cover each other's controls either. Pi's question is never covered by the
+// context panel (it ends above the question). The slash and @ menus may cover it while the user types, until Esc (step 4b).
 //
 // Not cases: the Figma pill and the Figma panel (#figma-pill, #figma-panel) sit in the page flow of the Design tab, not
 // over it, so nothing can cover them. Same-level pairs are skipped on purpose, because they never open together:
@@ -246,9 +247,9 @@ selftestSteps.push(async ({ snap, wait }) => {
 		await second.open();
 		await settle(second);
 		const topRows = vis(top.root()) ? reach(top) : [];
-		// The input's own menus (slash, @) open upward over the question docked above it on purpose (Esc closes them), and the
-		// context panel opened by the user can sit over it: a question that appears while the panel is open closes it (the late case).
-		const ownMenu = !late && lo.name === "ask" && ["slash-menu", "mention-menu", "context-panel"].includes(hi.name);
+		// The input's own menus (slash, @) open upward over the question docked above it while the user types (step 4b: Esc closes
+		// them and the question is reachable again). The context panel is never allowed over it: it ends above the question.
+		const ownMenu = !late && lo.name === "ask" && ["slash-menu", "mention-menu"].includes(hi.name);
 		const underRows = (late || !BLOCKING.has(hi.layer)) && !ownMenu && vis(under.root()) ? reach(under) : [];
 		report(`${first.name} then ${second.name}`, theme, [...topRows, ...underRows], vis(top.root()) ? "" : " top not visible");
 		if (shot) await snap(`layers-${first.name}-${second.name}-${theme}`);
@@ -307,11 +308,29 @@ selftestSteps.push(async ({ snap, wait }) => {
 		for (const lo of OVERLAYS)
 			for (const hi of OVERLAYS) {
 				if (level(hi) <= level(lo)) continue;
-				const shot = (hi.name === "confirm" && lo.name === "repo-picker") || (hi.name === "toast" && ["repo-picker", "ask"].includes(lo.name));
+				const shot = (hi.name === "context-panel" && lo.name === "ask") || (hi.name === "confirm" && lo.name === "repo-picker") || (hi.name === "toast" && ["repo-picker", "ask"].includes(lo.name));
 				await together(lo, hi, theme, shot);
 			}
 		// 4. A question that appears while a popover is open must end up reachable (the input's own menus excepted: Esc closes them).
 		for (const lo of OVERLAYS.filter((o) => o.layer === "popover" && !["slash-menu", "mention-menu"].includes(o.name))) await together(lo, byName("ask"), theme, false, true);
+		// 4b. The slash and @ menus belong to the message box and may cover the answer buttons while the user types. Esc must close
+		//     them, and then every answer button is reachable again.
+		for (const menu of [byName("slash-menu"), byName("mention-menu")]) {
+			const q = byName("ask");
+			await q.open();
+			await settle(q);
+			await menu.open();
+			await settle(menu);
+			const shown = vis(menu.root());
+			const wasCovered = shown ? reach(q).filter((r) => !r.ok).length : 0;
+			$("#input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+			await wait(250);
+			const closed = !vis(menu.root());
+			console.error(`SELFTEST layers ${menu.name} over the question while typing (${theme}): menu shown=${shown}, answer controls under it=${wasCovered}`);
+			report(`${menu.name} closed by Esc, question reachable`, theme, reach(q), shown && closed ? "" : ` menu shown=${shown} closed=${closed}`);
+			await shut(menu);
+			await shut(q);
+		}
 		// 5. Same level, open together: the toast column and the update card.
 		await together(byName("toast"), byName("update-card"), theme, false);
 	}
