@@ -368,6 +368,7 @@ function register(ctx) {
 		return p;
 	}
 	ipcMain.handle("subs:status", () => status());
+	ctx.subsStatus = { status, invalidate: invalidateStatus }; // for health-main.js: one sign-in check, not two
 	async function computeStatus() {
 		const rows = await Promise.all(
 			SUBSCRIPTIONS.map(async (s) => ({ ...s, ...(s.kind === "local" ? await ollamaRow() : await authCheck(s)) })),

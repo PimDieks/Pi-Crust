@@ -192,6 +192,13 @@ contextBridge.exposeInMainWorld("crust", {
 		ollamaSync: () => ipcRenderer.invoke("subs:ollama-sync"),
 		ollamaRemove: () => ipcRenderer.invoke("subs:ollama-remove"),
 	},
+	health: {
+		check: (o) => ipcRenderer.invoke("health:check", o),
+		recheck: (o) => ipcRenderer.invoke("health:recheck", o),
+		onboarding: () => ipcRenderer.invoke("health:onboarding"),
+		onboardingSet: (key, value) => ipcRenderer.invoke("health:onboardingSet", key, value),
+		stubSet: (s) => ipcRenderer.invoke("health:stubSet", s), // selftest only
+	},
 	remote: {
 		status: () => ipcRenderer.invoke("remote:status"),
 		setEnabled: (on) => ipcRenderer.invoke("remote:setEnabled", on),

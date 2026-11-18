@@ -1663,6 +1663,8 @@ const ctx = {
 	},
 	run,
 	findPi,
+	devUrl: DEV_URL,
+	figmaStatus: () => figmaMain.status(),
 	insideRepo,
 	readSettings,
 	writeSettings,
@@ -1688,6 +1690,7 @@ require("./worktree-main").register(ctx);
 require("./voice-main").register(ctx);
 require("./browser-tools-main").register(ctx);
 require("./subscriptions-main").register(ctx);
+require("./health-main").register(ctx);
 require("./remote-main").register(ctx);
 require("./update-main").register(ctx);
 require("./mendix-main").register(ctx);
