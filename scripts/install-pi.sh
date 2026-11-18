@@ -33,7 +33,7 @@ command_of() {
 	case "$1" in
 		node) echo "brew install node" ;;
 		git) echo "brew install git" ;;
-		pi) echo "npm install -g @earendil-works/pi-coding-agent@1.5.2 --allow-scripts=koffi,protobufjs,@google/genai" ;;
+		pi) echo "npm install -g @earendil-works/pi-coding-agent@1.4.0 --allow-scripts=koffi,protobufjs,@google/genai" ;;
 	esac
 }
 

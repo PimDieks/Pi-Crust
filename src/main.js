@@ -129,7 +129,7 @@ const findPi = makeFindPi(locatePi);
 // Windows: PI_CRUST_PI (cli.js, pi.cmd or pi.exe), npm's global folder (%APPDATA%\npm), nvm-windows (the active
 // %NVM_SYMLINK%, then %NVM_HOME%\vX newest first), then PATH. Never through the pi.cmd shim (a .cmd only runs in a
 // shell, which breaks stdio and arguments): its CLI script runs with the node.exe next to it, else the one on PATH.
-const PI_PACKAGES = [path.join(...require("./pi-package").PI_PACKAGE.name.split("/"))]; // the deprecated @mariozechner scope is no longer looked for (see pi-package.js)
+const PI_PACKAGES = [require("./pi-package").PI_PACKAGE.name, ...require("./pi-package").PI_OLD_NAMES].map((n) => path.join(...n.split("/"))); // current scope first; the deprecated one is still found (see pi-package.js)
 function onPath(name, env = process.env) {
 	for (const dir of String(env[pathKey(env)] || "").split(path.delimiter)) {
 		if (!dir) continue;

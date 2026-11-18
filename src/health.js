@@ -23,7 +23,7 @@
 			"all-ready",
 			{ figma: "ready" },
 			[
-				"pi|ready|Pi 1.5.2 is installed.|-",
+				"pi|ready|Pi 1.4.0 is installed.|-",
 				"auth|ready|Signed in to Claude.|-",
 				"git|ready|Git 2.47.1 is installed.|-",
 				"project|ready|Working in /stub/site.|-",
@@ -47,7 +47,7 @@
 			"env-key-and-plain-folder",
 			{ auth: "env", project: "notgit" },
 			[
-				"pi|ready|Pi 1.5.2 is installed.|-",
+				"pi|ready|Pi 1.4.0 is installed.|-",
 				"auth|ready|Using an API key from your computer's settings.|-",
 				"git|ready|Git 2.47.1 is installed.|-",
 				"project|todo|That folder isn't a Git project yet. Make it one?|Make it a Git project",

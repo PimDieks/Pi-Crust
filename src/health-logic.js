@@ -9,9 +9,11 @@
 //   needs:  what an install would have to add, in install order: a subset of ["node", "git", "pi"] (see install-pi script).
 "use strict";
 
-// Floors: Pi is the version this release is tested with (pi-package.js), Node as npm lists it for Pi 1.5.x.
-const MIN_PI = require("./pi-package").PI_PACKAGE.version; // the version this release is tested with: older Pi gets the "Update Pi" row
-const PI_VERSION_OK = MIN_PI; // what the stub reports for a current Pi
+// Floors: driven by what the app needs, not by the install pin in pi-package.js (existing users on an older Pi see nothing).
+// MIN_PI: the first Pi with `pi auth check`, which the sign-in row calls; Pi 0.73 lacks it. Must stay at or below the oldest Pi in use (1.4.0).
+const MIN_PI = "1.0.0";
+const PI_VERSION_OK = "1.4.0"; // what the stub reports for a current Pi
+// MIN_NODE: what npm lists for the Pi version we install (engines of 1.4.0).
 const MIN_NODE = "22.19.0";
 
 const REQUIRED = ["pi", "auth", "git", "project"];
