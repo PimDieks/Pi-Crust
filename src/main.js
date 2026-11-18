@@ -23,7 +23,7 @@ function repoFromArgs(argv) {
 	return p && fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.resolve(p) : null;
 }
 const DEV_URL = process.env.PI_CRUST_URL || "http://localhost:3000/";
-const SELFTEST = process.env.PI_CRUST_SELFTEST === "1";
+const SELFTEST = !app.isPackaged && process.env.PI_CRUST_SELFTEST === "1"; // never in a packaged app: a stray variable must not switch off updates or the crash dialog
 const START_HIDDEN = process.env.PI_CRUST_HIDDEN === "1"; // set by the login item: start in the background
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const IGNORED = new Set([".git", "node_modules", "dist", ".turbo", ".next", "coverage", ".DS_Store", "__generated__"]);
@@ -905,7 +905,7 @@ ipcMain.handle("browser:pick", async (_e, opts) => {
 
 // Figma desktop picker: current selection via the Figma desktop MCP server.
 // File link and status IPC live in figma-main.js (per-project link, falls back to the old app-wide value and the env var).
-const figmaMain = require("./figma-main").register({ ipcMain, readSettings, writeSettings, get repo() { return REPO; } });
+const figmaMain = require("./figma-main").register({ ipcMain, readSettings, writeSettings, selftest: SELFTEST, get repo() { return REPO; } });
 const figmaFile = () => require("./figma-main").legacyFile(figmaMain.file());
 const figmaError = (e) => require("./figma-status").figmaError(e);
 ipcMain.handle("figma:pickSelection", async () => {

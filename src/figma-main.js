@@ -3,11 +3,23 @@
 // No timer and no probe at startup: the renderer asks (Design tab opened, panel opened, Test connection, after a failed Figma action).
 "use strict";
 
-// File link for a repo: this project's entry first, then the old app-wide value, then the env var.
+const fs = require("fs");
+
+// Per-project key: the real path where the folder exists, lower-cased on Windows, so C:\X and c:\x share one link.
+function repoKey(repo, platform = process.platform) {
+	if (!repo) return repo;
+	let k = String(repo);
+	try {
+		k = fs.realpathSync(k);
+	} catch {}
+	return platform === "win32" ? k.toLowerCase() : k;
+}
+
+// File link for a repo: this project's entry first (normalised key, then the old raw key), then the old app-wide value, then the env var.
 // Returns { key, name, scope: "project" | "app" | "env" | null }.
 function fileFor(settings, repo, env = process.env) {
 	const s = settings || {};
-	const p = repo && s.figmaFiles && s.figmaFiles[repo];
+	const p = repo && s.figmaFiles && (s.figmaFiles[repoKey(repo)] || s.figmaFiles[repo]);
 	if (p && p.key) return { key: p.key, name: p.name || "", scope: "project" };
 	if (s.figmaFileKey) return { key: s.figmaFileKey, name: s.figmaFileName || "", scope: "app" };
 	if (env.PI_CRUST_FIGMA_FILE_KEY) return { key: env.PI_CRUST_FIGMA_FILE_KEY, name: env.PI_CRUST_FIGMA_FILE_NAME || "file", scope: "env" };
@@ -20,12 +32,17 @@ const legacyFile = (f) => ({ key: f.key, name: f.name });
 function makeApi({ readSettings, writeSettings, getRepo, probe, checkProcess, env = process.env }) {
 	const st = require("./figma-status");
 	const parseFigmaUrl = (t) => require("./figma-selection").parseFigmaUrl(t);
+	let inflight = null; // one probe at a time: callers share the running one
 	const file = () => fileFor(readSettings(), getRepo(), env);
 	const fileLink = () => {
 		const f = file();
 		return { set: !!f.key, name: f.name, scope: f.scope };
 	};
-	async function run() {
+	function run() {
+		if (!inflight) inflight = runOnce().finally(() => (inflight = null));
+		return inflight;
+	}
+	async function runOnce() {
 		const raw = await probe();
 		// The process check only matters when the port is closed.
 		const proc = raw && raw.stage === "connect" ? await checkProcess() : {};
@@ -41,19 +58,25 @@ function makeApi({ readSettings, writeSettings, getRepo, probe, checkProcess, en
 			return { ...result, checks: st.checks(raw) };
 		},
 		setFile: (link) => {
-			const f = parseFigmaUrl(String(link || ""));
+			const text = String(link || "").trim();
+			const f = text.length <= 500 && /^https:\/\/(?:www\.)?figma\.com\//.test(text) ? parseFigmaUrl(text) : null;
 			if (!f) return { ok: false, error: "That doesn't look like a Figma link. Paste a link to a Figma file." };
 			const repo = getRepo();
-			if (repo) writeSettings({ figmaFiles: { ...(readSettings().figmaFiles || {}), [repo]: { key: f.key, name: f.name } } });
+			if (repo) {
+				const files = { ...(readSettings().figmaFiles || {}) };
+				delete files[repo]; // an entry under the old raw key moves to the normalised one
+				files[repoKey(repo)] = { key: f.key, name: f.name };
+				writeSettings({ figmaFiles: files });
+			}
 			else writeSettings({ figmaFileKey: f.key, figmaFileName: f.name });
 			return { ok: true, key: f.key, name: f.name, fileLink: fileLink() };
 		},
 		// Old channel: parse a pasted text, store per project, return { key, name } or null.
 		setFileFromText: (text) => {
-			const f = parseFigmaUrl(String(text || ""));
-			if (!f) return null;
-			const r = self.setFile(text);
-			return r.ok ? { key: f.key, name: f.name } : null;
+			// A pasted text may hold the link among other words: take the first https figma link in it.
+			const m = /https:\/\/(?:www\.)?figma\.com\/\S+/.exec(String(text || ""));
+			const r = m ? self.setFile(m[0]) : { ok: false };
+			return r.ok ? { key: r.key, name: r.name } : null;
 		},
 	};
 	return self;
@@ -64,10 +87,10 @@ const HELP_URL = "https://developers.figma.com/docs/figma-mcp-server/local-serve
 let api;
 function register(ctx) {
 	const { ipcMain } = ctx;
-	// Selftest only (PI_CRUST_SELFTEST=1 and PI_CRUST_FIGMA_STUB=<port>, with PI_CRUST_FIGMA_MCP_URL pointing at that port):
+	// Selftest only (ctx.selftest, never true in a packaged app; PI_CRUST_SELFTEST=1 and PI_CRUST_FIGMA_STUB=<port>, with PI_CRUST_FIGMA_MCP_URL pointing at that port):
 	// the stub Figma server runs in this process, the file link lives in memory (never touches the real settings.json),
 	// and the process check answers what the test says.
-	const stubPort = process.env.PI_CRUST_SELFTEST === "1" && Number(process.env.PI_CRUST_FIGMA_STUB);
+	const stubPort = ctx.selftest === true && Number(process.env.PI_CRUST_FIGMA_STUB);
 	let mem = {};
 	let stub = null;
 	let procFacts = {};
@@ -100,4 +123,4 @@ function register(ctx) {
 	return api;
 }
 
-module.exports = { HELP_URL, register, makeApi, fileFor, legacyFile };
+module.exports = { repoKey, HELP_URL, register, makeApi, fileFor, legacyFile };
