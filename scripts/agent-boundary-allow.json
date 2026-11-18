@@ -30,6 +30,36 @@
 			"file": "src/onboarding.js",
 			"rule": "pi-package",
 			"reason": "Selftest expectations for the install confirmation and the manual fallback text, which quote the package name the user sees."
+		},
+		{
+			"file": "src/main.js",
+			"rule": "pi-folder",
+			"reason": "permissionOldCopy: a read-only look in Pi's extensions folder for an older copy of the permission extension, to tell the user once (added by the permission-modes work). Phase 7 can make it the Pi adapter's onAppStart hint."
+		},
+		{
+			"file": "src/permission-logic.js",
+			"rule": "pi-folder",
+			"reason": "Logic shared with the permission-modes extension: protects the .pi folder from edits and finds old extension copies in Pi's agent folder. Pi-specific by nature."
+		},
+		{
+			"file": "src/permission-logic.js",
+			"rule": "pi-status",
+			"reason": "The permission-mode status key of the permission-modes extension, shared with the extension and the mode selector."
+		},
+		{
+			"file": "src/palette.js",
+			"rule": "pi-folder",
+			"reason": "User-facing text of the old-copy notice (names the folder the user must look in)."
+		},
+		{
+			"file": "src/layers.js",
+			"rule": "pi-folder",
+			"reason": "Selftest case that shows the old-copy notice text."
+		},
+		{
+			"file": "src/renderer.js",
+			"rule": "pi-folder",
+			"reason": "User-facing text of the old-copy notice (names the folder the user must look in)."
 		}
 	]
 }

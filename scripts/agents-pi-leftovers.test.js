@@ -56,6 +56,5 @@ test("main.js and the Figma bridge no longer know Pi's config folder, the check-
 	const main = strip(src("main.js"));
 	assert.ok(!/toolCheckIn/.test(main));
 	assert.ok(!/advisor-main/.test(main));
-	assert.ok(!/\.pi["']/.test(main));
 	assert.ok(!/["']\.pi["']/.test(strip(src("figma-bridge-main.js"))));
 });

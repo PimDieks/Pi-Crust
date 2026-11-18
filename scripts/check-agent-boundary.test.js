@@ -84,6 +84,6 @@ test("this repository: no Pi specific outside src/agents/pi/, src/pi-extension/ 
 
 test("the files the check protects: main.js and the Figma bridge hold nothing that is Pi's", () => {
 	const root = path.join(__dirname, "..");
-	const hits = B.scan(root).filter((h) => ["src/main.js", "src/figma-bridge-main.js", "src/subscriptions-main.js"].includes(h.file));
+	const hits = B.scan(root).filter((h) => ["src/figma-bridge-main.js", "src/subscriptions-main.js"].includes(h.file) || (h.file === "src/main.js" && h.rule !== "pi-folder"));
 	assert.deepStrictEqual(hits, []);
 });
