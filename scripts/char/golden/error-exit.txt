@@ -60,7 +60,7 @@ P2 {"seq":9,"dir":"out","data":"{\"type\":\"response\",\"id\":\"ui-7\",\"command
 P2 {"seq":10,"dir":"in","data":{"id":"crust-main-1","type":"get_session_stats"}}
 P2 {"seq":11,"dir":"err","data":"char: dying\n"}
 P2 {"seq":12,"dir":"meta","exit":4}
-H1 {"seq":1,"dir":"meta","argv":["--version"],"cwd":"C:\\Users\\pim_d","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
-H2 {"seq":1,"dir":"meta","argv":["auth","check","--provider","anthropic","--json","--no-refresh"],"cwd":"C:\\Users\\pim_d","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
-H3 {"seq":1,"dir":"meta","argv":["auth","check","--provider","github-copilot","--json","--no-refresh"],"cwd":"C:\\Users\\pim_d","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
-H4 {"seq":1,"dir":"meta","argv":["auth","check","--provider","openai-codex","--json","--no-refresh"],"cwd":"C:\\Users\\pim_d","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+H1 {"seq":1,"dir":"meta","argv":["--version"],"cwd":"<HOME>","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+H2 {"seq":1,"dir":"meta","argv":["auth","check","--provider","anthropic","--json","--no-refresh"],"cwd":"<HOME>","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+H3 {"seq":1,"dir":"meta","argv":["auth","check","--provider","github-copilot","--json","--no-refresh"],"cwd":"<HOME>","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}
+H4 {"seq":1,"dir":"meta","argv":["auth","check","--provider","openai-codex","--json","--no-refresh"],"cwd":"<HOME>","env":{"PI_CRUST_TOOL_CHECKIN":null,"PI_CODING_AGENT_DIR":"<AGENT_DIR>"}}

@@ -52,3 +52,69 @@ test("buildCapture: stderr events are their own sequence, so cross-pipe order do
 	const c = buildCapture({ events: [ev("pi:exit", 3), ev("pi:record", 1), ev("pi:stderr", 2)], procs: [] }, []);
 	assert.notStrictEqual(a, c); // other events keep their order
 });
+
+test("the recorder plugin does nothing outside selftest mode, even with its env set", () => {
+	const fs = require("node:fs");
+	const os = require("node:os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "char-gate-"));
+	const saved = { out: process.env.PI_CRUST_CHAR_OUT, tr: process.env.PI_CRUST_CHAR_TRANSCRIPT };
+	process.env.PI_CRUST_CHAR_OUT = path.join(dir, "events.jsonl");
+	process.env.PI_CRUST_CHAR_TRANSCRIPT = path.join(dir, "missing.json"); // reading it would throw
+	try {
+		const taps = [];
+		const ctx = { selftest: false, addSendTap: (f) => taps.push(f) };
+		assert.doesNotThrow(() => require("./char/plugin/char-main").register(ctx));
+		assert.strictEqual(taps.length, 0);
+		assert.strictEqual(fs.existsSync(process.env.PI_CRUST_CHAR_OUT), false);
+	} finally {
+		if (saved.out === undefined) delete process.env.PI_CRUST_CHAR_OUT;
+		else process.env.PI_CRUST_CHAR_OUT = saved.out;
+		if (saved.tr === undefined) delete process.env.PI_CRUST_CHAR_TRANSCRIPT;
+		else process.env.PI_CRUST_CHAR_TRANSCRIPT = saved.tr;
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+test("a stale plugin copy in src/local/ is removed at the start of a run, other local files are not touched", () => {
+	const fs = require("node:fs");
+	const os = require("node:os");
+	const { removeStalePlugin, removePluginCopy, PLUGIN_FILES } = require("./char/run");
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "char-stale-"));
+	try {
+		const local = path.join(root, "local");
+		assert.strictEqual(removeStalePlugin(local), false); // no folder: nothing to do
+		fs.mkdirSync(local);
+		for (const f of PLUGIN_FILES) fs.writeFileSync(path.join(local, f), "// stale");
+		assert.strictEqual(removeStalePlugin(local), true);
+		assert.strictEqual(fs.existsSync(local), false, "the emptied folder goes too");
+		fs.mkdirSync(local);
+		fs.writeFileSync(path.join(local, PLUGIN_FILES[0]), "// stale");
+		fs.writeFileSync(path.join(local, "mine-main.js"), "// the user's own");
+		assert.strictEqual(removeStalePlugin(local), true);
+		assert.deepStrictEqual(fs.readdirSync(local), ["mine-main.js"]);
+		// the cleanup after a run: only the plugin files, the folder only when the run made it
+		for (const f of PLUGIN_FILES) fs.writeFileSync(path.join(local, f), "x");
+		removePluginCopy(local, false);
+		assert.deepStrictEqual(fs.readdirSync(local), ["mine-main.js"]);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+test("writeFixtures: files under the temp folder, <ENC:name> is the folder name Pi gives a working folder, mtimes are set", () => {
+	const fs = require("node:fs");
+	const os = require("node:os");
+	const { writeFixtures, encodeCwd } = require("./char/run");
+	const { sessionsDirFor } = require("../src/agents/pi/sessions");
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "char-fx-"));
+	try {
+		// the harness' encoding is the app's own (a change in Pi's folder naming must break the fixtures loudly)
+		assert.strictEqual(path.basename(sessionsDirFor(path.join(tmp, "repo"), "/h")), encodeCwd(path.join(tmp, "repo")));
+		writeFixtures([{ path: "home/sessions/<ENC:repo>/a.jsonl", content: "x", mtimeAgoSec: 600 }, { path: "plain.txt" }], tmp);
+		const f = path.join(tmp, "home", "sessions", encodeCwd(path.join(tmp, "repo")), "a.jsonl");
+		assert.strictEqual(fs.readFileSync(f, "utf8"), "x");
+		assert.ok(Date.now() - fs.statSync(f).mtimeMs > 590_000);
+		assert.strictEqual(fs.readFileSync(path.join(tmp, "plain.txt"), "utf8"), "");
+		assert.doesNotThrow(() => writeFixtures(undefined, tmp));
+	} finally {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	}
+});

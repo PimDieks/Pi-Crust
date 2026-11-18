@@ -1,5 +1,5 @@
 // Characterization recorder and driver (main process). TEST TOOL: scripts/char/run.js copies it to src/local/ (gitignored) for one
-// run and removes it afterwards. It does nothing unless PI_CRUST_CHAR_OUT is set.
+// run and removes it afterwards. It does nothing outside the app's selftest mode, and nothing unless PI_CRUST_CHAR_OUT is set.
 //  - Records every `pi:*` event the main process sends to the renderer (through the app's own send tap), in order.
 //  - Drives the scenario's `drive` list through the same ctx functions Remote uses (piSend, answerUi, stopChat, piRequest, restartChat).
 // Env: PI_CRUST_CHAR_OUT (events file, JSONL), PI_CRUST_CHAR_TRANSCRIPT (scenario json).
@@ -15,6 +15,7 @@ const sub = (v) => (typeof v === "string" ? v.replace("<TMP>", path.dirname(proc
 const get = (o, dotted) => dotted.split(".").reduce((v, k) => (v == null ? undefined : v[k]), o);
 
 function register(ctx) {
+	if (!ctx.selftest) return; // a leftover copy in src/local/ does nothing in a normal run
 	const outFile = process.env.PI_CRUST_CHAR_OUT;
 	if (!outFile) return;
 	const T = JSON.parse(fs.readFileSync(process.env.PI_CRUST_CHAR_TRANSCRIPT, "utf8"));
@@ -46,6 +47,8 @@ function register(ctx) {
 	const finished = new Promise((r) => (done = r));
 	ctx.ipcMain.handle("local:char-wait", () => finished);
 
+	const pids = {};
+	const savedEnv = {};
 	async function step(s) {
 		const chat = s.chat || readyChat;
 		switch (s.do) {
@@ -84,16 +87,56 @@ function register(ctx) {
 				const r = spawnSync("git", sub(s.args), { cwd: process.env.PI_CRUST_CWD, stdio: "ignore" });
 				return { status: r.status };
 			}
+			case "writeFile":
+				fs.mkdirSync(path.dirname(sub(s.path)), { recursive: true });
+				fs.writeFileSync(sub(s.path), s.content ?? "");
+				return { wrote: true };
+			case "rm":
+				fs.rmSync(sub(s.path), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+				return { removed: !fs.existsSync(sub(s.path)) };
+			case "pid": {
+				// Remember a chat's process id under a name, to check later that it is gone (killAllChats, repo switch).
+				const pid = ctx.chatInfo(chat)?.pid;
+				pids[s.as] = pid;
+				return { hadPid: typeof pid === "number" };
+			}
+			case "waitGone": {
+				const pid = pids[s.as];
+				let gone = false;
+				for (let t = 0; t < 9000 && !gone; t += 100) {
+					try {
+						process.kill(pid, 0);
+						await sleep(100);
+					} catch {
+						gone = true;
+					}
+				}
+				return { gone };
+			}
+			case "setEnv":
+				// Only for the app's own reads of the home folder after start-up (Electron needs the real one to start): put back by restoreEnv.
+				if (!(s.name in savedEnv)) savedEnv[s.name] = process.env[s.name];
+				process.env[s.name] = sub(s.value);
+				return { set: s.name };
+			case "restoreEnv":
+				for (const [k, v] of Object.entries(savedEnv)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+				return { restored: Object.keys(savedEnv).length };
 			case "unsetEnv":
 			delete process.env[s.name]; // "installing Pi while the app runs": the next search finds it
 			return { unset: s.name };
 		case "restart":
-				return { restarted: await ctx.restartChat(chat, s.file) };
+				try {
+					return { restarted: await ctx.restartChat(chat, s.file) };
+				} catch (e) {
+					return { restartThrew: String((e && e.message) || e) }; // a spawn that fails synchronously (Windows: a file that is not a program)
+				}
 			case "ipc": {
 				// Calls a handler the app registered with ipcMain.handle, as the renderer would.
 				const h = ctx.ipcMain._invokeHandlers && ctx.ipcMain._invokeHandlers.get(s.channel);
 				if (!h) return { error: "no handler" };
 				const r = await h({ sender: ctx.win && ctx.win.webContents }, ...sub(s.args || []));
+				// the session list: what the glue returns, without times and with file names only (the folder names carry the temp path)
+				if (s.summary === "sessions") return { sessions: (r || []).map((x) => [x.name, x.firstPrompt, x.cwd, x.branch, path.basename(x.path), typeof x.mtime === "number", typeof x.size === "number"]) };
 				if (s.summary === "subs-status") return { rows: (r.rows || []).filter((x) => x.kind === "oauth").map((x) => [x.id, x.status, x.detail]) };
 				return { result: r };
 			}

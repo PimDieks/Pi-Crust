@@ -114,6 +114,38 @@ function diffLines(a, b) {
 	return out;
 }
 
+// The recorder plugin is a test tool: it lives in <root>/src/local/ only while a scenario runs. Both helpers are exported for the tests.
+function removePluginCopy(localDir, removeDir) {
+	for (const f of PLUGIN_FILES) fs.rmSync(path.join(localDir, f), { force: true });
+	try {
+		if (removeDir && fs.readdirSync(localDir).length === 0) fs.rmdirSync(localDir);
+	} catch {}
+}
+// A copy left behind by a run that crashed: remove it (and the folder, when nothing else is in it) before anything else.
+function removeStalePlugin(localDir) {
+	if (!fs.existsSync(localDir)) return false;
+	const had = PLUGIN_FILES.some((f) => fs.existsSync(path.join(localDir, f)));
+	removePluginCopy(localDir, true);
+	return had;
+}
+
+// Files a scenario needs before the app starts: T.fixtures = [{ path, content, mtimeAgoSec? }]. `path` is relative to the run's temp folder;
+// "<ENC:name>" is the folder name Pi gives a working folder (<tmp>/name) under sessions/ (see agents/pi/sessions.js), so a fixture can
+// put a session file where the app looks for it.
+const encodeCwd = (cwd) => `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+function writeFixtures(list, tmp) {
+	for (const f of list || []) {
+		const rel = f.path.replace(/<ENC:([^>]+)>/g, (_m, name) => encodeCwd(path.join(tmp, name)));
+		const full = path.join(tmp, rel);
+		fs.mkdirSync(path.dirname(full), { recursive: true });
+		fs.writeFileSync(full, f.content ?? "");
+		if (f.mtimeAgoSec != null) {
+			const t = new Date(Date.now() - f.mtimeAgoSec * 1000);
+			fs.utimesSync(full, t, t);
+		}
+	}
+}
+
 // --- a run -------------------------------------------------------------------------------------------------------
 function killTree(child) {
 	try {
@@ -137,11 +169,18 @@ async function runScenario(name, o) {
 	git("-c", "user.name=char", "-c", "user.email=char@example.invalid", "commit", "-q", "-m", "fixture");
 	const transcript = path.join(o.transcripts, `${name}.json`);
 	const localDir = path.join(o.root, "src", "local");
+	removeStalePlugin(localDir); // a copy left by a crashed run
 	const hadLocal = fs.existsSync(localDir);
 	if (hadLocal) {
-		const other = fs.readdirSync(localDir).filter((f) => !PLUGIN_FILES.includes(f));
+		const other = fs.readdirSync(localDir);
 		if (other.length) throw new Error(`${localDir} holds other local plugins (${other.join(", ")}); they would change the capture. Use a clean worktree.`);
 	}
+	let log = "";
+	let code;
+	const removePlugin = () => removePluginCopy(localDir, hadLocal);
+	const onExit = () => removePlugin(); // process.exit or a signal in the middle of a run
+	process.on("exit", onExit);
+	try {
 	fs.mkdirSync(localDir, { recursive: true });
 	for (const f of PLUGIN_FILES) fs.copyFileSync(path.join(HERE, "plugin", f), path.join(localDir, f));
 	const T = JSON.parse(fs.readFileSync(transcript, "utf8"));
@@ -158,16 +197,14 @@ async function runScenario(name, o) {
 		PI_CRUST_CHAR_TRANSCRIPT: transcript,
 		PI_CRUST_CHAR_OUT: outFile,
 		PI_CRUST_CHAR_LOGDIR: logDir,
-		...(T.env || {}), // per-scenario switches (for example PI_CRUST_SELFTEST_NO_PI=1)
+		...Object.fromEntries(Object.entries(T.env || {}).map(([k, v]) => [k, String(v).split("<TMP>").join(tmp)])), // per-scenario switches (for example PI_CRUST_SELFTEST_NO_PI=1); <TMP> is the run's temp folder
 	};
+	writeFixtures(T.fixtures, tmp);
 	if (T.settings) {
 		// settings.json of the app for this run (for example toolCallCheckIn), in the fresh data folder
 		fs.mkdirSync(env.PI_CRUST_SELFTEST_USERDATA, { recursive: true });
 		fs.writeFileSync(path.join(env.PI_CRUST_SELFTEST_USERDATA, "settings.json"), JSON.stringify(T.settings));
 	}
-	let log = "";
-	let code;
-	try {
 		code = await new Promise((resolve) => {
 			const child = spawn("npm", ["run", "selftest", "--", "char"], { cwd: o.root, env, shell: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
 			const timer = setTimeout(() => (killTree(child), resolve("timeout")), 150_000);
@@ -176,8 +213,8 @@ async function runScenario(name, o) {
 			child.on("exit", (c) => (clearTimeout(timer), resolve(c)));
 		});
 	} finally {
-		for (const f of PLUGIN_FILES) fs.rmSync(path.join(localDir, f), { force: true });
-		if (!hadLocal) fs.rmSync(localDir, { recursive: true, force: true });
+		removePlugin();
+		process.removeListener("exit", onExit);
 	}
 	const events = readJsonl(outFile);
 	const procs = fs.existsSync(logDir)
@@ -192,6 +229,7 @@ async function runScenario(name, o) {
 		[agentDir, "<AGENT_DIR>"],
 		[tmp, "<TMP>"],
 		[o.root, "<APP>"],
+		[os.homedir(), "<HOME>"], // last: the folders above live under it (a helper process starts in the home folder; no user name in a golden file)
 	];
 	const capture = buildCapture({ events, procs }, tokens);
 	const problems = [];
@@ -256,4 +294,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).then((c) => process.exit(c));
-module.exports = { normalizeString, normalizeValue, buildCapture, diffLines };
+module.exports = { writeFixtures, encodeCwd, removePluginCopy, removeStalePlugin, PLUGIN_FILES, normalizeString, normalizeValue, buildCapture, diffLines };
