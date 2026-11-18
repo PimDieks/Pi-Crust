@@ -2277,4 +2277,5 @@ window.addEventListener("DOMContentLoaded", async () => {
 	initGraph();
 	initLayout();
 	initRepos();
+	if (info.selftestNoPrompt) setTimeout(() => { if (!selftestTouring) { selftestTouring = true; runSelftestTour(); } }, 6000); // selftest without a prompt: no turn will settle, so start the tour here
 });
