@@ -9,6 +9,7 @@ npm run selftest -- <feature>            # e.g. npm run selftest -- timeline
 npm run selftest -- <feature> <feature>  # several, e.g. timeline annotate
 ```
 
+- Test runs set `PI_CRUST_SELFTEST_USERDATA` to a temporary folder (with a temporary `PI_CODING_AGENT_DIR`), so they never touch the real settings or recent projects.
 - Step names come from the script that registers the step (`selftestSteps.push(...)` in `src/<name>.js` gives `<name>`). Examples: `timeline`, `annotate`, `chat-find`, `design-tokens`, `worktree`, `tweak`. The turn timers are `durations`, and the built-in tour (context panel, changes, theme, terminal, editor, palette, chat tabs, modes, layout, zoom) is `core`.
 - If you build a new feature, register its own selftest step in its script so it can be tested alone. Don't add it to `runCoreTour`.
 - An unknown name prints `SELFTEST only: ... MISMATCH unknown ... (known: ...)` with the valid names.

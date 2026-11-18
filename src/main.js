@@ -1559,7 +1559,7 @@ function toggleWindow() {
 	try {
 		if (!fs.existsSync(userData) && fs.existsSync(legacy)) fs.renameSync(legacy, userData);
 	} catch {}
-	app.setPath("userData", userData);
+	app.setPath("userData", (SELFTEST && process.env.PI_CRUST_SELFTEST_USERDATA) || userData); // selftest only: keep test runs out of the user's real settings and recent projects
 }
 const isPrimary = SELFTEST || app.requestSingleInstanceLock();
 if (!isPrimary) {
