@@ -9,6 +9,7 @@ const { execFile, execFileSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { hardenGitArgs } = require("./git-harden");
 
 const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
 const real = (p) => {
@@ -39,7 +40,7 @@ function parsePorcelain(text) {
 
 function listWorktrees(repo, env) {
 	return new Promise((resolve) => {
-		execFile("git", ["worktree", "list", "--porcelain"], { cwd: repo, env, maxBuffer: 5e6, windowsHide: true }, (err, out) => resolve(err ? [] : parsePorcelain(out)));
+		execFile("git", hardenGitArgs(["worktree", "list", "--porcelain"]), { cwd: repo, env, maxBuffer: 5e6, windowsHide: true }, (err, out) => resolve(err ? [] : parsePorcelain(out)));
 	});
 }
 
@@ -122,7 +123,7 @@ function register(ctx) {
 	ipcMain.handle("worktree:status", async (_e, cwd) => {
 		const wt = await known(cwd);
 		if (!wt) return { ok: false, error: "Not a worktree of this repo" };
-		const r = await ctx.run("git", ["status", "--porcelain"], { cwd: wt.path });
+		const r = await ctx.run("git", hardenGitArgs(["status", "--porcelain"]), { cwd: wt.path });
 		const changes = r.stdout.split("\n").filter(Boolean).length;
 		return { ok: r.ok, dirty: changes > 0, changes, branch: wt.branch, managed: managed(wt) };
 	});

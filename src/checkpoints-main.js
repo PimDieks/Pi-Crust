@@ -10,6 +10,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { hardenGitArgs } = require("./git-harden");
 
 const REF_PREFIX = "refs/pi-crust/cp/";
 const KEEP = 300;
@@ -28,7 +29,9 @@ function cleanEnv(base, extra = {}) {
 
 function git(cwd, args, env) {
 	return new Promise((resolve) => {
-		execFile("git", args, { cwd, env, maxBuffer: 50e6, windowsHide: true }, (err, stdout, stderr) =>
+		// Automatic on every message: hardened (no fsmonitor, no hooks such as reference-transaction). Filters stay on,
+		// so a snapshot stores what git add would (LFS pointers, line endings).
+		execFile("git", hardenGitArgs(args), { cwd, env, maxBuffer: 50e6, windowsHide: true }, (err, stdout, stderr) =>
 			resolve({ ok: !err, stdout: String(stdout || ""), stderr: String(stderr || "") || (err ? err.message : "") }),
 		);
 	});

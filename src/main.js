@@ -9,6 +9,7 @@ const { makeFindPi } = require("./pi-cache");
 const { watchTree } = require("./watch-tree");
 const { createPrLookup } = require("./pr-lookup");
 const { NOISE_DIRS, isNoise, createIgnoreCheck, debounceMax } = require("./watch-filter");
+const { hardenGitArgs } = require("./git-harden"); // automatic read-only git calls: no fsmonitor, hooks, ext diff, textconv, pager
 const IS_WIN = process.platform === "win32";
 const IS_DARWIN = process.platform === "darwin";
 
@@ -640,7 +641,7 @@ ipcMain.handle("git:status", async (_e, main, chatId) => {
 	return new Promise((resolve) => {
 		if (!REPO) return resolve({ branch: null, files: {} });
 		const worktree = root !== REPO;
-		execFile("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd: root, env: { ...ENV, GIT_OPTIONAL_LOCKS: "0" }, maxBuffer: 20e6, windowsHide: true }, (err, out) => {
+		execFile("git", hardenGitArgs(["status", "--porcelain=v1", "-z", "--untracked-files=all"]), { cwd: root, env: { ...ENV, GIT_OPTIONAL_LOCKS: "0" }, maxBuffer: 20e6, windowsHide: true }, (err, out) => {
 			if (err) return resolve({ branch: null, files: {}, worktree });
 			const files = {};
 			const parts = out.split("\0");
@@ -651,7 +652,7 @@ ipcMain.handle("git:status", async (_e, main, chatId) => {
 				files[rec.slice(3)] = code; // keep both columns: index (staged) and worktree
 				if (code[0] === "R" || code[0] === "C") i++; // skip the original path of a rename
 			}
-			execFile("git", ["branch", "--show-current"], { cwd: root, env: ENV, windowsHide: true }, (_e2, b) => resolve({ branch: (b || "").trim() || null, files, worktree, root }));
+			execFile("git", hardenGitArgs(["branch", "--show-current"]), { cwd: root, env: ENV, windowsHide: true }, (_e2, b) => resolve({ branch: (b || "").trim() || null, files, worktree, root }));
 		});
 	});
 });
@@ -1105,16 +1106,20 @@ function run(cmd, args, opts = {}) {
 	});
 }
 
+// Read-only git for the Changes tab, graph and palette: hardened, so the repository can't make it run code (git-harden.js).
+// User actions (commit, push, discard) use run("git", ...) and keep the user's hooks.
+const gitRead = (args, opts) => run("git", hardenGitArgs(args), opts);
+
 ipcMain.handle("git:diff", async (_e, chatId, rel, status) => {
 	const root = await rootFor(chatId);
 	insideRepo(rel, root);
 	rel = gitRel(rel);
 	if (status === "??") {
 		// Untracked: compare against nothing (exit code 1 means "differences", not an error).
-		const r = await run("git", ["diff", "--no-color", "--no-index", "--", "/dev/null", rel], { cwd: root });
+		const r = await gitRead(["diff", "--no-color", "--no-index", "--", "/dev/null", rel], { cwd: root });
 		return r.stdout || r.stderr;
 	}
-	const r = await run("git", ["diff", "--no-color", "HEAD", "--", rel], { cwd: root });
+	const r = await gitRead(["diff", "--no-color", "HEAD", "--", rel], { cwd: root });
 	return r.ok ? r.stdout : r.stderr;
 });
 
@@ -1124,7 +1129,7 @@ ipcMain.handle("git:original", async (_e, chatId, rel, status) => {
 	insideRepo(rel, root);
 	rel = gitRel(rel);
 	if (status === "??" || (status && status[0] === "A")) return { content: "" };
-	const r = await run("git", ["show", `HEAD:./${rel}`], { cwd: root });
+	const r = await gitRead(["show", `HEAD:./${rel}`], { cwd: root });
 	if (!r.ok) return { content: "" };
 	if (r.stdout.slice(0, 8000).includes("\0")) return { error: "Binary file.", binary: true };
 	return { content: r.stdout };
@@ -1195,9 +1200,9 @@ ipcMain.handle("git:info", async (_e, chatId) => {
 		return { branch: null, ahead: null, hasUpstream: false, pr: null, error: e.message };
 	}
 	const [branch, ahead, remote] = await Promise.all([
-		run("git", ["branch", "--show-current"], { cwd: root }),
-		run("git", ["rev-list", "--count", "@{upstream}..HEAD"], { cwd: root }),
-		run("git", ["remote", "get-url", "origin"], { cwd: root }),
+		gitRead(["branch", "--show-current"], { cwd: root }),
+		gitRead(["rev-list", "--count", "@{upstream}..HEAD"], { cwd: root }),
+		gitRead(["remote", "get-url", "origin"], { cwd: root }),
 	]);
 	const b = branch.stdout.trim();
 	let pr = null;
@@ -1215,7 +1220,7 @@ ipcMain.handle("git:log", async (_e, opts = {}) => {
 	const fmt = ["%H", "%P", "%an", "%at", "%D", "%s"].join("%x1f") + "%x1e";
 	const args = ["log", `--max-count=${limit}`, "--date-order", `--format=${fmt}`];
 	if (opts.all !== false) args.push("--exclude=refs/pi-crust/*", "--all"); // checkpoints live under refs/pi-crust/
-	const r = await run("git", args, { cwd: REPO });
+	const r = await gitRead(args, { cwd: REPO });
 	if (!r.ok) return { commits: [], error: r.stderr.trim() };
 	const commits = r.stdout
 		.split("\x1e")
@@ -1231,21 +1236,21 @@ ipcMain.handle("git:log", async (_e, opts = {}) => {
 // A cheap fingerprint of HEAD and all refs, so the UI can redraw the graph only when something changed.
 ipcMain.handle("git:refsStamp", async () => {
 	if (!REPO) return "";
-	const [head, refs] = await Promise.all([run("git", ["rev-parse", "HEAD"], { cwd: REPO }), run("git", ["for-each-ref", "--format=%(objectname)%(refname)"], { cwd: REPO })]);
+	const [head, refs] = await Promise.all([gitRead(["rev-parse", "HEAD"], { cwd: REPO }), gitRead(["for-each-ref", "--format=%(objectname)%(refname)"], { cwd: REPO })]);
 	const own = refs.stdout.split("\n").filter((l) => !l.includes("refs/pi-crust/")).join("\n"); // not the checkpoints
 	return head.stdout.trim() + own.length + own.slice(0, 4000);
 });
 
 ipcMain.handle("git:show", async (_e, hash) => {
 	if (!REPO || !/^[0-9a-f]{7,40}$/.test(String(hash))) return "";
-	const r = await run("git", ["show", "--no-color", "--stat", "--patch", "--format=fuller", hash], { cwd: REPO });
+	const r = await gitRead(["show", "--no-color", "--stat", "--patch", "--format=fuller", hash], { cwd: REPO });
 	return r.ok ? r.stdout : r.stderr;
 });
 
 // Every tracked and untracked (not ignored) file, for the command palette.
 ipcMain.handle("fs:index", async () => {
 	if (!REPO) return [];
-	const r = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: REPO });
+	const r = await gitRead(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: REPO });
 	return r.ok ? [...new Set(r.stdout.split("\0").filter(Boolean))] : [];
 });
 

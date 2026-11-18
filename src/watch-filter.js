@@ -1,6 +1,7 @@
 // Which file changes are build noise, and a debounce that can't be postponed forever.
 "use strict";
 const { createTtlCache } = require("./ttl-cache");
+const { hardenGitArgs } = require("./git-harden");
 
 // Folder names that are noise anywhere in a path (the tree listing keeps its own, shorter set).
 const NOISE_DIRS = new Set([".git", "node_modules", ".turbo", ".next", ".vite", "coverage", "storybook-static", ".DS_Store", "__generated__"]);
@@ -29,7 +30,7 @@ function createIgnoreCheck(root, { spawnSync, ttlMs = 30_000, now = Date.now } =
 		dirRel = dirRel.replace(/\\/g, "/");
 		if (cache.has(dirRel)) return cache.get(dirRel);
 		let ignored;
-		const r = spawnSync("git", ["check-ignore", "-q", "--", dirRel + "/"], { cwd: root, timeout: 3000, windowsHide: true });
+		const r = spawnSync("git", hardenGitArgs(["check-ignore", "-q", "--", dirRel + "/"]), { cwd: root, timeout: 3000, windowsHide: true });
 		if (r.status === 0) ignored = true;
 		else if (r.status === 1) ignored = false;
 		else ignored = dirRel.split("/").pop() === "dist"; // not a git repo, or git failed
