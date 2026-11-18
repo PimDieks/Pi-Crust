@@ -156,15 +156,15 @@
 			<!-- Right: chat -->
 			<section id="chat-pane" class="pane">
 				<header class="pane-header">
-					<span class="pane-title">Pi</span>
+					<span class="pane-title agent-chip" id="agent-chip" title="This chat's agent">Pi</span>
 					<button type="button" id="ctx-meter" title="Model, context and usage" aria-haspopup="dialog" aria-expanded="false"><span class="pill-model">Model</span><svg class="pill-chev" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg><span class="meter-seg" data-seg="ctx" hidden><span class="meter-label">Ctx</span><span class="ctx-bar"><span></span></span><span class="ctx-pct"></span></span><span class="meter-seg" data-seg="copilot" hidden><span class="meter-label">Copilot</span><span class="ctx-bar"><span></span></span><span class="ctx-pct"></span></span></button>
 					<button type="button" id="setup-pill" class="st-pill" aria-haspopup="dialog" hidden></button>
 					<span class="spacer"></span>
 					<button type="button" class="icon remote-indicator off" id="remote-indicator" title="Remote access: off" aria-label="Remote access" aria-haspopup="menu" aria-expanded="false" hidden><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/></svg><span class="ri-count"></span></button>
 					<button class="icon" id="open-palette" title="Command palette (⌘K)" aria-label="Command palette"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg></button>
 					<button class="icon" id="history" title="Earlier chats (⌘J)" aria-label="Earlier chats"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg></button>
-					<button class="icon" id="new-chat" title="New chat (⌘N)" aria-label="New chat"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg></button>
-					<button class="icon" id="new-chat-menu" title="More ways to start a chat" aria-label="More ways to start a chat" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg></button>
+					<span class="split-btn" role="group" aria-label="New chat"><button class="icon" id="new-chat" title="New chat (⌘N)" aria-label="New chat"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg></button>
+					<button class="icon" id="new-chat-menu" title="Choose the agent, or start in a worktree" aria-label="Choose the agent for a new chat" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg></button></span>
 				</header>
 				<div id="chat-tabs" role="tablist" aria-label="Chats"></div>
 				<div id="timeline" hidden role="region" aria-label="Screenshots timeline"></div>
@@ -175,6 +175,7 @@
 				<div id="queue" role="region" aria-label="Queued messages" hidden></div>
 				<div id="first-task" role="region" aria-label="First task" hidden></div>
 				<form id="composer">
+					<div id="reason-line" class="reason-line" role="status" hidden></div>
 					<div id="picks" class="pick-pills" aria-label="Picked elements" hidden></div>
 					<textarea id="input" rows="3" placeholder="Ask Pi…  (Enter to send, Shift+Enter for a new line)"></textarea>
 					<div class="composer-bar">
@@ -258,6 +259,7 @@
 		<script src="remote-panel.js"></script>
 		<script src="chat-find.js"></script>
 		<script src="thinking.js"></script>
+		<script src="agent-ui.js"></script>
 		<script src="slash-menu.js"></script>
 		<script src="mention-menu.js"></script>
 		<script src="todo-panel.js"></script>

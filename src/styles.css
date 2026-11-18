@@ -1326,3 +1326,18 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 #first-task .btn:focus-visible, #first-task .ft-hide:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 #first-task .ft-hide { background: none; border: 0; padding: 0 var(--space-xs); font: inherit; font-size: var(--fs-sm); color: var(--text-action-on-surface); cursor: pointer; border-radius: var(--radius-xs); }
 .msg.user.ft-point .user-actions { opacity: 1; pointer-events: auto; box-shadow: 0 0 0 2px var(--accent), var(--elevation-1); }
+
+/* Agents (phase 7): the chip in the chat header, the mark on a Claude Agent tab, the split "New chat" button, and controls an agent cannot use.
+   No new overlay: the menu is the existing .wt-menu on the popover layer, the reason line sits in the composer's flow. */
+.agent-chip { display: inline-flex; align-items: center; height: calc(var(--control-h) - 8px); padding: 0 var(--space-xs); border: 1px solid var(--border); border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
+.agent-chip[data-agent]:not([data-agent="pi"]) { color: var(--text-action-on-surface); border-color: color-mix(in srgb, var(--text-action-on-surface) 45%, var(--border)); }
+.split-btn { display: inline-flex; align-items: center; }
+.split-btn > button.icon { border-radius: 0; }
+.split-btn > button.icon:first-child { border-radius: var(--radius-full) 0 0 var(--radius-full); padding-right: 3px; }
+.split-btn > button.icon:last-child { border-radius: 0 var(--radius-full) var(--radius-full) 0; padding-left: 2px; padding-right: 4px; }
+.chat-tab .ct-agent { display: inline-flex; flex: none; width: 10px; height: 10px; color: var(--text-action-on-surface); }
+.chat-tab .ct-agent svg { width: 10px; height: 10px; }
+.is-disabled { opacity: 0.45; cursor: default; }
+button.is-disabled:hover { background: none; color: inherit; }
+.pal-item.is-disabled.active { background: var(--hover); }
+.reason-line { padding: var(--space-3xs) var(--space-sm); font-size: var(--fs-xs); color: var(--muted); }

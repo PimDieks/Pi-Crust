@@ -35,7 +35,8 @@ function resetModeSelect() {
 	sel.dataset.mode = "";
 	sel.className = "mode-none";
 	sel.disabled = true;
-	sel.title = MODE_NOT_ACTIVE;
+	sel.title = window.agentUi?.modeNotActive() || MODE_NOT_ACTIVE;
+	window.agentUi?.describe(sel, sel.title); // the reason also reaches a screen reader
 }
 // "/crust-mode" is an extension command (unlike "/mode" it cannot clash with another extension's /mode), so Pi runs it
 // right away, also while it is working. The selector NEVER moves on our request: it keeps showing the enforced mode
@@ -45,7 +46,7 @@ async function setMode(mode) {
 	const sel = $("#perm-mode");
 	const previous = sel.dataset.mode || "";
 	if (!previous) {
-		toast(MODE_NOT_ACTIVE, "error");
+		toast(window.agentUi?.modeNotActive() || MODE_NOT_ACTIVE, "error");
 		resetModeSelect();
 		return;
 	}

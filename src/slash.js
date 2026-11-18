@@ -246,6 +246,11 @@ async function handleBuiltinCommand(text) {
 		}
 		return true;
 	}
+	const why = window.agentUi?.slashReason(cmd.name); // this chat's agent cannot do it
+	if (why) {
+		toast(why, "warning");
+		return true;
+	}
 	if (!state.ready) {
 		notReadyToast();
 		return true;

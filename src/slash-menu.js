@@ -29,7 +29,7 @@
 		}));
 		for (const c of allBuiltinCommands()) {
 			if (isShadowed(c.name)) continue;
-			out.push({ name: c.name, args: c.args || "", description: c.description, source: "crust", builtin: true });
+			out.push({ name: c.name, args: c.args || "", description: c.description, source: "crust", builtin: true, disabledWhy: window.agentUi?.slashReason(c.name) || "" });
 		}
 		return out;
 	}
@@ -69,7 +69,13 @@
 				label.classList.add("slash-name");
 				row.append(label);
 				if (c.args) row.append(el("span", "slash-args", c.args));
-				if (c.description) row.append(el("span", "desc", c.description));
+				if (c.disabledWhy) {
+					// This chat's agent cannot do it: the row stays listed, disabled, with the reason in place of the description.
+					row.classList.add("is-disabled");
+					row.setAttribute("aria-disabled", "true");
+					row.title = c.disabledWhy;
+					row.append(el("span", "desc", c.disabledWhy));
+				} else if (c.description) row.append(el("span", "desc", c.description));
 				row.append(el("span", "kind slash-badge", c.source));
 				row.onmousedown = (e) => e.preventDefault(); // keep focus in the input
 				row.onmousemove = () => setActive(i, false);
@@ -123,6 +129,7 @@
 	function accept(i, send) {
 		const c = items[i];
 		if (!c) return;
+		if (c.disabledWhy) return toast(c.disabledWhy, "warning"); // the menu stays open; the reason is on the row too
 		close();
 		input.value = `/${c.name} `;
 		input.focus();

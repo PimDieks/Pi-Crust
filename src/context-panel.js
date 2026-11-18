@@ -56,7 +56,7 @@ function ctxUsed(d) {
 function renderContextMeter() {
 	const btn = $("#ctx-meter");
 	const d = ctxData();
-	const cp = copilotData();
+	const cp = window.agentUi?.can("extensions") === false ? null : copilotData(); // the Copilot meter is fed by Pi's extension statuses
 	const hasCtx = !!(d && d.window);
 	const tips = [`Model: ${btn.querySelector(".pill-model").textContent}`];
 	const ctxSeg = btn.querySelector('[data-seg="ctx"]');
@@ -102,7 +102,7 @@ function ctxRow(color, label, tokens, pct, opts = {}) {
 function renderContextPanel() {
 	let panel = $("#ctx-panel");
 	const d = ctxData();
-	const cp = copilotData();
+	const cp = window.agentUi?.can("extensions") === false ? null : copilotData();
 	if (!panel) {
 		panel = el("div");
 		panel.id = "ctx-panel";
@@ -110,7 +110,8 @@ function renderContextPanel() {
 		panel.setAttribute("aria-label", "Context usage");
 		document.body.append(panel);
 	}
-	const parts = [...(window.crustSubs?.parts() || []), ...modelParts()];
+	const piOnly = window.agentUi?.can("extensions") === false; // Pi's subscriptions (logins, Ollama sync) are absent for an agent without extensions
+	const parts = [...(piOnly ? [] : window.crustSubs?.parts() || []), ...modelParts()];
 	if (d && d.window) parts.push(...contextParts(d));
 	if (cp) parts.push(...copilotParts(cp, true));
 	panel.replaceChildren(...parts);
@@ -121,7 +122,7 @@ function renderContextPanel() {
 let ctxModelFilter = "";
 function modelParts() {
 	const all = active?.models || [];
-	const models = window.crustSubs?.filterModels(all) ?? all; // the selected subscription's models (subscriptions.js)
+	const models = (window.agentUi?.can("extensions") === false ? null : window.crustSubs?.filterModels(all)) ?? all; // the selected subscription's models (subscriptions.js)
 	const cur = active?.state.model;
 	const head = el("div", `ctx-head${window.crustSubs ? " ctx-models-head" : ""}`);
 	head.append(el("span", "ctx-title", "Model"));

@@ -109,7 +109,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 			controls: () => [...$("#ctx-panel").querySelectorAll("button, input")],
 			close: () => closeContextPanel(),
 		},
-		{ name: "worktree-menu", layer: "popover", ...menuOf("wt-menu:not(.view-menu):not(.remote-menu)", () => $("#new-chat-menu")) },
+		{ name: "new-chat-menu", layer: "popover", ...menuOf("wt-menu:not(.view-menu):not(.remote-menu)", () => $("#new-chat-menu")) },
 		(() => {
 			// The phone button is hidden when remote access isn't available (as in a test run): show it for the case.
 			const m = menuOf("remote-menu", () => $("#remote-indicator"));
@@ -342,6 +342,36 @@ selftestSteps.push(async ({ snap, wait }) => {
 			walk(sheet.cssRules);
 		} catch {} // a cross-origin sheet: not ours
 	}
+	// The arrow of the split "New chat" button (agent menu + worktree): on the popover layer, lists Pi and Claude Agent, works by keyboard,
+	// closes on Escape (focus back on the arrow) and on a click outside.
+	{
+		const arrow = $("#new-chat-menu");
+		const problems = [];
+		const menuEl = () => document.querySelector(".wt-menu:not(.view-menu):not(.remote-menu)");
+		arrow.click();
+		await wait(250);
+		const m = menuEl();
+		const labels = m ? [...m.querySelectorAll("[role=menuitem] .label")].map((n) => n.textContent) : [];
+		if (labels.slice(0, 2).join() !== "Pi,Claude Agent") problems.push(`items ${labels}`);
+		if (m && getComputedStyle(m).zIndex !== cssLayer("popover")) problems.push("not on the popover layer");
+		if (arrow.getAttribute("aria-expanded") !== "true") problems.push("aria-expanded not true");
+		if (m && document.activeElement !== m.querySelector("[role=menuitem]")) problems.push("first item has no focus");
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+		if (m && document.activeElement !== m.querySelectorAll("[role=menuitem]")[1]) problems.push("ArrowDown did not move");
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		await wait(150);
+		if (menuEl() || document.activeElement !== arrow || arrow.getAttribute("aria-expanded") !== "false") problems.push("Escape did not close it and return focus");
+		arrow.click();
+		await wait(250);
+		document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+		await wait(150);
+		if (menuEl()) {
+			problems.push("a click outside did not close it");
+			arrow.click();
+		}
+		if (problems.length) bad++;
+		console.error(`SELFTEST layers new-chat-menu keyboard, Escape and outside click: ${problems.length ? "MISMATCH " + problems.join("; ") : "OK"}`);
+	}
 	if (rawZ.length) bad++;
 	console.error(`SELFTEST layers raw z-index numbers: ${rawZ.length ? JSON.stringify(rawZ) : "none"} -> ${rawZ.length ? "MISMATCH" : "OK"}`);
 
@@ -439,7 +469,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		// 6d. Opening the welcome view closes every popover of the app (the model panel is the context panel, the slash and @ menus, the
 		//     worktree menu), so nothing from the app stays on top of the view. The timeline popover closes through the same
 		//     outside-click listener as the worktree menu; its real popover needs recorded screenshots, so it is not opened here.
-		for (const pop of [byName("context-panel"), byName("slash-menu"), byName("mention-menu"), byName("worktree-menu")]) {
+		for (const pop of [byName("context-panel"), byName("slash-menu"), byName("mention-menu"), byName("new-chat-menu")]) {
 			const view = byName("welcome-view");
 			await pop.open();
 			await wait(400);

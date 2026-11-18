@@ -145,7 +145,8 @@
 			};
 			return row;
 		};
-		menu.append(item("New chat", keyLabel("⌘N"), () => newChat()), item("New chat in worktree…", "own branch and folder", newWorktreeChat));
+		// The arrow of the split button: the agent for a new chat (a plain click on the plus is always Pi), then the worktree way.
+		menu.append(item("Pi", keyLabel("⌘N"), () => newChat()), item("Claude Agent", "needs an API key", () => newChat(null, null, { agent: "claude" })), item("New chat in worktree…", "own branch and folder", newWorktreeChat));
 		document.body.append(menu);
 		const r = btn.getBoundingClientRect();
 		menu.style.top = `${r.bottom + 4}px`;
@@ -198,7 +199,7 @@
 			await wait(300);
 			const mr = menu?.getBoundingClientRect();
 			const shown = !!mr && mr.width > 0 && mr.height > 0 && mr.right <= innerWidth && mr.bottom <= innerHeight && getComputedStyle(menu).opacity !== "0";
-			console.error(`SELFTEST worktree menu: ${menu ? menu.querySelectorAll(".pal-item").length : 0} items, rect=${mr ? [mr.x, mr.y, mr.width, mr.height].map(Math.round) : "none"} shown=${shown} -> ${menu?.querySelectorAll(".pal-item").length === 2 && shown ? "OK" : "MISMATCH"}`);
+			console.error(`SELFTEST worktree menu: ${menu ? menu.querySelectorAll(".pal-item").length : 0} items, rect=${mr ? [mr.x, mr.y, mr.width, mr.height].map(Math.round) : "none"} shown=${shown} -> ${menu?.querySelectorAll(".pal-item").length === 3 && shown ? "OK" : "MISMATCH"}`);
 			await snap("worktree-menu");
 			closeMenu();
 			// the main chat sees the main checkout again

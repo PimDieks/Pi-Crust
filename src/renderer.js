@@ -498,7 +498,7 @@ function makeChat(id, opts = {}) {
 		modes: undefined, // permission-mode status text
 		models: [],
 		sessionFile: opts.sessionFile || null,
-		agent: opts.agent || null, // { id, label, capabilities } from pi:started; nothing gates on it yet
+		agent: opts.agent || null, // { id, label, capabilities } from pi:started; agent-ui.js gates the controls on its capabilities
 		cwd: opts.cwd || null, // a git worktree of the repo (worktree.js), null = the repo itself
 		branch: opts.branch || null,
 		resume: !!opts.sessionFile, // replay the stored messages once Pi is ready
@@ -549,6 +549,12 @@ function renderTabs() {
 			if (rb) {
 				t.append(rb);
 				t.title += " · shared with your phone";
+			}
+			const mark = window.agentUi?.tabMark(c); // only chats of a non-default agent
+			if (mark) {
+				t.append(mark);
+				t.title += `
+${c.agent.label} chat`;
 			}
 			t.append(el("span", "ct-label", chatLabel(c)));
 			const base = t.title;
@@ -603,6 +609,7 @@ function activate(c) {
 	$("#stop").hidden = !state.streaming;
 	$("#send").textContent = state.streaming ? "Queue" : "Send";
 	$("#send").title = state.streaming ? keyLabel("Queue: Pi reads it when the run is done (⌥Enter steers right away)") : "";
+	window.agentUi?.sync(c); // chip, placeholder, mode list, gated controls: before the mode status is read
 	syncModeFromStatus(c.modes);
 	renderAsk();
 	renderQueue();
@@ -672,9 +679,10 @@ function resetChats() {
 // opts.cwd / opts.branch: work in a git worktree of the repo (worktree.js).
 async function newChat(sessionFile, label, opts = {}) {
 	const file = typeof sessionFile === "string" ? sessionFile : undefined;
-	const id = await crust.pi.newChat(file, opts.cwd ? { cwd: opts.cwd } : undefined);
+	const id = await crust.pi.newChat(file, opts.cwd ? { cwd: opts.cwd } : undefined, opts.agent || undefined); // opts.agent: an agent id (undefined = Pi)
+	if (!id && opts.agent) return toast("Couldn't start that chat (no repo open, or that agent isn't available)", "error");
 	if (!id) return toast(opts.cwd ? "Couldn't start a chat in that worktree" : "Couldn't start a new chat (no repo open)", "error");
-	const c = chats.get(id) || makeChat(id, { sessionFile: file, label: typeof label === "string" ? label : "", cwd: opts.cwd, branch: opts.branch });
+	const c = chats.get(id) || makeChat(id, { sessionFile: file, label: typeof label === "string" ? label : "", cwd: opts.cwd, branch: opts.branch, agent: opts.agent ? { id: opts.agent, label: opts.agent, capabilities: {} } : undefined }); // pi:started brings the real agent record
 	if (opts.cwd) {
 		c.cwd = opts.cwd;
 		c.branch = opts.branch || c.branch;
@@ -2173,6 +2181,7 @@ function renderQueue() {
 			steer.type = "button";
 			steer.title = "Move forward: Pi reads it after the current step instead of when the run is done";
 			steer.addEventListener("click", () => queueSteer(i));
+			window.agentUi?.gate(steer, "steering", active); // an agent that cannot steer: disabled, with the reason
 			r.append(steer);
 		}
 		r.append(
@@ -2194,7 +2203,9 @@ $("#input").addEventListener("keydown", (e) => {
 	const input = e.target;
 	if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
 		e.preventDefault();
-		submit({ steer: e.altKey }); // ⌥Enter while Pi works: steer instead of queueing
+		const steer = e.altKey && window.agentUi?.can("steering") !== false;
+		if (e.altKey && !steer) window.agentUi.blocked("steering"); // this agent cannot steer: say why, and queue as usual
+		submit({ steer }); // ⌥Enter while Pi works: steer instead of queueing
 	} else if (e.key === "Backspace" && input.selectionStart === 0 && input.selectionEnd === 0 && active?.picks.length) {
 		active.picks.pop(); // Backspace at the start removes the last pill
 		renderPicks();
@@ -2294,6 +2305,8 @@ crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, ag
 	const fresh = !c;
 	if (!c) c = makeChat(chatId, { sessionFile, cwd: worktree?.cwd, branch: worktree?.branch, agent });
 	c.agent = agent || c.agent;
+	if (c === active) window.agentUi?.sync(c);
+	renderTabs();
 	if (worktree) {
 		c.cwd = worktree.cwd;
 		c.branch = worktree.branch || c.branch;
