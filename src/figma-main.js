@@ -59,22 +59,45 @@ function makeApi({ readSettings, writeSettings, getRepo, probe, checkProcess, en
 	return self;
 }
 
+const HELP_URL = "https://developers.figma.com/docs/figma-mcp-server/local-server-installation/";
+
 let api;
 function register(ctx) {
 	const { ipcMain } = ctx;
+	// Selftest only (PI_CRUST_SELFTEST=1 and PI_CRUST_FIGMA_STUB=<port>, with PI_CRUST_FIGMA_MCP_URL pointing at that port):
+	// the stub Figma server runs in this process, the file link lives in memory (never touches the real settings.json),
+	// and the process check answers what the test says.
+	const stubPort = process.env.PI_CRUST_SELFTEST === "1" && Number(process.env.PI_CRUST_FIGMA_STUB);
+	let mem = {};
+	let stub = null;
+	let procFacts = {};
 	api = makeApi({
-		readSettings: () => ctx.readSettings(),
-		writeSettings: (p) => ctx.writeSettings(p),
+		readSettings: () => (stubPort ? mem : ctx.readSettings()),
+		writeSettings: (p) => (stubPort ? void Object.assign(mem, p) : ctx.writeSettings(p)),
 		getRepo: () => ctx.repo,
 		probe: () => require("./figma-mcp").probe(),
-		checkProcess: () => require("./figma-status").checkFigmaProcess(),
+		checkProcess: () => (stubPort ? Promise.resolve(procFacts) : require("./figma-status").checkFigmaProcess()),
 	});
 	ipcMain.handle("figma:status", () => api.status());
 	ipcMain.handle("figma:test", () => api.test());
 	ipcMain.handle("figma:setFile", (_e, link) => api.setFile(link));
 	ipcMain.handle("figma:setFileFromText", (_e, text) => api.setFileFromText(text));
 	ipcMain.handle("figma:file", () => legacyFile(api.file()));
+	ipcMain.handle("figma:openHelp", () => {
+		require("electron").shell.openExternal(HELP_URL);
+		return {};
+	});
+	if (stubPort) {
+		ipcMain.handle("figma:stubMode", async (_e, mode, o = {}) => {
+			if (stub) await stub.close();
+			stub = null;
+			procFacts = o.proc || {};
+			if (o.clearFile) mem = {};
+			stub = await require("../scripts/figma-stub-server").start(mode, stubPort, { delayMs: o.delayMs || 0 });
+			return true;
+		});
+	}
 	return api;
 }
 
-module.exports = { register, makeApi, fileFor, legacyFile };
+module.exports = { HELP_URL, register, makeApi, fileFor, legacyFile };

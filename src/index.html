@@ -91,7 +91,10 @@
 				<div class="tab-panel" data-panel="design" hidden>
 					<header class="pane-header design-bar">
 						<div class="seg" id="design-views" role="tablist" aria-label="Design views"></div>
+						<button type="button" class="st-pill" id="figma-pill" aria-expanded="false" aria-controls="figma-panel">Figma: checking…</button>
+						<span class="fp-sr" id="figma-live" role="status" aria-live="polite"></span>
 					</header>
+					<section id="figma-panel" aria-label="Figma connection" hidden></section>
 					<div id="design-host"></div>
 				</div>
 				<div class="tab-panel" data-panel="changes" hidden>
@@ -251,6 +254,7 @@
 		<script src="design-viewports.js"></script>
 		<script src="figma-match.js"></script>
 		<script src="design-stories.js"></script>
+		<script src="figma-panel.js"></script>
 		<script src="worktree.js"></script>
 		<script src="tweak.js"></script>
 		<script src="annotate.js"></script>

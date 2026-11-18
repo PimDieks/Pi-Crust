@@ -121,6 +121,8 @@ contextBridge.exposeInMainWorld("crust", {
 		status: () => ipcRenderer.invoke("figma:status"),
 		test: () => ipcRenderer.invoke("figma:test"),
 		setFile: (link) => ipcRenderer.invoke("figma:setFile", link),
+		openHelp: () => ipcRenderer.invoke("figma:openHelp"),
+		stubMode: (mode, o) => ipcRenderer.invoke("figma:stubMode", mode, o), // selftest only
 		screenshot: () => ipcRenderer.invoke("figma:screenshot"),
 	},
 	design: {

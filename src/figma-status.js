@@ -31,7 +31,7 @@ const HINT_LINE = {
 	not_running: "Figma desktop isn't running.",
 	server_off: "Figma is running, but its MCP server is off.",
 	// Assumed: HTTP 401/403 from the port means a seat or plan refusal.
-	seat: "Figma answered, but refused the connection. Your Figma seat or plan may not allow the desktop MCP server.",
+	seat: "Figma answered, but refused the connection. Ask the Figma admin for a Dev or Full seat.",
 	unknown: LINE.not_reachable,
 };
 
