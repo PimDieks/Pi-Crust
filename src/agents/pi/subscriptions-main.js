@@ -1,4 +1,4 @@
-﻿// Subscriptions: which provider account Pi uses. Status comes from `pi auth check` (never prints secrets without
+// Subscriptions: which provider account Pi uses. Status comes from `pi auth check` (never prints secrets without
 // --credentials), Ollama from its local API plus ~/.pi/agent/models.json. Signing in runs Pi's own login code in a small
 // helper process (src/agents/pi/pi-login-helper.mjs, JSONL over stdio) so auth.json is written exactly as `/login` does.
 //  - subs:login(provider)       -> runs the login; progress goes to the renderer as "subs:login-state", resolves { ok, error?, cancelled? }
