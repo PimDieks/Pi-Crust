@@ -26,3 +26,8 @@ Every commit and push runs the secret check (`.githooks`, `scripts/check-secrets
 - Never commit `.env` files, `auth.json` or other login files, keys or certificates, real tokens in tests or docs, or personal data from the user's machine.
 - Test files (`*.test.js`, `*.spec.*`, `test/`, `tests/`, `__tests__/`) may hold made-up passwords in URLs and assignments; the check skips those generic patterns there. Fake tokens in a real format (`ghp_…`, `sk-ant-…`, keys) are still caught everywhere, so build those from pieces (see `scripts/check-secrets.test.js`).
 - Before pushing, also look at `git diff origin/main..HEAD --stat` for files that shouldn't be there.
+
+## UI layers: nothing overlaps
+
+Every new overlay (menu, popover, toast, panel, modal, confirmation) takes a named `--layer-*` z-index from `src/styles.css` (panel, popover, toast, modal, confirm; never a bare number), and anything that needs an answer sits above whatever is open.
+Add a case for it to `OVERLAYS` in `src/layers.js` and run `npm run selftest -- layers`: every control of the top overlay must be reachable with `elementFromPoint`.
