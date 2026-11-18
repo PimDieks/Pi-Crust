@@ -8,7 +8,6 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { pathToFileURL } = require("url");
-const { execFileSync } = require("child_process");
 const CA = require("../src/chat-agents");
 const A = require("../src/agents/adapter");
 const { createRegistry } = require("../src/agents/registry");
@@ -19,18 +18,8 @@ const ROOT = path.join(__dirname, "..");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "chat-agents-"));
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const standIn = () => import(pathToFileURL(path.join(__dirname, "claude-sdk-stand-in.mjs")).href);
-// main.js as last released (branch main, before T8). Without that branch (a shallow checkout) the two reviewed fragments stand in for it.
-const mainOnMain = () => {
-	try {
-		return execFileSync("git", ["show", "main:src/main.js"], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 26, stdio: ["ignore", "pipe", "ignore"] });
-	} catch {
-		return [
-			'const files = [...new Set(saved.files || [])].filter((f) => typeof f === "string" && fs.existsSync(f));',
-			'openList = files.map((file) => ({ id: newChatId(), file, cwd: typeof saved.cwds?.[file] === "string" ? saved.cwds[file] : null }));',
-			"const handle = agent.start({ pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile }, sink);",
-		].join("\n");
-	}
-};
+// main.js as last released: a fixed copy of the reader and the Pi start call, from commit 52a58f6. No git ref or history is read.
+const mainOnMain = () => fs.readFileSync(path.join(__dirname, "fixtures", "main-js-as-released.txt"), "utf8");
 
 // The code under test, optionally broken.
 const restore = (saved, exists) => {

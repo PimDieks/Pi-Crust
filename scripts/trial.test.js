@@ -139,7 +139,7 @@ test("an adapter chat writes one chat_start and one gate line per call, with no 
 	]);
 	const ready = [];
 	const sink = { isCurrent: () => true, ready: (h, d) => ready.push(d), record() {}, stderr() {}, exit() {}, ask: async (h, prompt) => (/lint/.test(prompt.title) ? "Deny" : "Allow once") };
-	const h = adapter.start({ cwd, mode: "ask-commands" }, sink);
+	const h = adapter.start({ cwd, mode: "ask-commands", env: { OPENAI_API_KEY: "LEAKVALUE1", GH_TOKEN: "LEAKVALUE2", PATH: "p" } }, sink);
 	const until = async (f, ms = 4000) => {
 		const t = Date.now();
 		while (!f()) {

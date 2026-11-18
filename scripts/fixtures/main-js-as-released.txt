@@ -1,0 +1,5 @@
+// Three lines of src/main.js as last released, copied from commit 52a58f6 (the last release before the Claude Agent work).
+// scripts/chat-agents.test.js compares the current code with these. They are a fixed copy so no test needs git history or a branch.
+const files = [...new Set(saved.files || [])].filter((f) => typeof f === "string" && fs.existsSync(f));
+openList = files.map((file) => ({ id: newChatId(), file, cwd: typeof saved.cwds?.[file] === "string" ? saved.cwds[file] : null }));
+const handle = agent.start({ pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile }, sink);
