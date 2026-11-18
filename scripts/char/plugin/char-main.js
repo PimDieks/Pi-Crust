@@ -60,6 +60,21 @@ function register(ctx) {
 				const r = await ctx.piRequest(chat, s.type, s.extra || {}, s.timeoutMs || 5000);
 				return { result: r };
 			}
+			case "closeAndWait": {
+				// pi:closeChat, then wait (up to 9 s) until the process is really gone: proves the orderly close plus the tree kill.
+				const pid = ctx.chatInfo(chat)?.pid;
+				await ctx.ipcMain._invokeHandlers.get("pi:closeChat")({ sender: ctx.win && ctx.win.webContents }, chat);
+				let gone = false;
+				for (let t = 0; t < 9000 && !gone; t += 100) {
+					try {
+						process.kill(pid, 0);
+						await sleep(100);
+					} catch {
+						gone = true;
+					}
+				}
+				return { gone, hadPid: typeof pid === "number" };
+			}
 			case "unsetEnv":
 			delete process.env[s.name]; // "installing Pi while the app runs": the next search finds it
 			return { unset: s.name };

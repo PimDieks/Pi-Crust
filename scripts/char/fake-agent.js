@@ -10,6 +10,7 @@
 // `fake-agent.js auth check --provider X --json --no-refresh` answers like `pi auth check` ("not signed in") and logs its argv.
 //
 // Transcript: { name, synthetic, state, messages, models, responses: { <type>: data }, rules: [ { on: {type, ...fields}, respond, emit: [...] } ] }
+// "ignoreStdinEnd": true keeps the process alive after stdin closes (the app has to kill it).
 // A rule matches a request when every field of `on` equals the request's field. `respond: false` sends no response record; `data` sets the response data.
 // emit items, in order: a record (object with `type`), { delay: ms }, { wait_ui: id } (pause until that extension_ui_response arrives),
 // { stderr: text }, { raw: text } (written as is: partial lines, CRLF, junk), { exit: code }.
@@ -129,5 +130,6 @@ process.stdin.on("data", (chunk) => {
 // Pi shuts down when stdin closes (the app's orderly stop).
 process.stdin.on("end", () => {
 	log({ dir: "meta", stdinClosed: true });
+	if (T.ignoreStdinEnd) return void setInterval(() => {}, 1000); // a stubborn program: it must be killed (transcript kill-stubborn)
 	process.exit(0);
 });

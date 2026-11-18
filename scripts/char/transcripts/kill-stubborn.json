@@ -1,0 +1,34 @@
+{
+	"name": "kill-stubborn",
+	"description": "A program that ignores the closed stdin: pi:closeChat must still end it (orderly close, then the tree kill). The driver waits until the process is gone.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"ignoreStdinEnd": true,
+	"rules": [],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "closeAndWait"
+		}
+	]
+}
