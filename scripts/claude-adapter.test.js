@@ -90,8 +90,8 @@ test("the budget comes from a setting; a result of error_max_budget_usd is its o
 	assert.strictEqual(t.sdk.calls[0].options.maxBudgetUsd, 2.5);
 	assert.strictEqual(t.sdk.calls[0].options.permissionMode, "plan");
 	assert.ok(t.adapter.send(h, { type: "prompt", message: "hi" }));
-	await t.until(() => t.events.records.some((r) => r.type === "claude_budget_reached"));
-	assert.strictEqual(t.events.records.find((r) => r.type === "claude_budget_reached").total_cost_usd, 2.51);
+	await t.until(() => t.events.records.some((r) => r.type === "claude_paused"));
+	assert.strictEqual(t.events.records.find((r) => r.type === "claude_paused").totalCostUsd, 2.51);
 	t.adapter.stop(h);
 });
 
@@ -160,6 +160,7 @@ test("a prompt becomes a user message; abort interrupts; other requests answer u
 	t.adapter.send(h, { type: "abort" });
 	await t.until(() => t.sdk.calls[0].interrupted === 1);
 	t.adapter.send(h, { id: 7, type: "compact" });
+	await t.until(() => t.events.records.some((r) => r.type === "response" && r.id === 7));
 	const resp = t.events.records.find((r) => r.type === "response" && r.id === 7);
 	assert.ok(resp && resp.success === false && resp.unsupported === true);
 	t.adapter.stop(h);

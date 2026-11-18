@@ -9,6 +9,10 @@
 // execution (the start is the end of the assistant message), per-step output tokens, the context breakdown (crust-context) and the
 // permission-mode status (the adapter owns both), retry events beyond the documented fields.
 //
+// A background subagent (the SDK may start one without being asked): its Agent card stays open past the turn's result and ends at
+// system/task_notification; the engine may then start a second turn by itself (origin task-notification), which opens with its
+// status/message_start and has no user row.
+//
 // Records beyond Pi's list (the adapter or the app may ignore them): { type:"claude_session", sessionId, model, permissionMode }.
 // Extras on Pi records: agent_end { costUsd (this turn), totalCostUsd (cumulative for the query) }, agent_settled { aborted },
 // tool_execution_end { denied:true } for a refused tool, message_end of an error row { errorCode: <result subtype> }.
@@ -70,6 +74,8 @@ function createTranslator(opts = {}) {
 	let cur = null; // the open assistant message: { blocks: Map(index -> block), stopReason, aborted }
 	const tools = new Map(); // tool_use id -> { name (SDK), args, startedAt }
 	const subs = new Map(); // Agent tool_use id -> { agent, task, messages: [], turns }
+	const early = []; // tool results that arrived before their assistant message closed
+	const taskTool = new Map(); // task_id -> Agent tool_use id (a background subagent ends at its task_notification)
 
 	const sub = (id) => {
 		if (!subs.has(id)) subs.set(id, { agent: undefined, task: undefined, messages: [], turns: 0 });
@@ -136,6 +142,7 @@ function createTranslator(opts = {}) {
 			out.push({ type: "tool_execution_start", toolCallId: c.id, toolName: toolName(c.name), args: c.args });
 		}
 		cur = null;
+		for (const e of early.splice(0)) toolResult(e.m, e.b, out);
 	};
 
 	function onStream(m, out) {
@@ -219,24 +226,47 @@ function createTranslator(opts = {}) {
 				sub(m.parent_tool_use_id).messages.push({ role: "toolResult", toolCallId: b.tool_use_id, content: resultContent(b.content), isError: !!b.is_error });
 				continue;
 			}
-			const t = tools.get(b.tool_use_id);
-			if (!t) continue; // a result for a call we never saw start: nothing to end
-			tools.delete(b.tool_use_id);
-			const isError = !!b.is_error;
-			const rec = {
-				type: "tool_execution_end",
-				toolCallId: b.tool_use_id,
-				toolName: toolName(t.name),
-				args: t.args,
-				result: { content: resultContent(b.content) },
-				isError,
-				durationMs: Math.max(0, now() - t.startedAt),
-			};
-			if (t.name === "Agent") rec.result.details = subDetails(b.tool_use_id, true, isError);
-			const meta = Array.isArray(m.tool_result_meta) ? m.tool_result_meta.find((x) => isObj(x) && x.id === b.tool_use_id) : null;
-			if (meta && meta.permission_decision && meta.permission_decision.decision === "reject") rec.denied = true;
-			out.push(rec);
+			// A background Agent launch answers before its assistant message is closed (nothing waits for approval): the card does not
+			// exist yet, so that result waits for message_stop. Any other result before its call is complete is out of order and dropped.
+			if (isObj(m.tool_use_result) && m.tool_use_result.status === "async_launched" && !tools.has(b.tool_use_id) && cur && [...cur.blocks.values()].some((x) => x.type === "tool_use" && x.id === b.tool_use_id)) {
+				early.push({ m, b });
+				continue;
+			}
+			toolResult(m, b, out);
 		}
+	}
+
+	function toolResult(m, b, out) {
+		const t = tools.get(b.tool_use_id);
+		if (!t) return; // a result for a call we never saw start: nothing to end
+		if (t.name === "Agent" && isObj(m.tool_use_result) && m.tool_use_result.status === "async_launched") {
+			// A background subagent: this result only says it was launched. The card stays open until its task_notification,
+			// which may arrive after this turn's result, and the card shows it as running.
+			t.async = true;
+			out.push({
+				type: "tool_execution_update",
+				toolCallId: b.tool_use_id,
+				toolName: "subagent",
+				args: t.args,
+				partialResult: { content: [{ type: "text", text: "Running in the background" }], details: subDetails(b.tool_use_id, false, false) },
+			});
+			return;
+		}
+		tools.delete(b.tool_use_id);
+		const isError = !!b.is_error;
+		const rec = {
+			type: "tool_execution_end",
+			toolCallId: b.tool_use_id,
+			toolName: toolName(t.name),
+			args: t.args,
+			result: { content: resultContent(b.content) },
+			isError,
+			durationMs: Math.max(0, now() - t.startedAt),
+		};
+		if (t.name === "Agent") rec.result.details = subDetails(b.tool_use_id, true, isError);
+		const meta = Array.isArray(m.tool_result_meta) ? m.tool_result_meta.find((x) => isObj(x) && x.id === b.tool_use_id) : null;
+		if (meta && meta.permission_decision && meta.permission_decision.decision === "reject") rec.denied = true;
+		out.push(rec);
 	}
 
 	function onResult(m, out) {
@@ -253,7 +283,7 @@ function createTranslator(opts = {}) {
 		out.push(end);
 		out.push(aborted ? { type: "agent_settled", aborted: true } : { type: "agent_settled" });
 		turnOpen = false;
-		tools.clear();
+		for (const [id, t] of tools) if (!t.async) tools.delete(id); // a background subagent outlives the turn
 	}
 
 	function onSystem(m, out) {
@@ -289,7 +319,21 @@ function createTranslator(opts = {}) {
 					});
 				}
 				break;
+			case "task_notification": {
+				const id = m.tool_use_id || taskTool.get(m.task_id);
+				const t = id && tools.get(id);
+				if (!t || !t.async) break; // foreground subagents ended with their tool result
+				tools.delete(id);
+				taskTool.delete(m.task_id);
+				const isError = m.status !== undefined && m.status !== "completed";
+				const text = typeof m.summary === "string" ? m.summary : "";
+				const rec = { type: "tool_execution_end", toolCallId: id, toolName: "subagent", args: t.args, result: { content: text ? [{ type: "text", text }] : [] }, isError, durationMs: Math.max(0, now() - t.startedAt) };
+				rec.result.details = subDetails(id, true, isError);
+				out.push(rec);
+				break;
+			}
 			case "task_started":
+				if (m.task_id && m.tool_use_id) taskTool.set(m.task_id, m.tool_use_id);
 				if (m.tool_use_id) {
 					const s = sub(m.tool_use_id);
 					if (!s.agent) s.agent = m.subagent_type;
@@ -341,4 +385,4 @@ function createTranslator(opts = {}) {
 	};
 }
 
-module.exports = { createTranslator, TOOL_NAME };
+module.exports = { createTranslator, TOOL_NAME, STOP_REASON, toolName, mapArgs, piBlocks, resultContent };

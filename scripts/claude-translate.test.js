@@ -23,6 +23,10 @@ const SENDS = {
 	interrupt: { 0: { text: "Write a long story." } },
 	queue: { 0: { text: "Read data.txt and count the lines." }, 3: { text: "Also end your final answer with the word DONE." } },
 	"thinking-subagent": { 0: { text: "Use a checker subagent to count the lines of data.txt." } },
+	// After an interrupt the same session takes a second prompt (index 19 is its repeated init).
+	"interrupt-continue": { 0: { text: "Count from 1 to 200." }, 19: { text: "Reply with the single word: ready." } },
+	// A background subagent: the one prompt gives two results; the second turn is unprompted (no send for it).
+	"subagent-background": { 0: { text: "Use a subagent to append a line to notes.txt." } },
 };
 
 function run(name, messages = load(name)) {
@@ -174,4 +178,45 @@ test("unknown or malformed messages are ignored without a throw and change nothi
 	const out = [...t2.userMessage(SENDS.read[0])];
 	for (const m of mixed) out.push(...t2.push(m));
 	assert.equal(JSON.stringify(out), want);
+});
+
+test("background subagent: its card stays open past the first result and ends at task_notification; the unprompted turn has no user row", () => {
+	const out = run("subagent-background");
+	const t = types(out);
+	assert.equal(t.filter((x) => x === "agent_start").length, 2, "the engine's own second turn opens a turn");
+	assert.equal(t.filter((x) => x === "agent_end").length, 2);
+	assert.equal(t.filter((x) => x === "agent_settled").length, 2);
+	assert.equal(out.filter((r) => r.type === "message_start" && r.message.role === "user").length, 1, "no user row for the unprompted turn");
+	const firstEnd = t.indexOf("agent_end");
+	const subEnd = out.findIndex((r) => r.type === "tool_execution_end" && r.toolName === "subagent");
+	assert.ok(subEnd > firstEnd, "the card ends after the first turn closed");
+	assert.equal(out.filter((r) => r.type === "tool_execution_end" && r.toolName === "subagent").length, 1, "ended once");
+	assert.equal(out[subEnd].isError, false);
+	assert.ok(out[subEnd].result.details.results[0].messages.length >= 2, "the inner messages that arrived after the first result are on the card");
+	const launched = out.findIndex((r) => r.type === "tool_execution_update" && /background/.test(JSON.stringify(r.partialResult)));
+	assert.ok(launched >= 0 && launched < firstEnd, "launch result shows the card as running, not finished");
+	const second = out.slice(t.indexOf("agent_start", t.indexOf("agent_start") + 1));
+	assert.ok(second.some((r) => r.type === "message_update" || r.type === "message_end"), "the second turn's text is not dropped");
+	assert.equal(t.filter((x) => x === "claude_session").length, 1, "the repeated init is not a second session");
+});
+
+test("a repeated init with the same session is no change; a different session id is", () => {
+	const tr = createTranslator();
+	const init = load("read")[0];
+	assert.equal(tr.push(init).length, 1);
+	assert.equal(tr.push({ ...init, uuid: "other" }).length, 0);
+	const again = tr.push({ ...init, session_id: "another-session" });
+	assert.deepEqual(types(again), ["claude_session"]);
+	assert.equal(again[0].sessionId, "another-session");
+});
+
+test("interrupt then a second prompt: the interrupted turn ends as aborted, the next is a normal turn, no user row for the interrupt marker", () => {
+	const out = run("interrupt-continue");
+	const t = types(out);
+	assert.equal(t.filter((x) => x === "agent_settled").length, 2);
+	assert.deepEqual(out.filter((r) => r.type === "agent_settled"), [{ type: "agent_settled", aborted: true }, { type: "agent_settled" }]);
+	assert.equal(out.filter((r) => r.type === "message_start" && r.message.role === "user").length, 2, "only our two sends");
+	assert.ok(!JSON.stringify(out).includes("Request interrupted"));
+	assert.equal(t.filter((x) => x === "claude_session").length, 1);
+	assert.ok(!out.some((r) => r.message && r.message.stopReason === "error"));
 });

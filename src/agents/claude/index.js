@@ -1,6 +1,7 @@
 // The Claude agent adapter (phase 7, T4): the shell. It loads the Agent SDK (ESM, dynamic import, one injectable loader), starts one
-// long-lived query with streaming input, and passes what the SDK emits on to the sink as { type: "sdk_message", message } records.
-// The translation into Pi's record shapes is T5; until then any request other than prompt and abort answers { success:false, unsupported:true }.
+// long-lived query with streaming input. Every SDK message goes through the translator (translate.js) and the sink gets Pi-shaped
+// records; after each result the context meter status and the cost are sent too (status.js). Requests are answered by requests.js,
+// history comes from history.js (the SDK's own functions). A request Claude cannot serve answers { success:false, unsupported:true }.
 // Key safety: the key goes into the SDK's `env` and nowhere else. This file never logs, never puts the key in an option, an error or a status.
 // The engine path comes from one function (enginePath) that returns null with a reason until the download-on-first-use task exists.
 "use strict";
@@ -11,6 +12,10 @@ const { pathToFileURL } = require("node:url");
 const A = require("../adapter");
 const { killTree } = require("../../kill-tree");
 const { sdkModeFor, makeCanUseTool } = require("./permissions");
+const { createTranslator } = require("./translate");
+const requests = require("./requests");
+const { createHistory } = require("./history");
+const status = require("./status");
 
 const DEFAULT_MAX_BUDGET_USD = 5;
 const DEFAULT_MAX_TURNS = 100;
@@ -78,6 +83,7 @@ function createClaudeAdapter(deps = {}) {
 		enginePath: deps.enginePath || enginePath,
 		env: deps.env || process.env,
 		fs: deps.fs || fs,
+		now: deps.now || Date.now,
 	};
 	const num = (v, d) => (v !== null && v !== "" && v !== undefined && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
 
@@ -150,6 +156,8 @@ function createClaudeAdapter(deps = {}) {
 		return o;
 	}
 
+	const history = createHistory({ loadSdk: () => loadSdk(), configDir: () => cfg.configDir, env: process.env });
+
 	// A queue the SDK reads as streaming input.
 	function inputQueue() {
 		const items = [];
@@ -195,6 +203,11 @@ function createClaudeAdapter(deps = {}) {
 	// opts: { cwd, env?, settings?, sessionRef?, mode?, ask? }. Returns the handle at once; readiness and failures come through the sink.
 	function start(opts, sink) {
 		const handle = { pid: undefined, exitCode: null, signalCode: null, query: null, input: inputQueue(), child: null, closed: false, exitCbs: [], sink, mode: opts.mode };
+		// What the adapter knows about this chat: its own translator, usage totals, the model and effort in force.
+		handle.translator = createTranslator({ now: cfg.now });
+		handle.track = status.newTrack();
+		handle.meta = { cwd: opts.cwd, sessionId: opts.sessionRef || null, modelId: null, chosen: false, effort: null, streaming: false, lastAssistantText: null, commands: [], permissionMode: null, lastContext: null };
+		handle.limits = {};
 		const finish = (info) => {
 			if (handle.exitCode !== null || handle.signalCode !== null) return;
 			if (info && info.signal) handle.signalCode = info.signal;
@@ -221,6 +234,8 @@ function createClaudeAdapter(deps = {}) {
 					cwd: opts.cwd,
 				});
 				handle.canUseTool = canUseTool;
+				const lim = opts.settings || cfg.getSettings() || {};
+				handle.limits = { budgetUsd: num(lim.claudeMaxBudgetUsd, DEFAULT_MAX_BUDGET_USD), maxTurns: Math.floor(num(lim.claudeMaxTurns, DEFAULT_MAX_TURNS)) };
 				const options = buildOptions(opts, key, {
 					canUseTool,
 					// Lets stop() tree-kill the engine process (the SDK does not give us its pid otherwise).
@@ -238,14 +253,12 @@ function createClaudeAdapter(deps = {}) {
 					return finish({ kind: "exit", code: null, signal: "SIGTERM" });
 				}
 				const init = typeof q.initializationResult === "function" ? await q.initializationResult() : {};
+				if (init && Array.isArray(init.commands)) handle.meta.commands = init.commands;
 				if (!sink.isCurrent || sink.isCurrent(handle)) sink.ready(handle, init || {});
 				for await (const message of q) {
 					if (sink.isCurrent && !sink.isCurrent(handle)) continue;
-					sink.record(handle, { type: "sdk_message", message });
-					// A budget stop is its own event, so the UI can offer Continue later.
-					if (message && message.type === "result" && message.subtype === "error_max_budget_usd") {
-						sink.record(handle, { type: "claude_budget_reached", total_cost_usd: message.total_cost_usd, session_id: message.session_id });
-					}
+					emit(handle, handle.translator.push(message));
+					if (message && message.type === "result") await afterResult(handle, message);
 				}
 				finish({ kind: "exit", code: 0, signal: null });
 			} catch (e) {
@@ -254,6 +267,38 @@ function createClaudeAdapter(deps = {}) {
 			}
 		})();
 		return handle;
+	}
+
+	// Records to the sink, remembering what the requests need (session, model, streaming, last answer text).
+	function emit(h, records) {
+		for (const r of records) {
+			const m = h.meta;
+			if (r.type === "claude_session") {
+				m.sessionId = r.sessionId || m.sessionId;
+				if (!m.chosen && r.model) m.modelId = r.model;
+				if (r.permissionMode) m.permissionMode = r.permissionMode;
+			} else if (r.type === "agent_start") m.streaming = true;
+			else if (r.type === "agent_settled") m.streaming = false;
+			else if (r.type === "message_end" && r.message && r.message.role === "assistant" && r.message.stopReason !== "error") {
+				const text = (r.message.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+				if (text) m.lastAssistantText = text;
+			}
+			h.sink.record(h, r);
+		}
+	}
+
+	// After every result: the cost and the context meter (getContextUsage, the only live source), and the pause event for a limit stop.
+	async function afterResult(h, result) {
+		status.trackUsage(h.track, result);
+		let usage = null;
+		try {
+			if (h.query && typeof h.query.getContextUsage === "function") usage = await h.query.getContextUsage();
+		} catch {}
+		if (usage) h.meta.lastContext = usage;
+		const ctx = status.contextStatus(usage || h.meta.lastContext, h.track);
+		if (ctx && !(h.sink.isCurrent && !h.sink.isCurrent(h))) h.sink.record(h, status.statusRecord(status.CONTEXT_STATUS_KEY, ctx));
+		const pause = status.pauseEvent(result, h.limits);
+		if (pause) h.sink.record(h, pause);
 	}
 
 	const canSend = (h) => !!h && !h.closed && h.input.open && h.exitCode === null && h.signalCode === null;
@@ -266,15 +311,38 @@ function createClaudeAdapter(deps = {}) {
 		return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
 	}
 
-	// Pi-shaped requests in. Only prompt and abort are served in T4; the rest answers unsupported (T5 adds them).
+	const answerCtx = (h) => ({
+		state: () => ({ ...h.meta }),
+		patch: (p) => {
+			if (p.modelId) {
+				h.meta.modelId = p.modelId;
+				h.meta.chosen = true;
+			}
+			if (p.effort) h.meta.effort = p.effort;
+		},
+		query: h.query,
+		messages: () => history.loadMessages(h.meta.sessionId, { cwd: h.meta.cwd }),
+		scrub: (t) => scrub(t),
+	});
+
+	// Pi-shaped requests in. A prompt feeds the input stream and its row is emitted here (the stream never echoes it); the rest is
+	// answered by requests.js. Every request with an id gets a response record.
 	function send(h, record) {
 		if (!canSend(h) || !record) return false;
-		if (record.type === "prompt") return h.input.push(userMessage(record));
-		if (record.type === "abort") {
-			if (h.query && typeof h.query.interrupt === "function") Promise.resolve(h.query.interrupt()).catch(() => {});
+		if (record.type === "prompt") {
+			const text = String(record.message == null ? "" : record.message);
+			const images = Array.isArray(record.images) ? record.images.filter((im) => im && im.data).map((im) => ({ data: im.data, mimeType: im.mimeType || "image/png" })) : [];
+			if (!h.input.push(userMessage(record))) return false;
+			emit(h, h.translator.userMessage({ text, images }));
+			if (record.id !== undefined) h.sink.record(h, { type: "response", id: record.id, command: "prompt", success: true });
 			return true;
 		}
-		if (record.id !== undefined && h.sink) h.sink.record(h, { type: "response", id: record.id, command: record.type, success: false, unsupported: true, error: "Not available for Claude Agent chats." });
+		Promise.resolve(requests.answer(record, answerCtx(h))).then(
+			(resp) => {
+				if (resp && record.id !== undefined && !h.closed) h.sink.record(h, resp);
+			},
+			() => {},
+		);
 		return true;
 	}
 
@@ -381,7 +449,7 @@ function createClaudeAdapter(deps = {}) {
 		state,
 		onceExit,
 		killRemains,
-		listSessions: () => [], // stub: the SDK's session listing comes with T8
+		listSessions: (opts) => history.listSessions(opts || {}),
 		auth,
 		mcpConfigPath: () => null,
 		onAppStart: () => {},

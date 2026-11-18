@@ -120,6 +120,12 @@
 			"rule": "pi-folder",
 			"contains": "in ~/.pi/agent/extensions loads",
 			"reason": "User-facing text of the old-copy notice (names the folder the user must look in)."
+		},
+		{
+			"file": "src/agents/claude/status.js",
+			"rule": "pi-status",
+			"contains": "const CONTEXT_STATUS_KEY = \"crust-context\";",
+			"reason": "The app context meter (src/context-panel.js) reads this status key by name. The Claude adapter feeds the same meter from getContextUsage(), so it sets the same key; this one line is the only place the Claude adapter names it."
 		}
 	]
 }

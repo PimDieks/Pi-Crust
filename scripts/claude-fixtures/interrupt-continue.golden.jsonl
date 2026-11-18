@@ -1,0 +1,27 @@
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Count from 1 to 200."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Count from 1 to 200."}]}}
+{"type":"claude_session","sessionId":"session-1","model":"claude-haiku-5-5","permissionMode":"default"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"1"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n2\n3\n4\n5"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n6\n7\n8\n9"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n10\n11\n12\n13"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n14\n15\n16\n17"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n18\n19\n20\n21"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n22\n23\n24\n25"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n26\n27\n28\n29"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n30\n31\n32\n33"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33"}],"stopReason":"aborted"}}
+{"type":"agent_end","messages":[],"costUsd":0.00006510000000000001,"totalCostUsd":0.00006510000000000001}
+{"type":"agent_settled","aborted":true}
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Reply with the single word: ready."}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Reply with the single word: ready."}]}}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"stop"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"ready"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"ready"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ready"}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"costUsd":0.00008295,"totalCostUsd":0.00014805}
+{"type":"agent_settled"}
