@@ -23,7 +23,7 @@ function repoFromArgs(argv) {
 	return p && fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.resolve(p) : null;
 }
 const DEV_URL = process.env.PI_CRUST_URL || "http://localhost:3000/";
-const SELFTEST = process.env.PI_CRUST_SELFTEST === "1";
+const SELFTEST = !app.isPackaged && process.env.PI_CRUST_SELFTEST === "1"; // never in a packaged app: a stray variable must not switch off updates or the crash dialog
 if (SELFTEST) process.on("uncaughtException", (e) => { console.error("SELFTEST crash", e); app.exit(1); }); // selftest only: a crash logs and exits, no dialog
 const START_HIDDEN = process.env.PI_CRUST_HIDDEN === "1"; // set by the login item: start in the background
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
