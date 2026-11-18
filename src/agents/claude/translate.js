@@ -13,13 +13,16 @@
 // system/task_notification; the engine may then start a second turn by itself (origin task-notification), which opens with its
 // status/message_start and has no user row.
 //
-// Records beyond Pi's list (the adapter or the app may ignore them): { type:"claude_session", sessionId, model, permissionMode }.
+// Records beyond Pi's list (the adapter or the app may ignore them): { type:"claude_session", sessionId, model, permissionMode, skillCount? },
+// { type:"auto_retry_end", success, attempt, finalError? } (Pi's own shape, closes auto_retry_start).
 // Extras on Pi records: agent_end { costUsd (this turn), totalCostUsd (cumulative for the query) }, agent_settled { aborted },
 // tool_execution_end { denied:true } for a refused tool, message_end of an error row { errorCode: <result subtype> }.
 "use strict";
 
-// SDK tool name -> the name the app already knows (Pi's). Unknown tools keep their own name.
-const TOOL_NAME = { Read: "read", Edit: "edit", Write: "write", Bash: "bash", Glob: "find", Grep: "grep", Agent: "subagent" };
+// SDK tool name -> the name the app already knows (Pi's). Unknown tools keep their own name. PowerShell is a shell like Bash: the
+// card shows its command (renderer toolSummary reads args.command for "bash"). Background-shell helpers (BashOutput, KillShell) and
+// Monitor have no command, so they keep their own names.
+const TOOL_NAME = { Read: "read", Edit: "edit", Write: "write", Bash: "bash", PowerShell: "bash", Glob: "find", Grep: "grep", Agent: "subagent" };
 const STOP_REASON = { end_turn: "stop", stop_sequence: "stop", tool_use: "toolUse", max_tokens: "length", pause_turn: "stop", refusal: "stop" };
 const ERROR_TEXT = {
 	error_max_turns: "Stopped: the turn limit was reached",
@@ -35,13 +38,21 @@ const toolName = (n) => TOOL_NAME[n] || String(n);
 function mapArgs(sdkName, input) {
 	const a = isObj(input) ? { ...input } : {};
 	if (sdkName === "Agent") return { agent: a.subagent_type, task: a.description };
-	if ("file_path" in a) {
-		a.path = a.file_path;
-		delete a.file_path;
+	for (const k of ["file_path", "notebook_path"]) {
+		if (k in a) {
+			a.path = a[k];
+			delete a[k];
+		}
 	}
 	if (sdkName === "Edit") {
 		if ("old_string" in a) (a.oldText = a.old_string), delete a.old_string;
 		if ("new_string" in a) (a.newText = a.new_string), delete a.new_string;
+		// Edit's args are { path, oldText, newText }, plus replaceAll only when it is on: the SDK's snake_case replace_all:false is
+		// the default and is not carried.
+		if ("replace_all" in a) {
+			if (a.replace_all === true) a.replaceAll = true;
+			delete a.replace_all;
+		}
 	}
 	return a;
 }
@@ -74,6 +85,7 @@ function createTranslator(opts = {}) {
 	let cur = null; // the open assistant message: { blocks: Map(index -> block), stopReason, aborted }
 	const tools = new Map(); // tool_use id -> { name (SDK), args, startedAt }
 	const subs = new Map(); // Agent tool_use id -> { agent, task, messages: [], turns }
+	let retry = null; // the open auto-retry: { attempt }
 	const early = []; // tool results that arrived before their assistant message closed
 	const taskTool = new Map(); // task_id -> Agent tool_use id (a background subagent ends at its task_notification)
 
@@ -88,15 +100,23 @@ function createTranslator(opts = {}) {
 			results: [{ agent: s.agent, task: s.task, exitCode: done ? (isError ? 1 : 0) : -1, stopReason: done ? "stop" : "toolUse", usage: { turns: s.turns }, messages: s.messages.slice() }],
 		};
 	};
+	const endRetry = (out, success, finalError) => {
+		if (!retry) return;
+		const r = { type: "auto_retry_end", success, attempt: retry.attempt };
+		if (!success && finalError) r.finalError = finalError;
+		retry = null;
+		out.push(r);
+	};
 	const startTurn = (out) => {
 		if (turnOpen) return;
 		turnOpen = true;
 		errorShown = false;
 		out.push({ type: "agent_start" });
 	};
-	const errorRow = (out, message, code) => {
+	const errorRow = (out, message, code, detail) => {
 		const m = { role: "assistant", content: [], stopReason: "error", errorMessage: message };
 		if (code) m.errorCode = code;
+		if (detail) m.errorDetail = detail; // the engine's own text, for a details view; never the headline
 		out.push({ type: "message_start", message: { role: "assistant", content: [], stopReason: "stop" } }, { type: "message_end", message: m });
 		errorShown = true;
 	};
@@ -137,6 +157,8 @@ function createTranslator(opts = {}) {
 		const stopReason = cur.aborted ? "aborted" : cur.stopReason || "stop";
 		out.push({ type: "message_end", message: { role: "assistant", content, stopReason } });
 		for (const c of calls) {
+			// durationMs counts from here, which includes any wait for the user's approval: the stream carries no moment for the
+			// approval (it is the adapter's canUseTool), so the two cannot be told apart in this file.
 			tools.set(c.id, { name: c.name, args: c.args, startedAt: now() });
 			if (c.name === "Agent") Object.assign(sub(c.id), { agent: c.args.agent, task: c.args.task });
 			out.push({ type: "tool_execution_start", toolCallId: c.id, toolName: toolName(c.name), args: c.args });
@@ -150,6 +172,7 @@ function createTranslator(opts = {}) {
 		if (!isObj(e) || m.parent_tool_use_id) return;
 		switch (e.type) {
 			case "message_start":
+				endRetry(out, true); // a new message after api_retry: the retry worked
 				startTurn(out);
 				cur = { blocks: new Map(), stopReason: null, aborted: false };
 				out.push({ type: "message_start", message: { role: "assistant", content: [], stopReason: "stop" } });
@@ -226,9 +249,10 @@ function createTranslator(opts = {}) {
 				sub(m.parent_tool_use_id).messages.push({ role: "toolResult", toolCallId: b.tool_use_id, content: resultContent(b.content), isError: !!b.is_error });
 				continue;
 			}
-			// A background Agent launch answers before its assistant message is closed (nothing waits for approval): the card does not
-			// exist yet, so that result waits for message_stop. Any other result before its call is complete is out of order and dropped.
-			if (isObj(m.tool_use_result) && m.tool_use_result.status === "async_launched" && !tools.has(b.tool_use_id) && cur && [...cur.blocks.values()].some((x) => x.type === "tool_use" && x.id === b.tool_use_id)) {
+			// A result can arrive before its assistant message is closed (a background Agent launch, or a fast tool when the model made
+			// several calls in one message): the card does not exist yet, so every such result waits for message_stop and is then emitted
+			// after the starts, in arrival order. Only a result for a call we never saw at all is dropped (in toolResult).
+			if (!tools.has(b.tool_use_id) && cur && [...cur.blocks.values()].some((x) => x.type === "tool_use" && x.id === b.tool_use_id)) {
 				early.push({ m, b });
 				continue;
 			}
@@ -272,10 +296,29 @@ function createTranslator(opts = {}) {
 	function onResult(m, out) {
 		if (!turnOpen) return; // a local command's result (/compact) or a stray one: no turn to end
 		closeMessage(out);
+		endRetry(out, !m.is_error, m.is_error ? (Array.isArray(m.errors) && m.errors[0]) || (typeof m.result === "string" ? m.result : "") || ERROR_TEXT[m.subtype] : undefined);
 		const aborted = m.terminal_reason === "aborted_streaming";
 		if (m.is_error && !aborted && !errorShown) {
 			const text = Array.isArray(m.errors) && m.errors.length ? m.errors.join("; ") : typeof m.result === "string" && m.result ? m.result : ERROR_TEXT[m.subtype] || `The agent stopped with an error (${m.subtype})`;
-			errorRow(out, m.subtype && ERROR_TEXT[m.subtype] && m.subtype !== "error_during_execution" ? ERROR_TEXT[m.subtype] : text, m.subtype);
+			// error_during_execution carries engine diagnostics ("[ede_diagnostic] ..."): a plain sentence is the message, the raw text is the detail.
+			const plain = m.subtype === "error_during_execution" || /\[ede_diagnostic\]/.test(text);
+			errorRow(out, plain ? ERROR_TEXT.error_during_execution : m.subtype && ERROR_TEXT[m.subtype] ? ERROR_TEXT[m.subtype] : text, m.subtype, plain ? text : undefined);
+		}
+		// A call still open at the end of the turn never got its result (interrupt, crash): its card ends as an error, never silently.
+		for (const [id, t] of [...tools]) {
+			if (t.async) continue; // a background subagent outlives the turn
+			tools.delete(id);
+			const rec = {
+				type: "tool_execution_end",
+				toolCallId: id,
+				toolName: toolName(t.name),
+				args: t.args,
+				result: { content: [{ type: "text", text: aborted ? "Stopped before this finished" : "The turn ended before this finished" }] },
+				isError: true,
+				durationMs: Math.max(0, now() - t.startedAt),
+			};
+			if (t.name === "Agent") rec.result.details = subDetails(id, true, true);
+			out.push(rec);
 		}
 		const end = { type: "agent_end", messages: [] };
 		if (isObj(m.model_usage_since_last_result)) end.costUsd = Object.values(m.model_usage_since_last_result).reduce((s, u) => s + (isObj(u) && typeof u.costUSD === "number" ? u.costUSD : 0), 0);
@@ -283,7 +326,6 @@ function createTranslator(opts = {}) {
 		out.push(end);
 		out.push(aborted ? { type: "agent_settled", aborted: true } : { type: "agent_settled" });
 		turnOpen = false;
-		for (const [id, t] of tools) if (!t.async) tools.delete(id); // a background subagent outlives the turn
 	}
 
 	function onSystem(m, out) {
@@ -293,7 +335,9 @@ function createTranslator(opts = {}) {
 				const key = JSON.stringify([m.session_id, m.model, m.permissionMode]);
 				if (key !== sessionKey) {
 					sessionKey = key;
-					out.push({ type: "claude_session", sessionId: m.session_id, model: m.model, permissionMode: m.permissionMode });
+					const rec = { type: "claude_session", sessionId: m.session_id, model: m.model, permissionMode: m.permissionMode };
+					if (Array.isArray(m.skills)) rec.skillCount = m.skills.length; // getContextUsage has no skill count; the init list does
+					out.push(rec);
 				}
 				break;
 			}
@@ -302,6 +346,7 @@ function createTranslator(opts = {}) {
 				break;
 			case "api_retry": {
 				const status = m.error_status ? ` (${m.error_status})` : "";
+				retry = { attempt: m.attempt };
 				out.push({ type: "auto_retry_start", attempt: m.attempt, maxAttempts: m.max_retries, errorMessage: `${m.error || "error"}${status}` });
 				break;
 			}

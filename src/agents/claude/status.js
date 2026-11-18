@@ -23,7 +23,7 @@ function categoryKey(c) {
 }
 
 function newTrack() {
-	return { models: new Map(), totalCostUsd: 0, turnCostUsd: 0 };
+	return { models: new Map(), totalCostUsd: 0, turnCostUsd: 0, skillCount: 0 }; // skillCount: from the init message's skills list (the adapter sets it)
 }
 
 // result.modelUsage is cumulative for the query; model_usage_since_last_result is this turn's part.
@@ -65,7 +65,7 @@ function contextStatus(usage, track = newTrack()) {
 		deferred: 0,
 		toolCount: Array.isArray(usage.mcpTools) ? usage.mcpTools.length : 0,
 		deferredCount: 0,
-		skillCount: 0,
+		skillCount: num(track.skillCount),
 		memoryFiles: (Array.isArray(usage.memoryFiles) ? usage.memoryFiles : []).filter((f) => isObj(f) && typeof f.path === "string").map((f) => ({ path: f.path, tokens: num(f.tokens) })),
 		models: [...track.models.values()].sort((a, b) => b.input + b.output - (a.input + a.output)),
 		// Beyond Pi's fields (the meter ignores them): the cost of the last turn and of the chat, an estimate by the SDK.

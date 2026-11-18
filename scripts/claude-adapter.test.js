@@ -283,3 +283,30 @@ test("scrub removes the exact key and any sk-ant- shaped token, each on its own"
 	assert.strictEqual(scrub(null), "");
 	assert.strictEqual(scrub("plain", 5), "plain");
 });
+
+test("every record that leaves the adapter is scrubbed: tool output, error results, assistant errors and task notifications never carry the key", async () => {
+	const t = await rig();
+	const echo = "key is " + KEY + " done";
+	t.sdk.setScript([
+		{ type: "system", subtype: "init", session_id: "s1", model: "claude-haiku-5-5", permissionMode: "default" },
+		{ type: "system", subtype: "status", status: "requesting" },
+		{ type: "stream_event", event: { type: "message_start" } },
+		{ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "Agent", input: {} } } },
+		{ type: "stream_event", event: { type: "content_block_stop", index: 0 } },
+		{ type: "stream_event", event: { type: "message_stop" } },
+		{ type: "system", subtype: "task_started", task_id: "k1", tool_use_id: "t1", description: "d" },
+		{ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: echo }] }, tool_use_result: { status: "async_launched" } },
+		{ type: "assistant", error: "unknown", message: { content: [{ type: "text", text: echo }] } },
+		{ type: "result", subtype: "error_during_execution", is_error: true, errors: [echo], session_id: "s1" },
+		{ type: "system", subtype: "task_notification", task_id: "k1", tool_use_id: "t1", status: "completed", summary: echo },
+	]);
+	const h = t.adapter.start({ cwd: t.cwd }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	t.adapter.send(h, { type: "prompt", message: "hi" });
+	await t.until(() => t.events.records.some((r) => r.type === "tool_execution_end" && r.toolCallId === "t1"));
+	const all = JSON.stringify(t.events.records);
+	assert.ok(!all.includes(KEY), "the key is not in any record");
+	assert.ok(all.includes("[key]"), "the text is there, with the key replaced");
+	assert.ok(t.events.records.some((r) => r.type === "message_end" && r.message.errorMessage), "an error row was emitted");
+	t.adapter.stop(h);
+});

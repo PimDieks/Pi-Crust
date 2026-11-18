@@ -63,6 +63,29 @@ function scrub(text, key) {
 	return s.replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, "[key]");
 }
 
+// A record with the key scrubbed out of every string in it (error text, tool output, task notifications: anything the engine says may
+// echo the key). Returns the same object when nothing changed.
+function scrubDeep(v, key) {
+	if (typeof v === "string") return v.includes("sk-ant-") || (key && v.includes(key)) ? scrub(v, key) : v;
+	if (Array.isArray(v)) {
+		let out = null;
+		v.forEach((x, i) => {
+			const y = scrubDeep(x, key);
+			if (y !== x) (out = out || v.slice())[i] = y;
+		});
+		return out || v;
+	}
+	if (v && typeof v === "object") {
+		let out = null;
+		for (const k of Object.keys(v)) {
+			const y = scrubDeep(v[k], key);
+			if (y !== v[k]) (out = out || { ...v })[k] = y;
+		}
+		return out || v;
+	}
+	return v;
+}
+
 function defaultIsPackaged() {
 	try {
 		const e = require("electron");
@@ -156,7 +179,7 @@ function createClaudeAdapter(deps = {}) {
 		return o;
 	}
 
-	const history = createHistory({ loadSdk: () => loadSdk(), configDir: () => cfg.configDir, env: process.env });
+	const history = createHistory({ loadSdk: () => loadSdk(), configDir: () => cfg.configDir, env: process.env, scrub: (t) => scrub(t) });
 
 	// A queue the SDK reads as streaming input.
 	function inputQueue() {
@@ -225,6 +248,7 @@ function createClaudeAdapter(deps = {}) {
 				if (!cfg.configDir) return finish({ kind: "error", error: NO_CONFIG_DIR, errorCode: "NO_CONFIG_DIR" });
 				const k = cfg.keystore ? await cfg.keystore.read() : { key: null };
 				key = k && k.key;
+				handle.key = key || null;
 				if (!key) return finish({ kind: "error", error: (k && k.reason) || NO_KEY, errorCode: "NO_KEY" });
 				const sdk = await loadSdk();
 				if (handle.closed) return finish({ kind: "exit", code: null, signal: "SIGTERM" });
@@ -281,13 +305,14 @@ function createClaudeAdapter(deps = {}) {
 				m.sessionId = r.sessionId || m.sessionId;
 				if (!m.chosen && r.model) m.modelId = r.model;
 				if (r.permissionMode) m.permissionMode = r.permissionMode;
+				if (typeof r.skillCount === "number") h.track.skillCount = r.skillCount;
 			} else if (r.type === "agent_start") m.streaming = true;
 			else if (r.type === "agent_settled") m.streaming = false;
 			else if (r.type === "message_end" && r.message && r.message.role === "assistant" && r.message.stopReason !== "error") {
 				const text = (r.message.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
 				if (text) m.lastAssistantText = text;
 			}
-			h.sink.record(h, r);
+			h.sink.record(h, scrubDeep(r, h.key));
 		}
 	}
 
@@ -300,9 +325,9 @@ function createClaudeAdapter(deps = {}) {
 		} catch {}
 		if (usage) h.meta.lastContext = usage;
 		const ctx = status.contextStatus(usage || h.meta.lastContext, h.track);
-		if (ctx && !(h.sink.isCurrent && !h.sink.isCurrent(h))) h.sink.record(h, status.statusRecord(status.CONTEXT_STATUS_KEY, ctx));
+		if (ctx && !(h.sink.isCurrent && !h.sink.isCurrent(h))) h.sink.record(h, scrubDeep(status.statusRecord(status.CONTEXT_STATUS_KEY, ctx), h.key));
 		const pause = status.pauseEvent(result, h.limits);
-		if (pause) h.sink.record(h, pause);
+		if (pause) h.sink.record(h, scrubDeep(pause, h.key));
 	}
 
 	const canSend = (h) => !!h && !h.closed && h.input.open && h.exitCode === null && h.signalCode === null;
@@ -474,3 +499,4 @@ module.exports.CLAUDE_MD_CAP_BYTES = CLAUDE_MD_CAP_BYTES;
 module.exports.DEFAULT_MAX_BUDGET_USD = DEFAULT_MAX_BUDGET_USD;
 module.exports.NO_KEY = NO_KEY;
 module.exports.scrub = scrub;
+module.exports.scrubDeep = scrubDeep;
