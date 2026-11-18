@@ -2280,6 +2280,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 		$("#input").value = prompt;
 		submit();
 	});
+	// NOPROMPT selftest: no turn will settle, so start the tour (the chosen steps) right away.
+	if (info.selftest && info.selftestNoPrompt && !selftestTouring) setTimeout(() => ((selftestTouring = true), runSelftestTour()), 4000);
 	initViews();
 	initChanges();
 	initTerminal();
