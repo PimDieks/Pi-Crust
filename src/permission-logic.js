@@ -427,7 +427,9 @@ function decide(args) {
 			const wheres = targets.map((t) => checkPath(t, cwd, pathOpts));
 			if (targets.some((t) => vis(t).length > MAX_SHOWN)) return block(tooLong("file path", Math.max(...targets.map((t) => vis(t).length))));
 			const flags = { outside: wheres.some((w) => !w.inside), protected: wheres.some((w) => w.protected), unc: wheres.some((w) => w.unc), broad: wheres.some((w) => w.broad) };
-			const resolved = wheres.map((w) => w.resolved);
+			// Show where the path really goes when it is outside, or spelled in a way that hides it (URL, ~, @, .., Git Bash drive, non-ASCII).
+			const odd = (t) => /^(file:|~|@)|\.\.|^\/(mnt\/|cygdrive\/)?[a-zA-Z](\/|$)|[^\x20-\x7e]/.test(t.trim());
+			const resolved = wheres.map((w, i) => (!w.inside || odd(targets[i]) ? w.resolved : null));
 			// Protected files and network paths always ask, with no "for this chat" and no inside-project shortcut.
 			if (flags.protected || flags.unc) return askOnce(askEdit(mode, toolName, targets, resolved, flags), "edit");
 			if (!flags.outside) {

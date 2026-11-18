@@ -351,7 +351,7 @@ function register(ctx) {
 			if (change.model) r = await ctx.piRequest(id, "set_model", { provider: change.model.provider, modelId: change.model.id });
 			else if (change.thinkingLevel) r = await ctx.piRequest(id, "set_thinking_level", { level: change.thinkingLevel });
 			// /mode is an extension command: Pi runs it right away, also while it is working (like the desktop's selector).
-			else if (change.mode) r = await ctx.piRequest(id, "prompt", { message: `/mode ${change.mode}` });
+			else if (change.mode) r = !hub.summary(id)?.mode ? { success: false, error: "Permission modes are not active in this chat (nothing is enforced)" } : await ctx.piRequest(id, "prompt", { message: `/crust-mode ${change.mode}` });
 			if (!r?.success) return { status: 409, error: r?.error || "Pi didn't accept the change" };
 			// The desktop's model pill and thinking select follow (the mode follows the extension's status by itself).
 			if (!change.mode) {

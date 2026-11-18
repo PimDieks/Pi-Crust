@@ -401,6 +401,7 @@ input:focus, textarea:focus { outline: none; border-color: color-mix(in srgb, va
 .composer-bar > * { flex: none; }
 .composer-bar > .spacer { flex: 1; }
 .composer-bar > .pill-select { flex: 0 1 auto; }
+#perm-wrap.mode-none { background-color: transparent; color: var(--muted); border: 1px dashed var(--border); }
 #perm-wrap.mode-plan { background-color: var(--fills-action-muted); color: var(--text-action-on-surface); }
 #perm-wrap.mode-ask-edits, #perm-wrap.mode-ask-commands { background-color: var(--fills-minor-muted); color: var(--text-minor); }
 

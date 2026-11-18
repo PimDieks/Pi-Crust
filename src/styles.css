@@ -294,6 +294,9 @@ select option { background: var(--panel-2); color: var(--text); }
 #ask h2::before { content: "? "; color: var(--accent); }
 #ask .ask-more { color: var(--muted); font-weight: normal; font-size: var(--fs-sm); }
 #ask p { margin: 0 0 10px; color: var(--muted); white-space: pre-wrap; }
+#ask .ask-detail { margin: 0 0 6px; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--mono); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; }
+#ask .ask-mode { margin: 0 0 10px; color: var(--muted); font-size: var(--fs-sm); }
+#ask .options button.ask-deny { color: var(--err); }
 #ask .options { display: flex; flex-direction: column; gap: 6px; }
 #ask .options button { text-align: left; background: var(--hover); border: 1px solid transparent; border-radius: var(--radius-sm); padding: 8px var(--space-sm); cursor: pointer; }
 #ask .options button:hover, #ask .options button:focus { background: var(--selected); border-color: var(--accent); outline: none; }
@@ -456,6 +459,7 @@ select option { background: var(--panel-2); color: var(--text); }
 
 /* Composer extras */
 #perm-mode { field-sizing: content; font-size: var(--fs-sm); font-weight: 500; border-radius: var(--radius-full); background-color: var(--selected); }
+#perm-mode.mode-none, #perm-mode:disabled { background-color: transparent; color: var(--muted); border: 1px dashed var(--border); cursor: help; }
 #perm-mode.mode-plan { background-color: var(--fills-action-muted); color: var(--text-action-on-surface); }
 #perm-mode.mode-ask-edits, #perm-mode.mode-ask-commands { background-color: var(--fills-minor-muted); color: var(--text-minor); }
 

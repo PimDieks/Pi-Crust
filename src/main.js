@@ -247,6 +247,17 @@ function killPi(proc) {
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
 // `wt` (from resolveWt) is null for the repo itself, { cwd, branch } for a chat in its own worktree (see worktree-main.js), or
 // { cwd, missing: true }: the worktree is gone. Then nothing is spawned (never a silent fallback to the main checkout).
+// Name of an older permission-modes extension in the user's Pi extensions folder, the first time only (then null).
+function permissionOldCopy() {
+	try {
+		const found = require("./permission-logic").findOldCopy(ENV.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"));
+		if (!found || readSettings().permissionOldCopyTold === found) return null;
+		if (!SELFTEST) writeSettings({ permissionOldCopyTold: found });
+		return found;
+	} catch {
+		return null;
+	}
+}
 function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	if (wt && wt.missing) {
 		if (!openList.some((e) => e.id === chatId)) {
@@ -276,6 +287,10 @@ function startPi(chatId, sessionFile, hint = {}, wt = null) {
 	// advisor.ts adds Anthropic's advisor tool (pairs in ~/.pi/agent/advisor.json, /advisor command).
 	const args = ["--mode", "rpc", ...["crust-context.ts", "crust-guard.ts", "advisor.ts", "permission-modes.ts"].flatMap((f) => ["-e", path.join(__dirname, "pi-extension", f)])];
 	if (sessionFile) args.push("--session", sessionFile);
+	// An old user copy of permission-modes in ~/.pi/agent/extensions would also load: two prompt layers. The app talks to
+	// OUR extension through /crust-mode (no clash with a second /mode), and the user is told once. The folder is only read.
+	const oldCopy = permissionOldCopy();
+	if (oldCopy) hint = { ...hint, oldPermissionCopy: oldCopy };
 	const [cmd, cmdArgs] = [pi.command, [...pi.args, ...args]];
 	// Windows: no process groups, and detached would open a console window.
 	const proc = spawn(cmd, cmdArgs, { cwd: cwd || REPO, env: { ...ENV, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn()) }, stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });

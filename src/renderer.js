@@ -1470,7 +1470,14 @@ function showDialog(spec) {
 
 // Fills `box` with the controls for one dialog spec; `finish(response)` answers it.
 function fillDialog(box, r, finish) {
-	box.replaceChildren(el("h2", "", r.title || "Pi asks"));
+	// A permission prompt ("Allow once" ...): the question, the exact thing to approve in a monospace block, the mode below.
+	const lines = r.method === "select" && Array.isArray(r.options) && r.options.includes("Allow once") && typeof r.title === "string" ? r.title.split("\n") : null;
+	if (lines && lines.length > 1) {
+		const modeLine = /^Mode: /.test(lines[lines.length - 1]) ? lines.pop() : "";
+		box.replaceChildren(el("h2", "", lines[0]));
+		box.append(el("pre", "ask-detail", lines.slice(1).join("\n")));
+		if (modeLine) box.append(el("div", "ask-mode", modeLine));
+	} else box.replaceChildren(el("h2", "", r.title || "Pi asks"));
 	if (r.message) box.append(el("p", "", r.message));
 	const actions = el("div", "modal-actions");
 	const cancel = el("button", "secondary", r.cancelLabel || "Cancel");
@@ -1483,7 +1490,7 @@ function fillDialog(box, r, finish) {
 	} else if (r.method === "select") {
 		const list = el("div", "options");
 		for (const opt of r.options || []) {
-			const b = el("button", "", opt);
+			const b = el("button", opt === "Allow once" ? "ask-allow" : opt === "Deny" ? "ask-deny" : "", opt);
 			b.type = "button";
 			b.onclick = () => finish({ value: opt });
 			list.append(b);
@@ -1622,6 +1629,8 @@ function handleUiRequest(r) {
 			return;
 		case "setStatus":
 			if (r.statusKey === "permission-mode") {
+				// A mode change cancels the extension's open approval prompts (it treats them as denied): drop them here too.
+				if (chat.modes && chat.modes !== r.statusText) for (const a of [...(chat.asks || [])]) if (a.spec.method === "select" && (a.spec.options || []).includes("Allow once")) a.dismiss();
 				chat.modes = r.statusText;
 				if (chat === active) syncModeFromStatus(r.statusText);
 			}
@@ -2190,7 +2199,8 @@ function settlePiWaiters(c, msg) {
 	for (const w of list) msg ? w.fail(msg) : w.ok();
 }
 
-crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree }) => {
+crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, oldPermissionCopy }) => {
+	if (oldPermissionCopy) toast(`Pi Crust brings its own permission modes. Your older "${oldPermissionCopy}" in ~/.pi/agent/extensions loads too and asks as well. Remove or rename it to avoid double prompts.`, "info");
 	let c = chats.get(chatId);
 	const fresh = !c;
 	if (!c) c = makeChat(chatId, { sessionFile, cwd: worktree?.cwd, branch: worktree?.branch });
@@ -2206,6 +2216,8 @@ crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree }) 
 	c.state.ready = false;
 	c.dead = false;
 	c.piMissing = false;
+	c.modes = undefined; // the new process reports its mode again; until then nothing is shown as enforced
+	if (c === active) syncModeFromStatus(undefined);
 	if (fresh) {
 		// Held messages live in main: pick up what is already there (renderer reload, chat restored).
 		crust.pi.held(chatId).then((held) => {

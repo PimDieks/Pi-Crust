@@ -454,8 +454,10 @@
 		$("#send").disabled = !usable;
 
 		const mode = $("#perm-mode");
-		if (!mode.dataset.busy) mode.value = MODE_IDS.includes(c?.mode) ? c.mode : "trusted";
-		mode.disabled = !usable || !!mode.dataset.busy;
+		const modeKnown = MODE_IDS.includes(c?.mode); // only what the extension reported: no guess, and no mode shown when nothing is enforced
+		if (!mode.dataset.busy) mode.value = modeKnown ? c.mode : "";
+		mode.disabled = !usable || !!mode.dataset.busy || !modeKnown;
+		mode.title = modeKnown ? "" : "Permission modes are not active in this chat (not enforced)";
 		syncPill(mode);
 
 		const think = $("#thinking-level");
@@ -562,15 +564,14 @@
 	async function changeMode() {
 		const sel = $("#perm-mode");
 		const c = chats.get(view.id);
-		const prev = MODE_IDS.includes(c?.mode) ? c.mode : "trusted";
+		const prev = MODE_IDS.includes(c?.mode) ? c.mode : "";
 		const next = sel.value;
 		syncPill(sel);
 		sel.dataset.busy = "1";
 		sel.disabled = true;
 		const ok = await setSetting({ mode: next });
 		delete sel.dataset.busy;
-		// The extension's status confirms the switch (summary.mode); until then show what was picked.
-		if (ok && c && chats.get(c.id) === c) c.mode = next;
+		// The extension's status confirms the switch (summary.mode); nothing is assumed before it arrives.
 		if (!ok) sel.value = prev;
 		renderChrome();
 	}
