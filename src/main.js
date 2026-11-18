@@ -904,22 +904,10 @@ ipcMain.handle("browser:pick", async (_e, opts) => {
 });
 
 // Figma desktop picker: current selection via the Figma desktop MCP server.
-const figmaFile = () => {
-	const s = readSettings();
-	return {
-		key: s.figmaFileKey || process.env.PI_CRUST_FIGMA_FILE_KEY || null,
-		name: s.figmaFileName || (process.env.PI_CRUST_FIGMA_FILE_KEY && !s.figmaFileKey ? process.env.PI_CRUST_FIGMA_FILE_NAME || "file" : ""),
-	};
-};
-function figmaError(e) {
-	const msg = String((e && e.message) || e);
-	const code = e && ((e.cause && e.cause.code) || e.code);
-	if (code === "ECONNREFUSED" || code === "ECONNRESET" || /fetch failed|timed out|ECONNREFUSED/i.test(msg))
-		return "Figma desktop isn't reachable. Open Figma desktop and enable the desktop MCP server: Dev Mode → Inspect.";
-	if (/only available if your active tab/i.test(msg)) return "The active Figma tab is not a design file. Switch to a design (or FigJam) file in Figma desktop.";
-	if (/nothing is selected/i.test(msg)) return "Nothing is selected in Figma. Select a layer in Figma desktop first.";
-	return msg;
-}
+// File link and status IPC live in figma-main.js (per-project link, falls back to the old app-wide value and the env var).
+const figmaMain = require("./figma-main").register({ ipcMain, readSettings, writeSettings, get repo() { return REPO; } });
+const figmaFile = () => require("./figma-main").legacyFile(figmaMain.file());
+const figmaError = (e) => require("./figma-status").figmaError(e);
 ipcMain.handle("figma:pickSelection", async () => {
 	try {
 		if (!figmaFile().key) return { error: "No Figma file set. Paste a Figma link into the prompt once to set the file." };
@@ -935,13 +923,6 @@ ipcMain.handle("figma:pickSelection", async () => {
 		return { error: figmaError(e) };
 	}
 });
-ipcMain.handle("figma:setFileFromText", (_e, text) => {
-	const f = require("./figma-selection").parseFigmaUrl(String(text || ""));
-	if (!f) return null;
-	writeSettings({ figmaFileKey: f.key, figmaFileName: f.name });
-	return { key: f.key, name: f.name };
-});
-ipcMain.handle("figma:file", () => figmaFile());
 
 // The embedded browser is a separate WebContentsView; once it held focus, clicking the UI focuses the
 // DOM element but not the UI's webContents, so Chromium draws no caret. Hand focus back explicitly.

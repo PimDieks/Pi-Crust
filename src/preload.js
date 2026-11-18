@@ -118,6 +118,9 @@ contextBridge.exposeInMainWorld("crust", {
 		pickSelection: () => ipcRenderer.invoke("figma:pickSelection"),
 		setFileFromText: (text) => ipcRenderer.invoke("figma:setFileFromText", text),
 		file: () => ipcRenderer.invoke("figma:file"),
+		status: () => ipcRenderer.invoke("figma:status"),
+		test: () => ipcRenderer.invoke("figma:test"),
+		setFile: (link) => ipcRenderer.invoke("figma:setFile", link),
 		screenshot: () => ipcRenderer.invoke("figma:screenshot"),
 	},
 	design: {

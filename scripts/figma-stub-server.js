@@ -29,7 +29,7 @@ function handle(mode, body, res) {
 	if (method === "tools/call") {
 		if (TOOL_ERROR[mode]) return reply({ jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: TOOL_ERROR[mode] }] } });
 		const name = params && params.name;
-		const text = name === "get_metadata" ? '<frame id="1:2" name="Stub Card" x="0" y="0" width="390" height="844" />' : name === "get_variable_defs" ? '{"color/bg":"#ffffff"}' : "<div>stub</div>";
+		const text = name === "get_metadata" ? '<frame id="1:2" name="Stub Card" x="0" y="0" width="390" height="844" />' : name === "get_variable_defs" ? '{"color/bg":"#ffffff"}' : '<div data-node-id="1:2" data-name="Stub Card" className="bg-[var(--color/bg,#ffffff)]">stub</div>';
 		return reply({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } });
 	}
 	return reply({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } });
