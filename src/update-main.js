@@ -10,6 +10,7 @@ const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { detect, isClone } = require("./update-mode");
+const releaseUpdater = require("./release-updater");
 
 const CHECK_EVERY_MS = 60 * 60 * 1000;
 const FIRST_CHECK_MS = 15 * 1000;
@@ -23,8 +24,40 @@ function findSource(app) {
 	return m.mode === "clone" ? { dir: m.dir, installed: m.via !== "above", commit: m.commit } : null;
 }
 
-function register(ctx) {
+// Release installs (piCrustBuild "release"): updates come from GitHub releases through electron-updater, wrapped by
+// release-updater.js, which only produces card statuses. No git here. deps.updater is for tests (a fake updater).
+function registerRelease(ctx, deps = {}) {
 	const { app, ipcMain } = ctx;
+	const updater = deps.updater || require("electron-updater").autoUpdater;
+	const rel = releaseUpdater.create({
+		updater,
+		version: app.getVersion(),
+		onStatus: (s) => ctx.send("appUpdate:status", s),
+		logFile: path.join(app.getPath("userData"), "updater.log"),
+	});
+	ipcMain.handle("appUpdate:status", () => rel.status());
+	ipcMain.handle("appUpdate:check", () => rel.check({ manual: true })); // the user pressed a button
+	ipcMain.handle("appUpdate:run", () => rel.download());
+	ipcMain.handle("appUpdate:restart", () => rel.restart()); // the renderer asks first when chats are busy
+	if (ctx.selftest) return rel;
+	setTimeout(() => rel.check(), FIRST_CHECK_MS);
+	setInterval(() => rel.check(), CHECK_EVERY_MS).unref?.();
+	return rel;
+}
+
+function register(ctx, deps = {}) {
+	const { app, ipcMain } = ctx;
+	// Same on every path: Release notes / Go back open a releases page in the browser; Copy details copies the updater details.
+	let rel = null;
+	ipcMain.handle("appUpdate:openNotes", () => {
+		const url = rel && rel.status().notesUrl && rel.status().notesUrl.startsWith(releaseUpdater.RELEASES_URL) ? rel.status().notesUrl : releaseUpdater.RELEASES_URL;
+		return (deps.openExternal || require("electron").shell.openExternal)(url);
+	});
+	ipcMain.handle("appUpdate:copyDetails", () => (rel ? (deps.writeClipboard || ((t) => require("electron").clipboard.writeText(t)))(rel.details()) : undefined));
+	if (detect(app).mode === "release") {
+		rel = registerRelease(ctx, deps);
+		return;
+	}
 	const source = findSource(app);
 	// state: "none" (nothing to show) | "available" | "updating" | "error"
 	let status = { state: "none" };
