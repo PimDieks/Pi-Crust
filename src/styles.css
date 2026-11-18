@@ -1345,17 +1345,21 @@ button.is-disabled:hover { background: none; color: inherit; }
 
 /* Claude Agent: setup card, pause card, Setup panel rows (claude-setup.js). In the page flow: no layer of their own. */
 .setup-card, .pause-card { align-self: center; width: min(560px, calc(100% - 2 * var(--space-md))); margin: var(--space-md) auto; padding: var(--space-md); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: var(--space-sm); flex: none; }
-.setup-card h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
-.sc-intro, .pc-text { margin: 0; color: var(--text-secondary); font-size: var(--fs-sm); }
-.pc-text { color: var(--text); font-size: var(--fs-md); }
+.setup-card h3, .pause-card h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.sc-intro { margin: 0; color: var(--text-secondary); font-size: var(--fs-sm); }
+.pc-text { display: flex; flex-direction: column; gap: var(--space-3xs); color: var(--text); font-size: var(--fs-md); }
+.pc-line { margin: 0; }
 .sc-steps { display: flex; flex-direction: column; gap: var(--space-3xs); }
 .sc-step, .ob-row.sc-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: var(--space-sm); padding: var(--space-sm); border-radius: var(--radius-sm); background: var(--panel-2); }
 .sc-mark { width: 20px; height: 20px; border: 1px solid var(--border); border-radius: var(--radius-full); display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); }
 .sc-step[data-state="done"] .sc-mark, .sc-row.ready .sc-mark { color: var(--text-success); border-color: currentColor; }
 .sc-step[data-state="failed"] .sc-mark, .sc-row.failed .sc-mark { color: var(--err); border-color: currentColor; }
-.sc-mark.sc-spin { border-color: var(--border); border-top-color: var(--accent); animation: sc-turn 0.9s linear infinite; }
+.sc-mark.sc-spin { color: var(--accent-2); border-color: transparent; }
+.sc-spinner { width: 18px; height: 18px; flex: none; display: block; animation: sc-turn 0.9s linear infinite; }
+.sc-spinner .sc-ring { fill: none; stroke: var(--border); stroke-width: 2; }
+.sc-spinner .sc-arc { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
 @keyframes sc-turn { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .sc-mark.sc-spin { animation: none; border-top-color: var(--accent); } }
+@media (prefers-reduced-motion: reduce) { .sc-spinner { animation: none; } }
 .sc-head { display: flex; align-items: baseline; gap: var(--space-sm); flex-wrap: wrap; }
 .sc-title { font-weight: 500; }
 .sc-size { color: var(--muted); font-size: var(--fs-xs); }

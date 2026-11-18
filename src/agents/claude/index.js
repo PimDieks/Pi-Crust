@@ -11,6 +11,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const A = require("../adapter");
 const { killTree } = require("../../kill-tree");
+const logic = require("../../permission-logic");
 const { sdkModeFor, makeCanUseTool, makeHooks } = require("./permissions");
 const { createTranslator } = require("./translate");
 const requests = require("./requests");
@@ -23,6 +24,8 @@ const CLAUDE_MD_CAP_BYTES = 32 * 1024;
 const NO_KEY = "No Anthropic API key is set. Add one in the Claude Agent key panel, or set ANTHROPIC_API_KEY.";
 const NO_CONFIG_DIR = "Claude Agent has no app config folder, so it was not started (it would otherwise use another Claude sign-in).";
 const NO_ENGINE = "The Claude Agent engine is not installed yet.";
+const MODE_FILE = "crust-permission-mode.json"; // the last chosen mode, in the app's own config folder (Pi keeps the same in its own folder)
+const MODE_COMMAND = /^\s*\/crust-mode(?:\s+(\S+))?\s*$/i; // what the mode selector sends; handled here, never given to the model
 
 // Capability values for Claude, as data (plan section 2). A false flag hides or disables the control with a reason.
 const CAPABILITIES = A.capabilities({
@@ -171,6 +174,8 @@ function createClaudeAdapter(deps = {}) {
 			systemPrompt: { type: "preset", preset: "claude_code", ...(appendText ? { append: appendText } : {}) },
 			maxBudgetUsd: num(settings.claudeMaxBudgetUsd, DEFAULT_MAX_BUDGET_USD),
 			maxTurns: Math.floor(num(settings.claudeMaxTurns, DEFAULT_MAX_TURNS)),
+			// Thinking text is returned as a summary, so a Claude Agent chat shows its thinking as a Pi chat does (the default is no text).
+			thinking: { type: "adaptive", display: "summarized" },
 			...sdkModeFor(opts.mode),
 			...extra,
 		};
@@ -223,9 +228,58 @@ function createClaudeAdapter(deps = {}) {
 		} catch {}
 	}
 
+	// The last chosen permission mode: a first run (or an unreadable file) starts in "Ask before commands".
+	function readLastMode() {
+		try {
+			if (!cfg.configDir) return logic.DEFAULT_MODE;
+			return logic.parseLastMode(cfg.fs.readFileSync(path.join(cfg.configDir, MODE_FILE), "utf8"));
+		} catch {
+			return logic.DEFAULT_MODE;
+		}
+	}
+	function writeLastMode(mode) {
+		try {
+			if (!cfg.configDir) return;
+			cfg.fs.mkdirSync(cfg.configDir, { recursive: true });
+			cfg.fs.writeFileSync(path.join(cfg.configDir, MODE_FILE), JSON.stringify({ mode }) + "\n", { mode: 0o600 });
+		} catch {}
+	}
+	// The status record the mode selector reads (the same one Pi's permission extension sends): only sent once the gate is installed.
+	const modeStatus = (h) => status.statusRecord(logic.STATUS_KEY, logic.statusText(h.mode));
+
+	// The SDK-side mode for a chat that is already running: "bypassPermissions" can only be entered when the query started with it.
+	const liveSdkMode = (h, mode) => {
+		const m = sdkModeFor(mode).permissionMode;
+		return m === "bypassPermissions" && !h.startedTrusted ? "default" : m;
+	};
+
+	// "/crust-mode <id>": the selector's request. The gate's mode changes (grants are cleared, as in Pi), the SDK's mode follows, the choice
+	// is remembered, and the status goes out: the selector moves only on that status.
+	async function switchMode(h, record) {
+		const reply = (success, extra) => {
+			if (record.id !== undefined && !h.closed) h.sink.record(h, { type: "response", id: record.id, command: "prompt", success, ...extra });
+		};
+		const m = MODE_COMMAND.exec(String(record.message));
+		const mode = m && m[1] ? logic.parseMode(m[1]) : null;
+		if (!mode) return reply(false, { error: "Unknown permission mode. Use plan, ask-edits, ask-commands or trusted." });
+		if (!h.query || !h.canUseTool || !h.gateInstalled) return reply(false, { error: "Claude Agent is not ready yet, so the mode cannot be changed." });
+		try {
+			if (typeof h.query.setPermissionMode === "function") await h.query.setPermissionMode(liveSdkMode(h, mode));
+		} catch {
+			return reply(false, { error: "Claude Agent did not take the mode switch, so the mode is unchanged." });
+		}
+		if (h.closed) return;
+		h.mode = mode;
+		logic.clearGrants(h.canUseTool.grants);
+		writeLastMode(mode);
+		emit(h, [modeStatus(h)]);
+		reply(true, { data: { disposition: "handled" } });
+	}
+
 	// opts: { cwd, env?, settings?, sessionRef?, mode?, ask? }. Returns the handle at once; readiness and failures come through the sink.
 	function start(opts, sink) {
-		const handle = { pid: undefined, exitCode: null, signalCode: null, query: null, input: inputQueue(), child: null, closed: false, exitCbs: [], sink, mode: opts.mode };
+		const mode0 = logic.isMode(opts.mode) ? opts.mode : readLastMode();
+		const handle = { pid: undefined, exitCode: null, signalCode: null, query: null, input: inputQueue(), child: null, closed: false, exitCbs: [], sink, mode: mode0, startedTrusted: mode0 === "trusted", gateInstalled: false };
 		// What the adapter knows about this chat: its own translator, usage totals, the model and effort in force.
 		handle.translator = createTranslator({ now: cfg.now });
 		handle.track = status.newTrack();
@@ -263,7 +317,7 @@ function createClaudeAdapter(deps = {}) {
 				const hooks = makeHooks({ getMode: () => handle.mode, grants: canUseTool.grants, cwd: opts.cwd });
 				const lim = opts.settings || cfg.getSettings() || {};
 				handle.limits = { budgetUsd: num(lim.claudeMaxBudgetUsd, DEFAULT_MAX_BUDGET_USD), maxTurns: Math.floor(num(lim.claudeMaxTurns, DEFAULT_MAX_TURNS)) };
-				const options = buildOptions(opts, key, {
+				const options = buildOptions({ ...opts, mode: handle.mode }, key, {
 					canUseTool,
 					hooks,
 					// Lets stop() tree-kill the engine process (the SDK does not give us its pid otherwise).
@@ -280,6 +334,9 @@ function createClaudeAdapter(deps = {}) {
 					closeQuery(handle);
 					return finish({ kind: "exit", code: null, signal: "SIGTERM" });
 				}
+				// Both the hook and the approval callback went into the query: only now is the mode enforced, so only now it is reported.
+				handle.gateInstalled = true;
+				emit(handle, [modeStatus(handle)]);
 				const init = typeof q.initializationResult === "function" ? await q.initializationResult() : {};
 				if (init && Array.isArray(init.commands)) handle.meta.commands = init.commands;
 				if (!sink.isCurrent || sink.isCurrent(handle)) sink.ready(handle, init || {});
@@ -358,6 +415,10 @@ function createClaudeAdapter(deps = {}) {
 	// answered by requests.js. Every request with an id gets a response record.
 	function send(h, record) {
 		if (!canSend(h) || !record) return false;
+		if (record.type === "prompt" && MODE_COMMAND.test(String(record.message == null ? "" : record.message))) {
+			switchMode(h, record);
+			return true;
+		}
 		if (record.type === "prompt") {
 			const text = String(record.message == null ? "" : record.message);
 			const images = Array.isArray(record.images) ? record.images.filter((im) => im && im.data).map((im) => ({ data: im.data, mimeType: im.mimeType || "image/png" })) : [];
@@ -403,7 +464,7 @@ function createClaudeAdapter(deps = {}) {
 		let q;
 		try {
 			const sdk = await loadSdk();
-			const options = buildOptions({ cwd: cfg.configDir || process.cwd(), claudeMd: false }, key, { maxTurns: 1, maxBudgetUsd: 0.05, tools: [], canUseTool: async () => ({ behavior: "deny", message: "No tools in a key check." }) });
+			const options = buildOptions({ cwd: cfg.configDir || process.cwd(), claudeMd: false }, key, { maxTurns: 1, maxBudgetUsd: 0.05, tools: [], thinking: { type: "disabled" }, canUseTool: async () => ({ behavior: "deny", message: "No tools in a key check." }) });
 			delete options.systemPrompt;
 			q = sdk.query({ prompt: "Reply with the single word: ok", options });
 			for await (const m of q) {

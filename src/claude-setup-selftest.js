@@ -22,15 +22,59 @@ selftestSteps.push(async ({ snap, wait }) => {
 	const BAD = "sk-ant-test-rejected-0000"; // the stand-in answers this one like the API answers a wrong key
 	const ui = window.claudeSetupUi;
 	let made = null;
-	const shots = async (name) => {
+	// Colour maths for the contrast check (WCAG): computed colours come as rgb(), rgba() or color(srgb ...).
+	const chan = (str) => {
+		const m = String(str).match(/-?\d*\.?\d+(?:e-?\d+)?/g) || [];
+		const n = m.map(Number);
+		const unit = /^color\(/.test(String(str)) ? 255 : 1;
+		return { r: n[0] * unit, g: n[1] * unit, b: n[2] * unit, a: n.length > 3 ? n[3] : 1 };
+	};
+	const lum = ({ r, g, b }) => {
+		const f = (v) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+		return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+	};
+	const ratio = (fg, bg) => {
+		const [a, b] = [lum(chan(fg)), lum(chan(bg))].sort((x, y) => y - x);
+		return (a + 0.05) / (b + 0.05);
+	};
+	const opacityOf = (n) => {
+		let o = 1;
+		for (; n && n.nodeType === 1; n = n.parentElement) o *= Number(getComputedStyle(n).opacity);
+		return o;
+	};
+	// The filled (primary) buttons inside `scope`: which ones they are (data-action), full opacity, and text against background of at least 4.5 to 1.
+	const primaryCheck = (name, th, scope, want) => {
+		const roots = [...document.querySelectorAll(scope)];
+		const all = roots.flatMap((r) => [...r.querySelectorAll("button")]).filter(vis);
+		const prim = all.filter((b) => b.classList.contains("btn") && !b.classList.contains("secondary"));
+		const got = prim.map((b) => b.dataset.action || b.textContent).join();
+		check(got === want, `primary buttons in ${name} (${th}): got "${got}", want "${want}"`);
+		for (const b of prim) {
+			const cs = getComputedStyle(b);
+			const r = ratio(cs.color, cs.backgroundColor);
+			check(r >= 4.5, `contrast of "${b.textContent}" in ${name} (${th}) is ${r.toFixed(2)}:1 (${cs.color} on ${cs.backgroundColor})`);
+			check(opacityOf(b) === 1, `"${b.textContent}" in ${name} (${th}) is faded (opacity ${opacityOf(b)})`);
+			check(!b.disabled && b.getAttribute("aria-disabled") !== "true", `"${b.textContent}" in ${name} reads as disabled`);
+		}
+	};
+	// name: the screenshot; want: the primary buttons expected (data-action list); scope: where to look.
+	const shots = async (name, want, scope = ".setup-card") => {
 		const was = themeSetting();
 		for (const th of ["light", "dark"]) {
 			setTheme(th);
 			await wait(300);
+			if (want !== undefined) primaryCheck(name, th, scope, want);
 			await snap(`claude-setup-${name}-${th}`);
 		}
 		setTheme(was);
 		await wait(150);
+	};
+	const arcOk = (s) => {
+		const arc = s?.querySelector(".sc-mark svg .sc-arc");
+		if (!arc) return false;
+		const r = arc.getBoundingClientRect();
+		const cs = getComputedStyle(arc);
+		return r.width > 3 && r.height > 3 && cs.stroke !== "none" && chan(cs.stroke).a > 0.9 && Number.parseFloat(cs.strokeWidth) >= 2;
 	};
 	if (!info.selftestClaudeFake) {
 		console.error("SELFTEST claude-setup: needs PI_CRUST_SELFTEST_CLAUDE=fake and PI_CRUST_CLAUDE_SDK (stand-in) -> MISMATCH");
@@ -40,7 +84,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 	const stepOf = (k) => card()?.querySelector(`.sc-step[data-step="${k}"]`);
 	const info1 = (k) => {
 		const s = stepOf(k);
-		return s ? { state: s.dataset.state, title: s.querySelector(".sc-title")?.textContent.replace(/^(To do|Working|Done|Failed)\. /, ""), size: s.querySelector(".sc-size")?.textContent || "", line: s.querySelector(".sc-line")?.textContent || "", buttons: [...s.querySelectorAll(".sc-actions button")].map((b) => b.textContent), alert: s.querySelector(".sc-line")?.getAttribute("role") === "alert" } : null;
+		return s ? { state: s.dataset.state, title: s.querySelector(".sc-title")?.textContent.replace(/^(To do|Working|Done|Failed)\. /, ""), size: s.querySelector(".sc-size")?.textContent || "", mark: s.querySelector(".sc-mark")?.textContent || "", line: s.querySelector(".sc-line")?.textContent || "", buttons: [...s.querySelectorAll(".sc-actions button")].map((b) => b.textContent), alert: s.querySelector(".sc-line")?.getAttribute("role") === "alert" } : null;
 	};
 	const btn = (k, action) => stepOf(k)?.querySelector(`[data-action="${action}"]`);
 	const fake = (cmd) => crust.claude.fakeSet(cmd);
@@ -74,8 +118,8 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(c1?.getAttribute("role") === "region" && /Set up Claude Agent/.test(c1.querySelector("h3")?.textContent), "card title");
 		let k = info1("key");
 		let e = info1("engine");
-		check(k && k.state === "todo" && k.title === "1 API key" && k.line === "Your own Anthropic key. Usage is billed to your Anthropic account." && k.buttons.join() === "Add key", `key step to do: ${JSON.stringify(k)}`);
-		check(e && e.state === "todo" && e.title === "2 Engine" && /^about \d+ MB$/.test(e.size) && e.line === "Downloaded once, checked before use." && e.buttons.join() === WANT_DOWNLOAD, `engine step to do: ${JSON.stringify(e)}`);
+		check(k && k.state === "todo" && k.title === "API key" && k.mark === "1" && k.line === "Your own Anthropic key. Usage is billed to your Anthropic account." && k.buttons.join() === "Add key", `key step to do: ${JSON.stringify(k)}`);
+		check(e && e.state === "todo" && e.title === "Engine" && e.mark === "2" && /^about \d+ MB$/.test(e.size) && e.line === "Downloaded once, checked before use." && e.buttons.join() === WANT_DOWNLOAD, `engine step to do: ${JSON.stringify(e)}`);
 		check(!document.querySelector("#modal-backdrop:not([hidden])") && !dialogOpen, "a dialog is open");
 		// the message box is disabled with the reason, until both steps are done
 		const input = $("#input");
@@ -89,7 +133,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(made.el.querySelectorAll(".msg.user").length === msgsBefore, "a message was sent during setup");
 		input.value = "";
 		check(!/Starting/.test($("#status-line").textContent), `status line: "${$("#status-line").textContent}"`);
-		await shots("todo");
+		await shots("todo", "add-key");
 
 		// 2. the Setup panel now lists the Claude Agent rows (not counted)
 		await window.crustOnboarding.open("claude-setup");
@@ -99,7 +143,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		const pillNow = $("#setup-pill").textContent;
 		check(pillNow === pillBefore, `the Setup count changed: "${pillBefore}" -> "${pillNow}"`);
 		check($("#onboarding").textContent.includes("Claude Agent key") && $("#onboarding").textContent.includes("Claude Agent engine"), "panel row label missing");
-		await shots("panel-rows-todo");
+		await shots("panel-rows-todo", "add-key", "#ob-rows");
 		window.crustOnboarding.close({ restore: false });
 		await wait(200);
 
@@ -108,7 +152,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		await wait(150);
 		const field = stepOf("key").querySelector(".sc-field input");
 		check(field && field.type === "password" && field.autocomplete === "off" && vis(field) && !dialogOpen, "the key field is not masked or not in the card");
-		await shots("key-field");
+		await shots("key-field", "save-key");
 		// a wrong key, stored before the engine is there: checked after the download (step 5)
 		await typeKey(BAD);
 		check(field.value === "", "the key stayed in the field after saving");
@@ -116,7 +160,8 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(/checked once the engine is downloaded/.test(info1("key").line) && info1("key").buttons.join() === "Change key,Remove key", `pending key: ${JSON.stringify(info1("key"))}`);
 		const leak = JSON.stringify(ui.state()) + document.body.innerText + [...document.querySelectorAll("[title],[aria-label]")].map((n) => n.title + n.getAttribute("aria-label")).join();
 		check(!leak.includes(BAD), "the key is in the state or on the page");
-		await shots("key-done-pending");
+		check(info1("key").mark === "✓", `key done mark: "${info1("key").mark}"`);
+		await shots("key-done-pending", "download");
 		btn("key", "remove-key").click();
 		check(await until(() => info1("key")?.state === "todo"), "Remove key did not bring step 1 back to do");
 		btn("key", "add-key").click();
@@ -134,7 +179,9 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(await until(() => /40%/.test(info1("engine")?.line || "")), `progress: ${info1("engine")?.line}`);
 		const bar = stepOf("engine").querySelector('[role="progressbar"]');
 		check(bar && bar.getAttribute("aria-valuenow") === "40" && info1("engine").buttons.join() === "Cancel", `progress bar / Cancel: ${info1("engine")?.buttons}`);
-		await shots("engine-downloading");
+		check(info1("engine").mark === "" && arcOk(stepOf("engine")), `the circle of the downloading engine step is empty or has no visible arc: ${JSON.stringify(info1("engine").mark)}`);
+		check(info1("engine").title === "Engine" && !/^\d/.test(info1("engine").title), "the step number is shown twice");
+		await shots("engine-downloading", "");
 		btn("engine", "cancel-download").click();
 		check(await until(() => info1("engine")?.state === "todo"), `Cancel: ${JSON.stringify(info1("engine"))}`);
 		btn("engine", "download").click();
@@ -143,7 +190,8 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(await until(() => info1("engine")?.state === "failed"), "no failed state");
 		e = info1("engine");
 		check(/Not enough free disk space/.test(e.line) && e.alert && e.buttons.join() === "Try again", `engine failed: ${JSON.stringify(e)}`);
-		await shots("engine-failed");
+		check(info1("engine").mark === "!", `failed mark: "${info1("engine").mark}"`);
+		await shots("engine-failed", "");
 		btn("engine", "download").click(); // Try again
 		await until(() => /Downloading/.test(info1("engine")?.line || ""));
 		await fake({ hold: "keyCheck" });
@@ -153,13 +201,15 @@ selftestSteps.push(async ({ snap, wait }) => {
 		// 5. the key stored before the engine is checked now: working, then the wrong key fails with a readable reason
 		check(await until(() => info1("key")?.state === "working" && /Checking your key/.test(info1("key").line)), `key checking: ${JSON.stringify(info1("key"))}`);
 		check(made.needsSetup && input.readOnly, "the message box opened while the key was being checked");
-		await shots("key-working");
+		check(arcOk(stepOf("key")), "the working key step has no visible spinner arc");
+		await shots("key-working", "");
 		await fake({ release: "keyCheck" });
 		check(await until(() => info1("key")?.state === "failed"), `key failed: ${JSON.stringify(info1("key"))}`);
 		k = info1("key");
 		check(/did not accept this key/.test(k.line) && k.alert && k.buttons.join() === "Try again" && !k.line.includes(BAD), `failed key text: ${JSON.stringify(k)}`);
 		check(info1("engine").state === "done" && made.needsSetup && !made.state.ready, "one failed step must keep the card and the disabled message box");
-		await shots("key-failed");
+		check(info1("key").mark === "!", `failed key mark: "${info1("key").mark}"`);
+		await shots("key-failed", "");
 		// 6. try again with a good key: engine is there, so it is checked at once; then both are done
 		btn("key", "add-key").click(); // Try again
 		await wait(150);
@@ -170,7 +220,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(await until(() => info1("key")?.state === "done"), `key done: ${JSON.stringify(info1("key"))}`);
 		k = info1("key");
 		check(/saved/i.test(k.line) && k.buttons.join() === "Change key,Remove key", `key done step: ${JSON.stringify(k)}`);
-		await shots("both-done");
+		await shots("both-done", "");
 		// the card goes away and the chat starts
 		check(await until(() => !card() && !made.needsSetup, 6000), "the card did not go away when both steps were done");
 		check(await until(() => made.state.ready, 10000), "the chat did not start");
@@ -184,7 +234,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(row("claude-key")?.classList.contains("ready") && row("claude-engine")?.classList.contains("ready"), "panel rows are not done");
 		const keyBtns = [...(row("claude-key")?.querySelectorAll(".sc-actions button") || [])].map((b) => b.textContent);
 		check(keyBtns.join() === "Change key,Remove key", `panel key buttons: ${keyBtns}`);
-		await shots("panel-rows-done");
+		await shots("panel-rows-done", "", "#ob-rows");
 		row("claude-key").querySelector('[data-action="change-key"]').click();
 		await wait(150);
 		check(!!row("claude-key").querySelector('.sc-field input[type="password"]') && !dialogOpen, "Change key in the panel has no inline field");
@@ -197,22 +247,47 @@ selftestSteps.push(async ({ snap, wait }) => {
 		await crust.claude.saveKey(GOOD); // the chat below needs no setup again
 		await until(() => ui.state()?.ready);
 
-		// 8. the pause card (the record the adapter sends at the spend limit)
+		// 8. the pause card (the record the adapter sends at the spend limit), under a few messages of conversation
+		const say = (...recs) => withChat(made, () => recs.forEach((r) => handleRecord(r)));
+		const turn = (user, thinking, answer) => [
+			{ type: "agent_start" },
+			{ type: "message_start", message: { role: "user", content: [{ type: "text", text: user }] } },
+			{ type: "message_end", message: { role: "user", content: [{ type: "text", text: user }] } },
+			{ type: "message_start", message: { role: "assistant", content: [], stopReason: "stop" } },
+			{ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: thinking } },
+			{ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: thinking } },
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: answer } },
+			{ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 1, content: answer } },
+			{ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking }, { type: "text", text: answer }], stopReason: "stop" } },
+			{ type: "agent_end" },
+			{ type: "agent_settled" },
+		];
+		say(...turn("Which files are in the src folder?", "The user wants a listing of src; I can answer from what I already read.", "The src folder holds the app's main files: the main process, the renderer, the styles and the agent adapters."));
+		say(...turn("Please summarise what the renderer does.", "A short summary is enough here.", "The renderer draws the chat, the panels and the setup cards, and sends the person's choices to the main process."));
+		await wait(300);
+		check(made.el.querySelectorAll(".msg.user").length >= 2, "the conversation above the pause card has no messages");
 		const rec = { type: "claude_paused", reason: "budget", message: "Stopped: the spending limit ($5.00) was reached. About $5.02 spent.", totalCostUsd: 5.02, limitUsd: 5, maxTurns: 100, sessionId: "stand-in-session", canContinue: true, continueLabel: "Continue" };
 		withChat(made, () => handleRecord(rec));
 		await wait(300);
 		const pc = () => made.el.querySelector(".pause-card");
 		check(pc() && made.el.lastElementChild === pc(), "the pause card is not at the end of the conversation");
-		check(pc()?.querySelector(".pc-text")?.textContent === "This chat has used about $5.02. Continue for up to another $5.00?", `pause text: ${pc()?.querySelector(".pc-text")?.textContent}`);
+		const pcLines = (n = pc()) => [...(n?.querySelectorAll(".pc-line") || [])].map((x) => x.textContent);
+		check(pc()?.querySelector("h3")?.textContent === "Paused at the spend limit" && pc().getAttribute("aria-labelledby") === pc().querySelector("h3")?.id, `pause title: "${pc()?.querySelector("h3")?.textContent}"`);
+		check(pc()?.firstElementChild?.tagName === "H3", "the title is not the first thing in the pause card");
+		check(pcLines().join("|") === "This chat has used about $5.02.|Continue for up to another $5.00?", `pause text: ${pcLines().join("|")}`);
+		{
+			const [a, b] = [...pc().querySelectorAll(".pc-line")].map((x) => x.getBoundingClientRect());
+			check(a && b && b.top >= a.bottom - 1, "the two lines of the pause card are not on two lines");
+		}
 		check([...pc().querySelectorAll("button")].map((b) => b.textContent).join() === "Continue,Change limit", "pause buttons");
 		check(input.readOnly && input.placeholder === "Choose Continue to send a message" && send.dataset.reason === "Choose Continue to send a message", `pause gate: ${input.readOnly} "${input.placeholder}"`);
-		await shots("pause");
+		await shots("pause", "continue", ".pause-card");
 		// Change limit: an invalid amount is refused, a valid one is a setting and continues
 		pc().querySelector('[data-action="change-limit"]').click();
 		await wait(150);
 		const lim = pc().querySelector('input[type="number"]');
 		check(lim && lim.value === "5", "the limit field does not start at the current limit");
-		await shots("pause-limit");
+		await shots("pause-limit", "continue,save-limit", ".pause-card");
 		lim.value = "0.1";
 		pc().querySelector("form").requestSubmit();
 		check(await until(() => pc()?.querySelector(".pc-error")), "an invalid limit was accepted");
@@ -224,7 +299,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		// Continue with the same limit
 		withChat(made, () => handleRecord({ ...rec, totalCostUsd: 7.51, limitUsd: 7.5 }));
 		await wait(200);
-		check(pc()?.querySelector(".pc-text")?.textContent === "This chat has used about $7.51. Continue for up to another $7.50?", `second pause text: ${pc()?.querySelector(".pc-text")?.textContent}`);
+		check(pcLines().join("|") === "This chat has used about $7.51.|Continue for up to another $7.50?", `second pause text: ${pcLines().join("|")}`);
 		pc().querySelector('[data-action="continue"]').click();
 		check(await until(() => !pc() && !made.pause), "Continue did not close the pause card");
 		check(await until(() => made.state.ready && !input.readOnly && input.placeholder.startsWith("Ask Claude Agent"), 10000), "the chat did not come back after Continue");

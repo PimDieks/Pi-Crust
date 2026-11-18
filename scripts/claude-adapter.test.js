@@ -78,6 +78,7 @@ test("start: the key reaches the SDK only through env; the other options are as 
 	assert.ok(c.options.maxTurns > 0);
 	assert.strictEqual(c.options.canUseTool, "[function]");
 	assert.strictEqual(c.options.permissionMode, "default");
+	assert.deepStrictEqual(c.options.thinking, { type: "adaptive", display: "summarized" }, "thinking text is asked for as a summary");
 	assert.deepStrictEqual(c.options.systemPrompt, { type: "preset", preset: "claude_code" });
 	t.adapter.stop(h0);
 });

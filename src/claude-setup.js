@@ -32,8 +32,9 @@
 		const actions = el("div", "sc-actions");
 		const title = el("span", "ob-label sc-title");
 		const line = el("div", "ob-line sc-line");
+		// Only the first step that is not done has the filled (primary) button; the other one is the outline style.
 		const btn = (label, onClick, { primary = false, id } = {}) => {
-			const b = el("button", primary ? "btn" : "btn secondary", label);
+			const b = el("button", primary && names.first === kind ? "btn" : "btn secondary", label);
 			b.type = "button";
 			if (id) b.dataset.action = id;
 			b.onclick = onClick;
@@ -110,9 +111,11 @@
 			}
 		}
 		word = { todo: "To do", working: "Working", done: "Done", failed: "Failed" }[state];
-		const glyph = state === "done" ? "✓" : state === "failed" ? "!" : state === "working" ? "" : names.todoMark;
-		mark.textContent = glyph;
-		if (state === "working") mark.classList.add("sc-spin");
+		// The circle carries the state: the number (or a dot in the Setup panel) to do, a spinner while working, a check when done, a warning mark when failed.
+		if (state === "working") {
+			mark.classList.add("sc-spin");
+			mark.append(spinner());
+		} else mark.textContent = state === "done" ? "✓" : state === "failed" ? "!" : names.todoMark;
 		const sr = el("span", "fp-sr", `${word}. `);
 		title.prepend(sr);
 		const head = el("div", "sc-head");
@@ -124,6 +127,30 @@
 		if (state === "working") text.setAttribute("aria-busy", "true");
 		return { state, mark, text, actions };
 	}
+
+	// A ring with a turning arc, so the circle is never empty while something runs (also with reduced motion, where the arc stands still).
+	function spinner() {
+		const NS = "http://www.w3.org/2000/svg";
+		const svg = document.createElementNS(NS, "svg");
+		svg.setAttribute("viewBox", "0 0 20 20");
+		svg.setAttribute("class", "sc-spinner");
+		svg.setAttribute("aria-hidden", "true");
+		const ring = document.createElementNS(NS, "circle");
+		ring.setAttribute("cx", "10");
+		ring.setAttribute("cy", "10");
+		ring.setAttribute("r", "8");
+		ring.setAttribute("class", "sc-ring");
+		const arc = document.createElementNS(NS, "path");
+		arc.setAttribute("d", "M10 2 A8 8 0 0 1 18 10");
+		arc.setAttribute("class", "sc-arc");
+		svg.append(ring, arc);
+		return svg;
+	}
+	// Which step is the first that is not done (it gets the primary button).
+	const firstOpen = () => {
+		const st = S || { key: { state: "todo" }, engine: { state: "todo" } };
+		return st.key.state !== "done" ? "key" : st.engine.state !== "done" ? "engine" : null;
+	};
 
 	// The masked field for the key, inside the step. Enter saves, Escape closes. The value leaves this field the moment it is saved.
 	function keyField(sf) {
@@ -231,7 +258,7 @@
 			host.dataset.step = kind;
 			sf.render = (focusField) => {
 				const had = host.contains(document.activeElement) ? document.activeElement.dataset?.action || document.activeElement.tagName : null;
-				const c = stepCells(kind, sf, { key: `${num} API key`, engine: `${num} Engine`, todoMark: String(num) });
+				const c = stepCells(kind, sf, { key: "API key", engine: "Engine", todoMark: String(num), first: firstOpen() });
 				host.dataset.state = c.state;
 				host.replaceChildren(c.mark, c.text, c.actions);
 				if (focusField) host.querySelector(".sc-field input")?.focus();
@@ -337,13 +364,15 @@
 		const budget = rec.reason === "budget";
 		const node = el("section", "pause-card");
 		node.setAttribute("role", "region");
-		node.setAttribute("aria-label", "Paused");
 		const p = { rec, el: node, limit: Number.isFinite(Number(rec.limitUsd)) && Number(rec.limitUsd) > 0 ? Number(rec.limitUsd) : DEFAULT_LIMIT, editing: false, error: null };
 		chat.pause = p;
 		const draw = () => {
-			const text = el("p", "pc-text");
-			if (budget) text.textContent = `This chat has used about ${usd(rec.totalCostUsd)}. Continue for up to another ${usd(p.limit)}?`;
-			else text.textContent = `This chat reached its limit of ${rec.maxTurns || "its"} steps. Continue?`;
+			const title = el("h3", "pc-title", budget ? "Paused at the spend limit" : "Paused at the step limit");
+			title.id = `pc-title-${chat.id}`;
+			node.setAttribute("aria-labelledby", title.id);
+			const text = el("div", "pc-text");
+			const lines = budget ? [`This chat has used about ${usd(rec.totalCostUsd)}.`, `Continue for up to another ${usd(p.limit)}?`] : [`This chat reached its limit of ${rec.maxTurns || "its"} steps.`, "Continue?"];
+			for (const l of lines) text.append(el("p", "pc-line", l));
 			const row = el("div", "sc-actions pc-actions");
 			const cont = el("button", "btn", "Continue");
 			cont.type = "button";
@@ -351,7 +380,7 @@
 			cont.onclick = () => resume(chat);
 			if (!rec.canContinue) {
 				cont.disabled = true;
-				text.textContent += " This chat cannot be continued: start a new one.";
+				text.lastChild.textContent = "This chat cannot be continued: start a new one.";
 			}
 			row.append(cont);
 			if (budget && rec.canContinue) {
@@ -362,7 +391,7 @@
 				change.onclick = () => ((p.editing = !p.editing), (p.error = null), draw());
 				row.append(change);
 			}
-			const kids = [text, row];
+			const kids = [title, text, row];
 			if (p.editing) {
 				const f = el("form", "sc-field pc-limit");
 				f.noValidate = true; // our own message for an amount that is out of range, not the browser's bubble
@@ -428,7 +457,7 @@
 				li.dataset.id = `claude-${kind}`;
 				const sf = { kind, keyOpen: false, keyBusy: false, keyError: null, engineBusy: false, engineErr: null };
 				sf.render = (focusField) => {
-					const c = stepCells(kind, sf, { key: label, engine: label, todoMark: "○" });
+					const c = stepCells(kind, sf, { key: label, engine: label, todoMark: "○", first: firstOpen() });
 					li.className = `ob-row sc-row ${c.state === "done" ? "ready" : c.state}`;
 					const opt = el("span", "ob-optional", "Optional");
 					c.text.querySelector(".sc-title").append(opt);

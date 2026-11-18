@@ -23,6 +23,8 @@ const SENDS = {
 	interrupt: { 0: { text: "Write a long story." } },
 	queue: { 0: { text: "Read data.txt and count the lines." }, 3: { text: "Also end your final answer with the word DONE." } },
 	"thinking-subagent": { 0: { text: "Use a checker subagent to count the lines of data.txt." } },
+	// Summarized thinking (the adapter asks for thinking: { type: "adaptive", display: "summarized" }): the thinking text streams as deltas.
+	"thinking-summarized": { 0: { text: "A bat and a ball cost 1.10 together. The bat costs 1.00 more than the ball. How much is the ball? Answer in one sentence." } },
 	// After an interrupt the same session takes a second prompt (index 19 is its repeated init).
 	"interrupt-continue": { 0: { text: "Count from 1 to 200." }, 19: { text: "Reply with the single word: ready." } },
 	// A background subagent: the one prompt gives two results; the second turn is unprompted (no send for it).
@@ -86,6 +88,16 @@ test("shape checks on the goldens that do not depend on the golden file itself",
 	assert.equal(queue.filter((r) => r.type === "agent_start").length, 1);
 	assert.equal(queue.filter((r) => r.type === "agent_end").length, 1, "one result for the merged message");
 	assert.equal(queue.filter((r) => r.type === "message_start" && r.message.role === "user").length, 2, "both sends have a row");
+
+	const think = run("thinking-summarized");
+	const tds = think.filter((r) => r.type === "message_update" && r.assistantMessageEvent.type === "thinking_delta");
+	assert.ok(tds.length >= 10, "the thinking text streams as deltas");
+	const te = think.find((r) => r.type === "message_update" && r.assistantMessageEvent.type === "thinking_end");
+	assert.equal(te.assistantMessageEvent.content, tds.map((r) => r.assistantMessageEvent.delta).join(""), "the closed thinking block holds the streamed text");
+	assert.ok(te.assistantMessageEvent.content.length > 40);
+	const tmsg = think.find((r) => r.type === "message_end" && r.message.role === "assistant");
+	assert.equal(tmsg.message.content[0].type, "thinking", "the finished message keeps the thinking block before the answer");
+	assert.equal(tmsg.message.content[0].thinking, te.assistantMessageEvent.content);
 
 	const sub = run("thinking-subagent");
 	assert.ok(sub.some((r) => r.type === "message_update" && r.assistantMessageEvent.type === "thinking_delta"));

@@ -1510,7 +1510,7 @@ const ctx = {
 	newChat,
 	restartChat,
 	addSendTap: (fn) => (sendTaps.add(fn), () => sendTaps.delete(fn)),
-	openChats: () => openList.map((e) => ({ id: e.id, file: e.file || null, cwd: e.cwd || null, running: chats.has(e.id) })),
+	openChats: () => openList.map((e) => ({ id: e.id, file: e.file || null, cwd: e.cwd || null, agent: e.agent || "pi", running: chats.has(e.id) })),
 	get activeChatId() {
 		return activeChatId;
 	},

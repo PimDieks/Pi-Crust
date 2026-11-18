@@ -33,6 +33,9 @@ const isPort = (n) => Number.isInteger(n) && n >= 1024 && n <= 65535;
 
 function register(ctx) {
 	const { ipcMain } = ctx;
+	// The phone view is Pi-only (Pim, 2026-11-18): a chat of another agent is not listed, shared, controlled or reported here. Every list of chats in this
+	// file comes through this one function, so records, status, key state and cost of such a chat never reach the hub, a phone or a notification.
+	const openChats = () => ctx.openChats().filter((c) => !c.agent || c.agent === "pi");
 
 	// --- Selftest: Remote is never on; the panel just learns that it is unavailable. -------------
 	if (ctx.selftest) {
@@ -171,7 +174,7 @@ function register(ctx) {
 		if (!info || !pairing || pairing.expiresAt !== info.expiresAt) pairing = null;
 		let shared = [];
 		try {
-			shared = ctx.openChats().filter((c) => isShared(c.id, c.file)).map((c) => c.id);
+			shared = openChats().filter((c) => isShared(c.id, c.file)).map((c) => c.id);
 		} catch {}
 		return {
 			enabled: cfg.enabled,
@@ -200,7 +203,7 @@ function register(ctx) {
 	// --- Chats ----------------------------------------------------------------------------------
 	// Chats closed on the desktop never produce an event: compare with main's list.
 	function sync() {
-		const open = ctx.openChats();
+		const open = openChats();
 		const ids = new Set(open.map((c) => c.id));
 		let changed = false;
 		for (const c of hub.list()) {
@@ -221,7 +224,7 @@ function register(ctx) {
 	}
 	// A chat counts as shared by its id, or by its session file (survives restarts, when ids are reassigned).
 	function isShared(id, file) {
-		return share.isShared(id, file ?? lastFile.get(id) ?? ctx.openChats().find((c) => c.id === id)?.file ?? null);
+		return share.isShared(id, file ?? lastFile.get(id) ?? openChats().find((c) => c.id === id)?.file ?? null);
 	}
 	const summaryOf = (o) => hub.summary(o.id) || { id: o.id, title: "", cwd: o.cwd, branch: null, status: o.running ? "starting" : "stopped", asking: 0, lastText: "", updatedAt: 0 };
 	function listChats() {
@@ -308,7 +311,7 @@ function register(ctx) {
 				return r.success ? { disposition: "compacted" } : { status: 409, error: r.error || "Compaction failed" };
 			}
 			// Best effort: the same snapshot the desktop takes before a prompt, so Rewind works for phone prompts too.
-			const file = ctx.openChats().find((c) => c.id === id)?.file || undefined;
+			const file = openChats().find((c) => c.id === id)?.file || undefined;
 			if (ctx.createCheckpoint) await Promise.race([ctx.createCheckpoint(id, file, text).catch(() => null), sleep(CHECKPOINT_WAIT_MS)]);
 			const st = hub.summary(id)?.status;
 			const working = st === "working" || st === "waiting";
@@ -373,7 +376,7 @@ function register(ctx) {
 			const id = await ctx.newChat(undefined, undefined);
 			if (!id) return { status: 409, error: "Couldn't start a chat" };
 			// A chat started from the phone is for the phone.
-			const o = ctx.openChats().find((c) => c.id === id);
+			const o = openChats().find((c) => c.id === id);
 			if (o) shareChat(o);
 			else share.share(id, null);
 			pushStatus();
@@ -382,7 +385,7 @@ function register(ctx) {
 		async restart(id, device) {
 			if (!isShared(id)) return notShared();
 			log("restart", { device, chat: id });
-			const open = ctx.openChats().find((c) => c.id === id);
+			const open = openChats().find((c) => c.id === id);
 			if (!open) return { status: 404, error: "Unknown chat" };
 			if (open.running) return { status: 409, error: "Pi is still running in this chat" };
 			if ((await ctx.restartChat(id, open.file || undefined)) === false) return { status: 404, error: "This chat was closed" };
@@ -688,7 +691,7 @@ function register(ctx) {
 	};
 	ipcMain.handle("remote:setEnabled", (_e, on) => enqueue(() => setEnabledImpl(on)));
 	ipcMain.handle("remote:share", (_e, chatId, on) => {
-		const o = typeof chatId === "string" ? ctx.openChats().find((c) => c.id === chatId) : null;
+		const o = typeof chatId === "string" ? openChats().find((c) => c.id === chatId) : null;
 		if (!o) return { error: "Unknown chat" };
 		if (on === true) {
 			if (!isShared(o.id, o.file)) shareChat(o);

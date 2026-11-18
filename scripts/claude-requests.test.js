@@ -217,8 +217,9 @@ test("after each result: the crust-context status (window, categories, models, c
 	t.sdk.setFixture(path.join(DIR, "read.jsonl"));
 	t.adapter.send(t.h, { type: "prompt", message: "go" });
 	await t.until(() => t.settled(1));
-	await t.until(() => t.events.records.some((r) => r.type === "extension_ui_request"));
-	const rec = t.events.records.find((r) => r.type === "extension_ui_request");
+	const isCtx = (r) => r.type === "extension_ui_request" && r.statusKey === "crust-context"; // the permission-mode status comes first now
+	await t.until(() => t.events.records.some(isCtx));
+	const rec = t.events.records.find(isCtx);
 	assert.equal(rec.method, "setStatus");
 	assert.equal(rec.statusKey, "crust-context");
 	const d = JSON.parse(rec.statusText);

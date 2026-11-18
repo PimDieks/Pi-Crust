@@ -15,6 +15,7 @@
 	let render = null; // re-fills the open panel, or null when it is closed
 	let shared = new Set(); // ids of the open chats shared with the phone, from the last status
 	const activeChat = () => (typeof active !== "undefined" && active) || null;
+	const phoneChat = (c = activeChat()) => !!c && (window.agentUi ? window.agentUi.isDefault(c) : true); // the phone view is Pi-only
 	const isActiveShared = () => !!activeChat() && shared.has(activeChat().id);
 
 	const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -207,8 +208,8 @@
 			const on = !!status?.enabled;
 			const c = activeChat();
 			const here = isActiveShared();
-			const chatRow = switchItem(c ? "Use this chat from your phone" : "No chat open", here, () => shareActive(!here));
-			if (!c) {
+			const chatRow = switchItem(c ? (phoneChat(c) ? "Use this chat from your phone" : "Phone view is for Pi chats only") : "No chat open", here, () => shareActive(!here));
+			if (!c || !phoneChat(c)) {
 				chatRow.setAttribute("aria-disabled", "true");
 				chatRow.onclick = null;
 			}
@@ -483,7 +484,7 @@
 		const list = [...(prevActions?.() || []), { label: "Remote access…", desc: "control chats from your phone", run: () => open() }];
 		if (status && !status.disabled) {
 			const here = isActiveShared();
-			if (activeChat()) list.push({ label: here ? "Stop using this chat from your phone" : "Use this chat from your phone", desc: here ? "shared with your phone" : "show it on your phone", run: () => shareActive(!here) });
+			if (activeChat() && phoneChat()) list.push({ label: here ? "Stop using this chat from your phone" : "Use this chat from your phone", desc: here ? "shared with your phone" : "show it on your phone", run: () => shareActive(!here) });
 			const on = !!status.enabled;
 			list.push({ label: on ? "Turn Remote access off" : "Turn Remote access on", desc: on ? statusLine(status) : "control chats from your phone", run: () => setEnabled(!on) });
 		}
