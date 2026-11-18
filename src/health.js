@@ -111,6 +111,32 @@
 		console.error(`SELFTEST health-real: ${r.rows.map((x) => `${x.id}=${x.state}`).join(" ")} pi=${r.facts.pi.version} node=${r.facts.node.version} git=${r.facts.git.version} auth="${a.line}" -> ${r.rows.length === 5 && wired ? "OK" : "MISMATCH"}`);
 	}, "health-real");
 
+	// Install through the real IPC, stubbed machine (PI_CRUST_HEALTH_STUB={}). A selftest always runs the script in dry-run mode, so
+	// nothing is installed; the point here is the list for the confirm, the streamed events and that the machine is unchanged.
+	selftestSteps.push(async () => {
+		try {
+			await crust.health.stubSet({});
+		} catch {
+			return console.error("SELFTEST health-install: needs PI_CRUST_HEALTH_STUB={} in the environment -> MISMATCH");
+		}
+		const events = [];
+		crust.health.onInstallProgress((e) => events.push(e.kind + (e.id ? ":" + e.id : "")));
+		await crust.health.stubSet({ pi: "missing", node: "old", git: "missing" });
+		const p = await crust.health.installPlan();
+		const planOk = p.needs.join() === "node,git,pi" && p.plan.ok && p.plan.lines.length === 3 && /Git, from the winget package Git.Git|Git, from the Homebrew formula git/.test(p.plan.text) && /Nothing else on this computer is changed./.test(p.plan.text);
+		console.error(`SELFTEST health-install plan: needs=[${p.needs}] lines=${p.plan.lines.length} -> ${planOk ? "OK" : "MISMATCH"}`);
+		const only = await crust.health.installPlan({ only: ["git"] });
+		console.error(`SELFTEST health-install only git: needs=[${only.needs}] steps=${only.plan.steps.map((s) => s.id)} -> ${only.needs.join() === "git" && only.plan.steps.length === 1 ? "OK" : "MISMATCH"}`);
+		const r = await crust.health.install({ only: ["pi", "git"] });
+		const would = (r.lines || []).filter((l) => l.startsWith("WOULD ")).length;
+		const stillMissing = r.health.rows[0].state === "todo"; // a dry run installed nothing, so Pi is still missing
+		console.error(`SELFTEST health-install dry run: ok=${r.ok} dryRun=${r.dryRun} would=${would} events=[${events.join(" ")}] piStillMissing=${stillMissing} -> ${r.ok && r.dryRun && would === 2 && stillMissing && events[0] === "start" && events.at(-1) === "end" ? "OK" : "MISMATCH"}`);
+		await crust.health.stubSet({});
+		const none = await crust.health.installPlan();
+		const nothing = await crust.health.install();
+		console.error(`SELFTEST health-install nothing missing: plan.ok=${none.plan.ok} install.ok=${nothing.ok} "${nothing.error}" -> ${!none.plan.ok && !nothing.ok && nothing.error === "Nothing to install." ? "OK" : "MISMATCH"}`);
+	}, "health-install");
+
 	// A chat whose Pi is really missing. Run with PI_CRUST_SELFTEST_NO_PI=1: main skips the search and spawns a program that
 	// doesn't exist, so the error is the real ENOENT from the real spawn. Without the variable this is the control run:
 	// Pi starts and there must be no error box and no "Open setup" button. Either way "ENOENT" must not reach the screen.

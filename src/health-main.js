@@ -196,6 +196,7 @@ function register(ctx) {
 			return true;
 		});
 	}
+	ctx.health = health; // for health-install.js: what is missing comes from here, never from the window
 	return health;
 }
 

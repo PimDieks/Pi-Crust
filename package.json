@@ -56,6 +56,8 @@
     "files": [
       "package.json",
       "src/**/*",
+    "scripts/install-pi.ps1",
+    "scripts/install-pi.sh",
       "!src/**/*.test.js",
       "!**/*.pdb",
       "!**/*.map",

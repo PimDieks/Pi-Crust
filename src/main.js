@@ -1699,6 +1699,7 @@ require("./voice-main").register(ctx);
 require("./browser-tools-main").register(ctx);
 require("./subscriptions-main").register(ctx);
 require("./health-main").register(ctx);
+require("./health-install").register(ctx);
 require("./remote-main").register(ctx);
 require("./update-main").register(ctx);
 require("./mendix-main").register(ctx);
