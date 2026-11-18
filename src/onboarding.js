@@ -192,12 +192,22 @@
 	}
 
 	// --- open and close ------------------------------------------------------------------------
+	// Nothing from the app stays visible on top of the view: a click outside closes the model panel, the worktree menu and the
+	// timeline popover (each listens for one), and taking the focus off the message box closes the slash and @ menus.
+	function closeAppPopovers() {
+		if (typeof closeContextPanel === "function") closeContextPanel();
+		document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+		document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+		if (document.activeElement && document.activeElement.closest?.("#composer")) document.activeElement.blur();
+	}
+
 	async function open(source = "menu") {
 		if (opened) return focusFirst();
 		// A question Pi is waiting on is never covered: the view stays closed while one is pending (the pill opens it after).
 		if (active?.asks?.length) return "question";
 		opened = true;
 		opener = document.activeElement;
+		closeAppPopovers();
 		crust.browser.hide(true, "setup");
 		root.hidden = false;
 		appEl.inert = true; // nothing behind the view takes focus or clicks

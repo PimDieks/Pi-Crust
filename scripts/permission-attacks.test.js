@@ -984,3 +984,22 @@ test("Hidden characters: both prompt UIs treat the new warning lines as reasons,
 	assert.equal(L.HIDDEN_WHY.startsWith("This text has hidden characters"), true);
 	assert.equal(L.DEVICE_WHY.startsWith("This name is a Windows device name"), true);
 });
+
+test("git --version and git version run without asking, alone; nothing else joins the list", { skip: !hasBash }, () => {
+	for (const c of ["git --version", "git version", "  git --version  "]) {
+		assert.equal(L.isReadOnlyCommand(c, "bash"), true, c);
+		assert.equal(L.isReadOnlyCommand(c, "powershell"), true, c);
+	}
+	for (const c of ["git version --build-options", "git --version --exec-path", "git --version; rm x", "git --version > out.txt", "git --exec-path", "git --html-path", "git help", "git config --list", "git remote -v", "git branch", "git fetch", "git -c core.pager=x --version", "git VERSION x", "git --versio"])
+		assert.equal(L.isReadOnlyCommand(c, "bash"), false, c);
+	const r = armed("hver");
+	for (const c of ["git --version", "git version"]) {
+		const x = L.decide({ mode: "plan", toolName: "bash", input: { command: c }, cwd: r, protect: { ok: true, files: [], dirs: [] }, shell: "bash" });
+		assert.equal(x.action, "allow", c + " in plan");
+		assert.ok(x.rewrite && x.rewrite.includes("core.hooksPath="), c);
+		touch(r);
+		const run = spawnSync(GIT_BASH, ["-c", x.rewrite], { cwd: r, windowsHide: true, encoding: "utf8" });
+		assert.match(run.stdout, /^git version /, c + ": " + run.stderr);
+		assert.deepEqual(pwned(r), [], c);
+	}
+});

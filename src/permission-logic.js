@@ -437,6 +437,8 @@ const READ_ONLY_COMMANDS = {
 	find: (args) => !args.some((a) => FIND_DENY.test(a)),
 	rg: (args) => !args.some((a) => /^--(pre|hostname)/i.test(a) || /^--search-zip/i.test(a) || /^-[^-]*z/.test(a)), // --pre runs a program
 	git: (args) => {
+		// `git --version` and `git version`, alone: they print the version and read nothing. Nothing after them (no --build-options).
+		if (args.length === 1 && (args[0] === "--version" || args[0] === "version")) return true;
 		if (!args.length || !GIT_SUBS.has(args[0])) return false; // also rejects -c, -C, --exec-path ... before the subcommand
 		return !args.slice(1).some((a) => {
 			if (!a.startsWith("--")) return false;

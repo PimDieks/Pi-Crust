@@ -11,6 +11,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { detect, isClone } = require("./update-mode");
 const releaseUpdater = require("./release-updater");
+const { hardenGitArgs } = require("./git-harden"); // the automatic checks (fetch, log, rev-list, status) run no hooks, fsmonitor or pager
 
 const CHECK_EVERY_MS = 60 * 60 * 1000;
 const FIRST_CHECK_MS = 15 * 1000;
@@ -72,7 +73,7 @@ function register(ctx, deps = {}) {
 
 	const git = (args, timeout = 60e3) =>
 		new Promise((resolve, reject) =>
-			execFile("git", args, { cwd: source.dir, env: { ...ctx.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" }, timeout, windowsHide: true, maxBuffer: 10e6 }, (err, out, errOut) =>
+			execFile("git", hardenGitArgs(args, { cwd: source.dir }), { cwd: source.dir, env: { ...ctx.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" }, timeout, windowsHide: true, maxBuffer: 10e6 }, (err, out, errOut) =>
 				err ? reject(new Error(String(errOut || err.message).trim())) : resolve(String(out).trim()),
 			),
 		);

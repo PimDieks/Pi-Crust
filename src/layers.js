@@ -40,24 +40,40 @@ selftestSteps.push(async ({ snap, wait }) => {
 	});
 
 	// layer: the --layer-* it must use; plus: its offset inside that layer (distinct levels for modals that can co-occur).
-	const OVERLAYS = [
-		{
-			name: "ask",
-			layer: "base", // Pi's question: docked in the chat pane's flow, no z-index of its own
-			root: () => $("#ask"),
-			open: () => {
-				active.asks = [{ spec: { id: "layers-test", method: "select", title: "Layers test", message: "Pick one", options: ["One", "Two"] }, finish() {} }];
-				const was = info.selftest;
-				info.selftest = false; // renderAsk would answer it by itself after 1.5 s
-				renderAsk();
-				info.selftest = was;
-			},
-			controls: () => [...$("#ask").querySelectorAll(".options button, .modal-actions button")],
-			close: () => {
-				active.asks = [];
-				renderAsk();
-			},
+	// Pi's question and the approval prompt of the permission modes: both docked in #ask, in the chat pane's flow, no z-index of
+	// their own. The approval prompt has a command to approve (the long one is the phone-view worst case) and three answers.
+	const LONG_COMMAND = "npm run build -- --mode production " + "--define:FEATURE_FLAG_NUMBER_ONE=enabled ".repeat(40) + "--outdir dist
+" + "x".repeat(700) + "
+node scripts/cleanup.js --really --everything";
+	const askOverlay = (name, spec, extra = {}) => ({
+		name,
+		layer: "base",
+		root: () => $("#ask"),
+		open: () => {
+			active.asks = [{ spec: { id: `layers-test-${name}`, method: "select", ...spec }, finish() {} }];
+			const was = info.selftest;
+			info.selftest = false; // renderAsk would answer it by itself after 1.5 s
+			renderAsk();
+			info.selftest = was;
 		},
+		controls: () => [...$("#ask").querySelectorAll(".options button, .modal-actions button")],
+		close: () => {
+			active.asks = [];
+			renderAsk();
+		},
+		...extra,
+	});
+	const PERM_OPTIONS = ["Allow once", "Allow for this chat", "Deny"];
+	const OVERLAYS = [
+		askOverlay("ask", { title: "Layers test", message: "Pick one", options: ["One", "Two"] }),
+		askOverlay("perm-ask", { title: 'Allow this command?
+git commit -m "Fix login"
+Mode: Ask before commands', options: PERM_OPTIONS }),
+		// The long command takes part in the explicit cases only (alone, toasts, slash menu, welcome view), not in the pair matrix.
+		askOverlay("perm-ask-long", { title: `Allow this command?
+This command is ${LONG_COMMAND.length} characters long. Read all of it before you allow it.
+${LONG_COMMAND}
+Mode: Ask before commands`, options: PERM_OPTIONS }, { with: [] }),
 		{
 			name: "diff-add",
 			layer: "panel",
@@ -167,7 +183,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 			name: "welcome-view",
 			layer: "popover",
 			plus: -1,
-			with: ["context-panel", "repo-picker", "palette", "toast", "update-card", "confirm"], // the others live in the inert app: they cannot open over the view
+			with: ["context-panel", "repo-picker", "palette", "toast", "update-card", "confirm"], // the questions and other popovers: see the cases below; the others live in the inert app: they cannot open over the view
 			root: () => $("#onboarding"),
 			open: async () => {
 				await crust.health.stubSet({});
@@ -242,6 +258,8 @@ selftestSteps.push(async ({ snap, wait }) => {
 		},
 	];
 	const byName = (n) => OVERLAYS.find((o) => o.name === n);
+	const isAsk = (o) => o.name === "ask" || o.name.startsWith("perm-ask");
+	const ASKS = ["ask", "perm-ask", "perm-ask-long"];
 	const level = (o) => LAYERS.indexOf(o.layer) * 100 + (o.plus || 0);
 	const mayPair = (a, b) => (!a.with || a.with.includes(b.name)) && (!b.with || b.with.includes(a.name));
 
@@ -303,7 +321,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		const topRows = vis(top.root()) ? reach(top) : [];
 		// The input's own menus (slash, @) open upward over the question docked above it while the user types (step 4b: Esc closes
 		// them and the question is reachable again). The context panel is never allowed over it: it ends above the question.
-		const ownMenu = !late && lo.name === "ask" && ["slash-menu", "mention-menu"].includes(hi.name);
+		const ownMenu = !late && isAsk(lo) && ["slash-menu", "mention-menu"].includes(hi.name);
 		// The welcome view is a full-screen view: the sign-in panel (and anything else) opens over part of it on purpose.
 		const underRows = (late || !BLOCKING.has(hi.layer)) && !ownMenu && lo.name !== "welcome-view" && vis(under.root()) ? reach(under) : [];
 		report(`${first.name} then ${second.name}`, theme, [...topRows, ...underRows], vis(top.root()) ? "" : " top not visible");
@@ -363,15 +381,15 @@ selftestSteps.push(async ({ snap, wait }) => {
 		for (const lo of OVERLAYS)
 			for (const hi of OVERLAYS) {
 				if (level(hi) <= level(lo) || !mayPair(lo, hi)) continue;
-				const shot = (hi.name === "context-panel" && lo.name === "ask") || (hi.name === "confirm" && lo.name === "repo-picker") || (hi.name === "toast" && ["repo-picker", "ask"].includes(lo.name));
+				const shot = (hi.name === "context-panel" && ["ask", "perm-ask"].includes(lo.name)) || (hi.name === "confirm" && lo.name === "repo-picker") || (hi.name === "toast" && ["repo-picker", "ask", "perm-ask"].includes(lo.name));
 				await together(lo, hi, theme, shot);
 			}
 		// 4. A question that appears while a popover is open must end up reachable (the input's own menus excepted: Esc closes them).
-		for (const lo of OVERLAYS.filter((o) => o.layer === "popover" && !["slash-menu", "mention-menu"].includes(o.name))) await together(lo, byName("ask"), theme, false, true);
+		for (const lo of OVERLAYS.filter((o) => o.layer === "popover" && !["slash-menu", "mention-menu"].includes(o.name))) for (const q of ASKS) await together(lo, byName(q), theme, false, true);
 		// 4b. The slash and @ menus belong to the message box and may cover the answer buttons while the user types. Esc must close
 		//     them, and then every answer button is reachable again.
-		for (const menu of [byName("slash-menu"), byName("mention-menu")]) {
-			const q = byName("ask");
+		for (const [menu, qName] of [[byName("slash-menu"), "ask"], [byName("mention-menu"), "ask"], [byName("slash-menu"), "perm-ask"], [byName("slash-menu"), "perm-ask-long"]]) {
+			const q = byName(qName);
 			await q.open();
 			await settle(q);
 			await menu.open();
@@ -382,31 +400,63 @@ selftestSteps.push(async ({ snap, wait }) => {
 			await wait(250);
 			const closed = !vis(menu.root());
 			console.error(`SELFTEST layers ${menu.name} over the question while typing (${theme}): menu shown=${shown}, answer controls under it=${wasCovered}`);
-			report(`${menu.name} closed by Esc, question reachable`, theme, reach(q), shown && closed ? "" : ` menu shown=${shown} closed=${closed}`);
+			report(`${menu.name} closed by Esc, ${q.name} reachable`, theme, reach(q), shown && closed ? "" : ` menu shown=${shown} closed=${closed}`);
 			await shut(menu);
+			await shut(q);
+		}
+		// 4c. The approval prompt (one command, then a very long one) with two toasts: the toast column is above it and covers none of its
+		//     answers; every answer is reachable, and so is every toast action.
+		for (const qName of ["perm-ask", "perm-ask-long"]) {
+			const q = byName(qName);
+			await q.open();
+			await settle(q);
+			toast("Extension error (permission-modes): something went wrong while loading, which is a long enough message to wrap onto several lines", "error", { label: "Details", onClick() {} });
+			toast("Pi Crust brings its own permission modes. Your older copy in ~/.pi/agent/extensions loads too. Remove or rename it.", "info", { label: "Undo", onClick() {} });
+			await wait(300);
+			const tz = Number(getComputedStyle($("#toasts")).zIndex);
+			report(`${q.name} with two toasts, answers`, theme, reach(q), "");
+			report(`${q.name} with two toasts, toast actions`, theme, reach(byName("toast")), $("#toasts").children.length === 2 && tz > 0 ? "" : ` toasts=${$("#toasts").children.length} z=${tz}`);
+			if (qName === "perm-ask") await snap(`layers-perm-ask-two-toasts-${theme}`);
+			$("#toasts").replaceChildren();
 			await shut(q);
 		}
 		// 5. Same level, open together: the toast column and the update card.
 		await together(byName("toast"), byName("update-card"), theme, false);
 		// 6. Setup. The first-task card and Pi's question are both in the chat pane's flow: neither may cover the other.
 		await together(byName("first-task"), byName("ask"), theme, true);
-		// 6b. A question from Pi while the welcome view is open closes the view and is reachable; and the view does not open over a question.
-		{
+		// 6b. A question from Pi (or an approval prompt) while the welcome view is open closes the view and is reachable; and the view
+		//     does not open over a question.
+		for (const qName of ["ask", "perm-ask", "perm-ask-long"]) {
 			const view = byName("welcome-view");
-			const q = byName("ask");
+			const q = byName(qName);
 			await view.open();
 			await settle(view);
 			await q.open();
 			await settle(q);
 			const closed = !vis(view.root()) && !$("#app").inert;
-			report("question while the welcome view is open", theme, reach(q), closed ? "" : ` view still open (visible=${vis(view.root())} inert=${$("#app").inert})`);
+			report(`${q.name} while the welcome view is open`, theme, reach(q), closed ? "" : ` view still open (visible=${vis(view.root())} inert=${$("#app").inert})`);
 			await shut(view);
 			await view.open(); // a question is still pending: the view must stay closed
 			await settle(view);
 			const refused = !vis(view.root()) && !$("#app").inert && window.crustOnboarding.isOpen() === false;
-			report("welcome view with a question pending", theme, reach(q), refused ? "" : " view opened over the question");
+			report(`welcome view with ${q.name} pending`, theme, reach(q), refused ? "" : " view opened over the question");
 			await shut(view);
 			await shut(q);
+		}
+		// 6d. Opening the welcome view closes every popover of the app (the model panel is the context panel, the slash and @ menus, the
+		//     worktree menu), so nothing from the app stays on top of the view. The timeline popover closes through the same
+		//     outside-click listener as the worktree menu; its real popover needs recorded screenshots, so it is not opened here.
+		for (const pop of [byName("context-panel"), byName("slash-menu"), byName("mention-menu"), byName("worktree-menu")]) {
+			const view = byName("welcome-view");
+			await pop.open();
+			await wait(400);
+			const shown = vis(pop.root());
+			await view.open();
+			await settle(view);
+			const left = vis(pop.root());
+			report(`${pop.name} closed when the welcome view opens`, theme, reach(view), shown && !left ? "" : ` popover shown=${shown} still open=${left}`);
+			await shut(view);
+			await shut(pop);
 		}
 		// 6c. The picker and the view together, in both orders: the picker is the top one either way.
 		{
