@@ -115,4 +115,81 @@ async function callToolRaw(name, args = {}) {
 	return result.content || [];
 }
 
-module.exports = { callTool, callToolRaw, URL_MCP };
+// Connection check for the status pill: its own fresh session (never the cached sessionId), tools/list, then one real call.
+// Returns the raw facts, never throws: { stage, reachable, initialized, status, errorCode, errorMessage, tools, call }.
+// stage = where it stopped: connect | initialize | not_mcp | tools | call (call = the tool answered, ok or not).
+async function probe({ url = URL_MCP, timeoutMs = 5000 } = {}) {
+	const out = { stage: "connect", reachable: false, initialized: false, status: null, errorCode: null, errorMessage: null, tools: null, call: null };
+	let sid = null;
+	let id = 1;
+	const send = async (body) => {
+		const headers = { ...HEADERS };
+		if (sid) headers["mcp-session-id"] = sid;
+		const ctl = new AbortController();
+		const timer = setTimeout(() => ctl.abort(), timeoutMs);
+		try {
+			const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: ctl.signal });
+			const text = await res.text();
+			out.reachable = true;
+			out.status = res.status;
+			return { res, text };
+		} catch (e) {
+			if (e && e.name === "AbortError") throw Object.assign(new Error("Figma MCP timed out"), { code: "ETIMEDOUT" });
+			throw e;
+		} finally {
+			clearTimeout(timer);
+		}
+	};
+	const rpcCall = async (method, params) => {
+		const myId = id++;
+		const { res, text } = await send({ jsonrpc: "2.0", id: myId, method, params });
+		return { res, text, msg: res.ok ? parseBody(text, myId) : null };
+	};
+	try {
+		const init = await rpcCall("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "pi-crust", version: "0.1.0" } });
+		if (!init.res.ok) {
+			out.stage = "initialize";
+			out.errorMessage = `HTTP ${init.res.status}: ${init.text.slice(0, 200)}`;
+			return out;
+		}
+		if (!init.msg || init.msg.jsonrpc !== "2.0") {
+			out.stage = "not_mcp";
+			out.errorMessage = init.text.slice(0, 200);
+			return out;
+		}
+		if (init.msg.error) {
+			out.stage = "initialize";
+			out.errorMessage = init.msg.error.message || "initialize failed";
+			return out;
+		}
+		out.initialized = true;
+		sid = init.res.headers.get("mcp-session-id");
+		await send({ jsonrpc: "2.0", method: "notifications/initialized" });
+		out.stage = "tools";
+		const list = await rpcCall("tools/list", {});
+		if (!list.msg || list.msg.error || !list.msg.result) {
+			out.errorMessage = (list.msg && list.msg.error && list.msg.error.message) || (list.res.ok ? "Empty tool list answer" : `HTTP ${list.res.status}`);
+			return out;
+		}
+		out.tools = (list.msg.result.tools || []).map((t) => t.name);
+		if (!out.tools.includes("get_design_context")) return out;
+		out.stage = "call";
+		const call = await rpcCall("tools/call", { name: "get_metadata", arguments: {} });
+		if (!call.msg || (!call.msg.result && !call.msg.error)) {
+			out.call = { ok: false, error: call.res.ok ? "Empty response from Figma MCP" : `HTTP ${call.res.status}: ${call.text.slice(0, 200)}` };
+		} else if (call.msg.error) {
+			out.call = { ok: false, error: call.msg.error.message || "Figma MCP error" };
+		} else {
+			const r = call.msg.result;
+			const t = (r.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+			out.call = r.isError ? { ok: false, error: t || "Figma tool error" } : { ok: true, text: t };
+		}
+		return out;
+	} catch (e) {
+		out.errorCode = (e && ((e.cause && e.cause.code) || e.code)) || null;
+		out.errorMessage = String((e && e.message) || e);
+		return out;
+	}
+}
+
+module.exports = { callTool, callToolRaw, probe, URL_MCP };
