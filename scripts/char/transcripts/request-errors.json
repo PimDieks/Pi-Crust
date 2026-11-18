@@ -1,0 +1,67 @@
+{
+	"name": "request-errors",
+	"description": "Requests main sends itself (Remote): a refusal without text, a refusal with text, no answer in time. The three main-side error texts.",
+	"synthetic": "Built from the record shapes the app consumes (src/renderer.js handleRecord, src/sessions.js), not from a real Pi session.",
+	"state": {
+		"model": {
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		},
+		"thinkingLevel": "off",
+		"isStreaming": false,
+		"sessionFile": "/char/session.jsonl",
+		"messageCount": 0
+	},
+	"models": [
+		{
+			"provider": "char",
+			"id": "char-1",
+			"name": "Char One"
+		}
+	],
+	"rules": [
+		{
+			"on": {
+				"type": "get_session_stats"
+			},
+			"success": false
+		},
+		{
+			"on": {
+				"type": "get_commands"
+			},
+			"success": false,
+			"error": "custom boom"
+		},
+		{
+			"on": {
+				"type": "get_last_assistant_text"
+			},
+			"respond": false
+		}
+	],
+	"drive": [
+		{
+			"do": "settle",
+			"ms": 300
+		},
+		{
+			"do": "request",
+			"type": "get_session_stats"
+		},
+		{
+			"do": "request",
+			"type": "get_commands"
+		},
+		{
+			"do": "request",
+			"type": "get_last_assistant_text",
+			"timeoutMs": 400
+		},
+		{
+			"do": "request",
+			"type": "get_state"
+		}
+	]
+}

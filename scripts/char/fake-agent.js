@@ -11,6 +11,7 @@
 //
 // Transcript: { name, synthetic, state, messages, models, responses: { <type>: data }, rules: [ { on: {type, ...fields}, respond, emit: [...] } ] }
 // "ignoreStdinEnd": true keeps the process alive after stdin closes (the app has to kill it).
+// A rule with "success": false answers { success: false, error? } ("error" is optional).
 // A rule matches a request when every field of `on` equals the request's field. `respond: false` sends no response record; `data` sets the response data.
 // emit items, in order: a record (object with `type`), { delay: ms }, { wait_ui: id } (pause until that extension_ui_response arrives),
 // { stderr: text }, { raw: text } (written as is: partial lines, CRLF, junk), { exit: code }.
@@ -102,7 +103,8 @@ function handle(req) {
 	// The response goes out at once (Pi answers while a run streams); the rule's records follow in order.
 	if (!rule || rule.respond !== false) {
 		const data = rule && "data" in rule ? rule.data : T.responses && req.type in T.responses ? T.responses[req.type] : defaults[req.type] ?? null;
-		out(JSON.stringify({ type: "response", id: req.id, command: req.type, success: true, data }) + "\n");
+		if (rule && rule.success === false) out(JSON.stringify({ type: "response", id: req.id, command: req.type, success: false, ...(rule.error !== undefined ? { error: rule.error } : {}) }) + "\n");
+		else out(JSON.stringify({ type: "response", id: req.id, command: req.type, success: true, data }) + "\n");
 	}
 	if (rule?.emit?.length) enqueue(() => emit(rule.emit));
 }
