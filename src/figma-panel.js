@@ -15,9 +15,10 @@
 		{ id: 2, text: "Open a design file in Figma desktop." },
 		{ id: 3, text: "Switch to Dev Mode: the toggle at the top of the toolbar, or press Shift+D." },
 		{ id: 4, text: "In the right sidebar, find MCP server and click Enable desktop MCP server." },
-		{ id: 5, text: "No MCP server option in Dev Mode? Your seat or plan may not allow it. Ask the Figma admin for a Dev or Full seat." },
-		{ id: 6, text: "Select a frame, then choose Test connection." },
+		{ id: 5, text: "Select a frame, then choose Test connection." },
 	];
+	// Unnumbered note under step 4. The highlighted line when Figma answers with a refusal (seat).
+	const SEAT_NOTE = "No MCP server option in Dev Mode? Your seat or plan may not allow it. Ask the Figma admin for a Dev or Full seat.";
 
 	let res = null; // last status or test result
 	let checks = null; // [{ label, ok }] from the last Test connection
@@ -33,22 +34,22 @@
 		return s < 10 ? "Checked just now" : s < 60 ? `Checked ${s} s ago` : `Checked ${Math.round(s / 60)} min ago`;
 	};
 
-	// Which steps are still open for a result, and which one is first. Steps 1 to 5 can only be proven by the port answering
-	// (Figma runs, the server is on); step 2 by a design file being open; step 6 by a successful read of the selection.
-	function openSteps(r) {
-		if (!r) return [];
-		const reached = ["no_file", "wrong_tab", "no_selection", "ready"].includes(r.state);
+	// What the app can prove, per step. Figma running: step 1 (hint server_off or seat, or any answer). The server answering
+	// (anything but not_reachable, and not "problem", which may be some other program on the port): steps 1, 3 and 4. A design
+	// file open (no_selection, ready): step 2. A selection read (ready): step 5. Nothing else is ticked.
+	function stepsFor(r) {
+		if (!r || r.state === "problem") return null;
+		const done = new Set();
 		if (r.state === "not_reachable") {
-			const first = { not_installed: 1, not_running: 1, server_off: 3, seat: 5, unknown: 1 }[r.hint] || 1;
-			return STEPS.slice(0, 5).map((s) => ({ ...s, first: s.id === first }));
+			if (r.hint === "server_off" || r.hint === "seat") done.add(1);
+		} else {
+			[1, 3, 4].forEach((n) => done.add(n));
+			if (r.state === "no_selection" || r.state === "ready") done.add(2);
+			if (r.state === "ready") done.add(5);
 		}
-		if (reached) {
-			const open = [];
-			if (r.state === "no_file" || r.state === "wrong_tab") open.push(STEPS[1]);
-			if (r.state === "no_selection") open.push(STEPS[5]);
-			return open.map((s, i) => ({ ...s, first: i === 0 }));
-		}
-		return [];
+		const firstOpen = STEPS.find((s) => !done.has(s.id))?.id;
+		const seat = r.state === "not_reachable" && r.hint === "seat";
+		return { steps: STEPS.map((s) => ({ ...s, done: done.has(s.id), first: !seat && s.id === firstOpen })), seat };
 	}
 
 	function paintPill() {
@@ -127,16 +128,26 @@
 			row.append(copy);
 			kids.push(row);
 		}
-		const steps = busy ? [] : openSteps(res);
-		if (steps.length) {
-			const ol = el("ol", "fp-steps");
-			for (const s of steps) {
-				const li = el("li", s.first ? "first" : "", s.text);
-				li.dataset.n = s.id;
-				if (s.first) li.setAttribute("aria-current", "step");
-				ol.append(li);
-			}
-			kids.push(ol);
+		const plan = busy ? null : stepsFor(res);
+		if (plan) {
+			const wrap = el("div", "fp-steps-wrap");
+			const list = (items) => {
+				const ol = el("ol", "fp-steps");
+				for (const s of items) {
+					const li = el("li", [s.done ? "done" : "", s.first ? "first" : ""].join(" ").trim());
+					li.dataset.n = s.id;
+					if (s.done) li.append(el("span", "fp-sr", "Done: "));
+					li.append(el("span", "", s.text));
+					if (s.first) li.setAttribute("aria-current", "step");
+					ol.append(li);
+				}
+				if (items[0].id > 1) ol.start = items[0].id;
+				return ol;
+			};
+			const note = el("p", plan.seat ? "fp-note first" : "fp-note", SEAT_NOTE);
+			if (plan.seat) note.setAttribute("aria-current", "true");
+			wrap.append(list(plan.steps.slice(0, 4)), note, list(plan.steps.slice(4)));
+			kids.push(wrap);
 		}
 		const test = el("button", "btn secondary", busy ? "Checking…" : "Test connection");
 		test.type = "button";
@@ -223,15 +234,15 @@
 		const cases = [
 			// [name, stub mode, stub options, expected pill, expected panel text]
 			["checking", "ready", { delayMs: 1500 }, "Figma: checking…", "Looking for Figma desktop."],
-			["not-installed", "closed", { proc: { running: false, installed: false } }, "Figma: not connected", "doesn't seem to be installed"],
-			["not-running", "closed", { proc: { running: false, installed: true } }, "Figma: not connected", "isn't running"],
-			["server-off", "closed", { proc: { running: true } }, "Figma: not connected", "MCP server is off"],
-			["unknown", "closed", { proc: {} }, "Figma: not connected", "switch on its MCP server"],
-			["seat", "http-403", {}, "Figma: not connected", "Dev or Full seat"],
-			["no-file", "no-file", {}, "Figma: open a file", "no design file is open"],
-			["wrong-tab", "wrong-tab", {}, "Figma: switch tab", "not a design file"],
-			["no-selection", "no-selection", {}, "Figma: select a frame", "Select a frame in Figma desktop"],
-			["ready", "ready", {}, "Figma: ready", "Selected frame: Stub Card"],
+			["not-installed", "closed", { proc: { running: false, installed: false } }, "Figma: not connected", "doesn't seem to be installed", ["", "1"]],
+			["not-running", "closed", { proc: { running: false, installed: true } }, "Figma: not connected", "isn't running", ["", "1"]],
+			["server-off", "closed", { proc: { running: true } }, "Figma: not connected", "MCP server is off", ["1", "2"]],
+			["unknown", "closed", { proc: {} }, "Figma: not connected", "switch on its MCP server", ["", "1"]],
+			["seat", "http-403", {}, "Figma: not connected", "Dev or Full seat", ["1", "note"]],
+			["no-file", "no-file", {}, "Figma: open a file", "no design file is open", ["1,3,4", "2"]],
+			["wrong-tab", "wrong-tab", {}, "Figma: switch tab", "not a design file", ["1,3,4", "2"]],
+			["no-selection", "no-selection", {}, "Figma: select a frame", "Select a frame in Figma desktop", ["1,2,3,4", "5"]],
+			["ready", "ready", {}, "Figma: ready", "Selected frame: Stub Card", ["1,2,3,4,5", ""]],
 			["problem", "not-mcp", {}, "Figma: problem", "Something else answers"],
 		];
 		switchTab("design");
@@ -246,7 +257,7 @@
 				await snap(`figma-panel-${name}-${th}`);
 			}
 		};
-		for (const [name, mode, opts, pillWant, lineWant] of cases) {
+		for (const [name, mode, opts, pillWant, lineWant, doneWant] of cases) {
 			await crust.figma.stubMode(mode, opts);
 			window.crustFigma.recheck();
 			await wait(name === "checking" ? 400 : 0);
@@ -255,6 +266,17 @@
 			const got = text(".fp-line");
 			const ok = pillGot === pillWant && got.includes(lineWant) && (pill.classList.contains("on") === (name === "ready"));
 			console.error(`SELFTEST figma status ${name}: "${pillGot}" / "${got}" -> ${ok ? "OK" : "MISMATCH"}`);
+			if (doneWant) {
+				// ticks: which of the five steps are done, which is highlighted, five numbered steps, the seat note unnumbered
+				const lis = [...panel.querySelectorAll(".fp-steps li")];
+				const doneGot = lis.filter((li) => li.classList.contains("done")).map((li) => li.dataset.n).join(",");
+				const firstGot = lis.filter((li) => li.classList.contains("first")).map((li) => li.dataset.n).join(",") || (panel.querySelector(".fp-note.first") ? "note" : "");
+				const noteOk = panel.querySelectorAll(".fp-note").length === 1 && /^No MCP server option in Dev Mode\?/.test(text(".fp-note")) && !panel.querySelector(".fp-steps li:nth-child(6)");
+				const srOk = lis.every((li) => li.classList.contains("done") === !!li.querySelector(".fp-sr"));
+				const tickOk = lis.every((li) => !li.classList.contains("done") || getComputedStyle(li, "::before").content.includes("✓"));
+				const good = lis.length === 5 && doneGot === doneWant[0] && firstGot === doneWant[1] && noteOk && srOk && tickOk;
+				console.error(`SELFTEST figma steps ${name}: done=[${doneGot}] first=[${firstGot}] n=${lis.length} -> ${good ? "OK" : "MISMATCH"}`);
+			}
 			await shots(name);
 			if (name === "checking") await until(idle);
 			if (name === "no-selection") {

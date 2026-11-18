@@ -1185,7 +1185,13 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 #mendix-log pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; }
 
 /* --- Figma connection pill and panel (Design tab), see figma-panel.js. Own block: keep apart from other edits. --- */
-#figma-pill { margin-left: var(--space-sm); border: 0; cursor: pointer; flex: none; }
+#figma-pill { margin-left: auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: var(--space-xs); border: 1px solid var(--borders-default); background: transparent; cursor: pointer; flex: 0 1 auto; }
+#figma-pill::before { content: ""; flex: none; width: 8px; height: 8px; box-sizing: border-box; border-radius: var(--radius-full); border: 1.5px solid currentColor; }
+#figma-pill:hover { background: var(--hover); }
+#figma-pill.on { color: var(--text-success); border-color: var(--fills-success); background: transparent; }
+#figma-pill.on::before { background: var(--fills-success); border-color: var(--fills-success); }
+#figma-pill.on:hover { background: var(--fills-success-muted); }
+.design-bar .seg { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 #figma-pill:focus-visible, .fp-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 #figma-pill[aria-expanded="true"] { background: var(--hover); }
 #figma-pill.on[aria-expanded="true"] { background: var(--fills-success-muted); }
@@ -1198,7 +1204,11 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .fp-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-3xs); counter-reset: fp; }
 .fp-steps li { counter-increment: fp; padding: var(--space-3xs) var(--space-sm); border-radius: var(--radius-sm); border-left: 2px solid transparent; color: var(--text-secondary); }
 .fp-steps li::before { content: attr(data-n) ". "; color: var(--muted); }
-.fp-steps li.first { background: var(--selected); border-left-color: var(--accent); color: var(--text); }
+.fp-steps li.first, .fp-note.first { background: var(--selected); border-left-color: var(--accent); color: var(--text); }
+.fp-steps li.done { color: var(--muted); }
+.fp-steps li.done::before { content: "✓ "; color: var(--text-success); }
+.fp-steps-wrap { display: flex; flex-direction: column; gap: var(--space-3xs); }
+.fp-note { padding: var(--space-3xs) var(--space-sm); border-radius: var(--radius-sm); border-left: 2px solid transparent; color: var(--muted); font-size: var(--fs-sm); }
 .fp-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
 .fp-row > input { flex: 1 1 140px; min-width: 0; height: var(--control-h); box-sizing: border-box; padding: 0 var(--space-sm); color: var(--text); }
 .fp-label { font-weight: 500; }
