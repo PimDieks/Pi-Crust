@@ -17,6 +17,7 @@ function register(ctx) {
 	fs.writeFileSync(outFile, "");
 	const waiters = new Set();
 	let readyChat = null;
+	let readyResolved = false;
 	let readyResolve;
 	const ready = new Promise((r) => (readyResolve = r));
 	const rec = (e) => {
@@ -26,7 +27,8 @@ function register(ctx) {
 	ctx.addSendTap((channel, payload) => {
 		if (!channel.startsWith("pi:")) return;
 		rec({ src: "main", channel, payload });
-		if (channel === "pi:ready" && !readyChat) (readyChat = payload.chatId), readyResolve();
+		if (channel === "pi:started" && !readyChat) readyChat = payload.chatId;
+		if (channel === (T.waitFor || "pi:ready") && !readyResolved) (readyResolved = true), readyResolve();
 	});
 
 	const waitEmit = (match, timeoutMs = 20000) =>
@@ -58,7 +60,10 @@ function register(ctx) {
 				const r = await ctx.piRequest(chat, s.type, s.extra || {}, s.timeoutMs || 5000);
 				return { result: r };
 			}
-			case "restart":
+			case "unsetEnv":
+			delete process.env[s.name]; // "installing Pi while the app runs": the next search finds it
+			return { unset: s.name };
+		case "restart":
 				return { restarted: await ctx.restartChat(chat, s.file) };
 			case "ipc": {
 				// Calls a handler the app registered with ipcMain.handle, as the renderer would.

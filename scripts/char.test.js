@@ -26,6 +26,15 @@ test("normalizeValue walks objects and arrays", () => {
 	const root = path.resolve("C:/work/app");
 	assert.deepStrictEqual(normalizeValue({ a: [`${root}/x`], b: 1 }, [[root, "<APP>"]]), { a: ["<APP>/x"], b: 1 });
 });
+test("buildCapture: helper processes are a sorted set, agent processes keep their start order", () => {
+	const chat = (n) => [{ seq: 1, dir: "meta", argv: ["--mode", "rpc", String(n)] }];
+	const aux = (a) => [{ seq: 1, dir: "meta", argv: a }, { seq: 2, dir: "meta", exit: 1 }];
+	const x = buildCapture({ events: [], procs: [chat(1), aux(["auth", "check", "--provider", "a"]), aux(["auth", "check", "--provider", "b"]), chat(2)] }, []);
+	const y = buildCapture({ events: [], procs: [chat(1), aux(["auth", "check", "--provider", "b"]), chat(2), aux(["auth", "check", "--provider", "a"])] }, []);
+	assert.strictEqual(x, y);
+	const z = buildCapture({ events: [], procs: [chat(2), chat(1)] }, []);
+	assert.notStrictEqual(buildCapture({ events: [], procs: [chat(1), chat(2)] }, []), z);
+});
 test("buildCapture: stderr events are their own sequence, so cross-pipe order does not matter", () => {
 	const ev = (channel, n) => ({ src: "main", channel, payload: { n } });
 	const a = buildCapture({ events: [ev("pi:record", 1), ev("pi:stderr", 2), ev("pi:exit", 3)], procs: [] }, []);

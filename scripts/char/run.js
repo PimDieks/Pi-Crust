@@ -53,7 +53,7 @@ const readJsonl = (f) =>
 				.filter(Boolean)
 				.map((l) => JSON.parse(l))
 		: [];
-// One text per scenario: "E" lines are main-process events and driver steps in order, "S" lines the pi:stderr events (own sequence), "P<n>" lines are what process n of the
+// One text per scenario (see the notes in buildCapture): "E" lines are main-process events and driver steps in order, "S" lines the pi:stderr events (own sequence), "P<n>" lines are what process n of the
 // stand-in saw and said (argv, cwd, env values, every line in and out). Compact JSON, one entry per line, no timestamps.
 function buildCapture({ events, procs }, tokens) {
 	const lines = [];
@@ -62,9 +62,19 @@ function buildCapture({ events, procs }, tokens) {
 	const isErr = (e) => e.channel === "pi:stderr";
 	for (const e of events.filter((x) => !isErr(x))) lines.push(`E ${JSON.stringify(normalizeValue(e, tokens))}`);
 	for (const e of events.filter(isErr)) lines.push(`S ${JSON.stringify(normalizeValue(e, tokens))}`);
-	procs.forEach((entries, i) => {
-		for (const e of entries) lines.push(`P${i + 1} ${JSON.stringify(normalizeValue(e, tokens))}`);
-	});
+	// Agent processes (started with --mode rpc) are numbered in start order (P lines). Helper processes the app starts on its own
+	// (the health check: `--version`, `auth check --provider X`) run in parallel, so their start order is not defined: they are
+	// compared as a set, sorted (H lines).
+	const isChat = (entries) => !!(entries[0] && Array.isArray(entries[0].argv) && entries[0].argv.includes("--mode"));
+	let n = 0;
+	const helpers = [];
+	for (const entries of procs) {
+		if (isChat(entries)) {
+			n++;
+			for (const e of entries) lines.push(`P${n} ${JSON.stringify(normalizeValue(e, tokens))}`);
+		} else helpers.push(entries.map((e) => JSON.stringify(normalizeValue(e, tokens))).join("\n"));
+	}
+	helpers.sort().forEach((h, i) => h.split("\n").forEach((l) => lines.push(`H${i + 1} ${l}`)));
 	return lines.join("\n") + "\n";
 }
 // Line diff (LCS). Returns [] when identical, else hunks like "- old" / "+ new" with 2 lines of context.
@@ -131,6 +141,7 @@ async function runScenario(name, o) {
 	}
 	fs.mkdirSync(localDir, { recursive: true });
 	for (const f of PLUGIN_FILES) fs.copyFileSync(path.join(HERE, "plugin", f), path.join(localDir, f));
+	const T = JSON.parse(fs.readFileSync(transcript, "utf8"));
 	const env = {
 		...process.env,
 		PI_CRUST_SELFTEST_OFFSCREEN: "1",
@@ -139,10 +150,12 @@ async function runScenario(name, o) {
 		PI_CRUST_PI: path.join(HERE, "fake-agent.js"),
 		PI_CRUST_CWD: repo,
 		PI_CODING_AGENT_DIR: agentDir,
+		PI_CRUST_SELFTEST_USERDATA: path.join(tmp, "userdata"), // fresh settings and recent projects for every run
 		PI_CRUST_CHAR_SCENARIO: name,
 		PI_CRUST_CHAR_TRANSCRIPT: transcript,
 		PI_CRUST_CHAR_OUT: outFile,
 		PI_CRUST_CHAR_LOGDIR: logDir,
+		...(T.env || {}), // per-scenario switches (for example PI_CRUST_SELFTEST_NO_PI=1)
 	};
 	let log = "";
 	let code;
