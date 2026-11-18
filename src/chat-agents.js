@@ -20,24 +20,45 @@ function resolveNewChatAgent(requested, registry) {
 	return id !== null && registry.has(id) ? id : null;
 }
 
+// What a Claude Agent chat stores before its next message (a new fork has no session id yet; a rewound chat must not come back as it was):
+// where it stands, as the adapter reports it (claude_pending). Anything else is dropped.
+const ID_MAX = 200;
+const idOrNull = (v) => (typeof v === "string" && v ? v.slice(0, ID_MAX) : null);
+function cleanPending(p) {
+	if (!p || typeof p !== "object" || Array.isArray(p) || typeof p.view !== "string" || !p.view) return null;
+	return { from: idOrNull(p.from), at: idOrNull(p.at), view: p.view.slice(0, ID_MAX), parent: idOrNull(p.parent), title: idOrNull(p.title) };
+}
+
 // Open chats of one repo -> the record written under that repo in open-chats.json. The old fields (files, active, cwds) are written
 // exactly as before; `agents` maps a session reference to its agent and lists only the chats that are not Pi, so a file with Pi chats
-// only is byte-identical to what older versions wrote. A reader that does not know `agents` ignores it.
+// only is byte-identical to what older versions wrote. A reader that does not know `agents` or `pending` ignores them.
+// `pending` lists the chats that are waiting for their next message ([{ i: tab position, cwd, agent, pending }]); they are not listed under
+// `files`. `activeAt` is the tab position of the active chat when that is one of them.
 function serializeOpenChats(openList, activeChatId) {
-	const files = [...new Set(openList.map((e) => e.file).filter(Boolean))];
+	const isPending = (e) => !!e.agent && e.agent !== DEFAULT_ID && !!cleanPending(e.pending);
+	const plain = openList.filter((e) => !isPending(e));
+	const files = [...new Set(plain.map((e) => e.file).filter(Boolean))];
 	const cwds = {};
 	const agents = {};
-	for (const e of openList) {
+	for (const e of plain) {
 		if (e.file && e.cwd) cwds[e.file] = e.cwd; // chats in a worktree reopen there
 		if (e.file && e.agent && e.agent !== DEFAULT_ID) agents[e.file] = e.agent;
 	}
-	const rec = { files, active: openList.find((e) => e.id === activeChatId)?.file || null, cwds };
+	const activeAt = openList.findIndex((e) => e.id === activeChatId && isPending(e));
+	const rec = { files, active: activeAt >= 0 ? null : plain.find((e) => e.id === activeChatId)?.file || null, cwds };
 	if (Object.keys(agents).length) rec.agents = agents;
+	const pending = [];
+	openList.forEach((e, i) => {
+		if (isPending(e)) pending.push({ i, cwd: e.cwd || null, agent: e.agent, pending: cleanPending(e.pending) });
+	});
+	if (pending.length) rec.pending = pending;
+	if (activeAt >= 0) rec.activeAt = activeAt;
 	return rec;
 }
 
-// The record of one repo -> entries to restore [{ file, cwd, agent }]. `exists(file)` is asked for Pi chats only: a Claude session
-// reference is an id, not a path. An entry whose agent id is not a string is read as Pi's default, never dropped.
+// The record of one repo -> entries to restore [{ file, cwd, agent, pending? }]. `exists(file)` is asked for Pi chats only: a Claude session
+// reference is an id, not a path. An entry whose agent id is not a string is read as Pi's default, never dropped. A pending chat comes back at
+// its tab position with no file and its `pending` record (adapter.start's opts.fork).
 function restoreEntries(saved, exists) {
 	const s = saved && typeof saved === "object" ? saved : {};
 	const agents = s.agents && typeof s.agents === "object" ? s.agents : {};
@@ -48,7 +69,23 @@ function restoreEntries(saved, exists) {
 		if (agent === DEFAULT_ID && !exists(file)) continue;
 		out.push({ file, cwd: typeof s.cwds?.[file] === "string" ? s.cwds[file] : null, agent });
 	}
+	const waiting = (Array.isArray(s.pending) ? s.pending : [])
+		.filter((p) => p && typeof p === "object" && typeof p.agent === "string" && p.agent && p.agent !== DEFAULT_ID && cleanPending(p.pending))
+		.sort((a, b) => (Number.isInteger(a.i) ? a.i : 1e9) - (Number.isInteger(b.i) ? b.i : 1e9));
+	for (const p of waiting) {
+		const entry = { file: null, cwd: typeof p.cwd === "string" && p.cwd ? p.cwd : null, agent: p.agent, pending: cleanPending(p.pending) };
+		if (Number.isInteger(p.i) && p.i === s.activeAt) entry.wasActive = true;
+		out.splice(Math.max(0, Math.min(Number.isInteger(p.i) ? p.i : out.length, out.length)), 0, entry);
+	}
 	return out;
+}
+
+// The entry to show first: the pending chat that was active, else the one whose file was, else none (the caller takes the first).
+function activeOf(saved, entries) {
+	const s = saved && typeof saved === "object" ? saved : {};
+	const w = entries.find((e) => e.wasActive);
+	if (w) return w;
+	return typeof s.active === "string" && s.active ? entries.find((e) => e.file === s.active) || null : null;
 }
 
 // The reader of the last released app (main, before this change), for the compatibility test: it knows files, active and cwds only.
@@ -88,4 +125,4 @@ async function listAllSessions({ adapters, repo, worktrees = [] }) {
 	return { sessions, status };
 }
 
-module.exports = { agentIdOf, resolveNewChatAgent, serializeOpenChats, restoreEntries, legacyRestoreEntries, listAllSessions, HISTORY_CAP };
+module.exports = { activeOf, cleanPending, agentIdOf, resolveNewChatAgent, serializeOpenChats, restoreEntries, legacyRestoreEntries, listAllSessions, HISTORY_CAP };

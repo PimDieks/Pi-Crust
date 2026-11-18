@@ -146,10 +146,20 @@
 			const [id, action] = key.split(":");
 			rowsEl.querySelector(`.ob-row[data-id="${id}"] [data-action="${action}"]`)?.focus();
 		}
-		if (opened && !root.contains(document.activeElement)) focusFirst();
+		if (opened && wantClaudeRows && showClaudeRows()) {
+			// the Claude Agent rows were asked for: they hold the focus
+		} else if (opened && !root.contains(document.activeElement)) focusFirst();
 		paintPill();
 	}
 
+	let wantClaudeRows = false; // until the person moves: every redraw of the rows keeps the Claude Agent rows in view
+	function showClaudeRows() {
+		const target = rowsEl.querySelector(".sc-row .btn, .sc-row input, .sc-row button");
+		if (!target) return false;
+		target.focus({ preventScroll: true });
+		target.closest(".sc-row").scrollIntoView({ block: "nearest" });
+		return true;
+	}
 	function focusFirst() {
 		(rowsEl.querySelector(".ob-row.first .btn") || (startBtn.disabled ? skipBtn : startBtn)).focus();
 	}
@@ -182,7 +192,7 @@
 		if (opened && focusPending) {
 			focusPending = false;
 			render();
-			focusFirst();
+			if (!(wantClaudeRows && showClaudeRows())) focusFirst();
 			announce(r.ready ? "Everything needed is set up." : `Setup: ${counts()} done.`);
 			return r;
 		}
@@ -223,6 +233,7 @@
 	}
 
 	function close({ restore = true } = {}) {
+		wantClaudeRows = false;
 		if (!opened) return;
 		opened = false;
 		root.hidden = true;
@@ -397,7 +408,7 @@
 	}
 
 	// --- events --------------------------------------------------------------------------------
-	for (const ev of ["mousedown", "keydown"]) root.addEventListener(ev, () => (focusPending = false), true); // the user moved: leave focus alone
+	for (const ev of ["mousedown", "keydown"]) root.addEventListener(ev, () => ((focusPending = false), (wantClaudeRows = false)), true); // the user moved: leave focus alone
 	skipBtn.onclick = skip;
 	startBtn.onclick = start;
 	recheckBtn.onclick = () => refresh({ fresh: true, figma: true });
@@ -406,7 +417,16 @@
 		window.crustFirstTask?.show();
 	};
 	pill.onclick = () => open("pill");
-	window.addEventListener("crust:open-setup", (e) => open(e.detail?.source || "event"));
+	// From a Claude Agent chat's chip (detail.rows === "claude"): the view opens at the Claude Agent rows, the first one holds the focus.
+	window.addEventListener("crust:open-setup", (e) => {
+		if (e.detail?.rows === "claude") {
+			wantClaudeRows = true;
+			if (opened) showClaudeRows();
+		}
+		open(e.detail?.source || "event").then(() => {
+			if (!opened) wantClaudeRows = false; // a question kept it closed: the next way in starts at the top
+		});
+	});
 	crust.repos.onChanged(() => {
 		if (health) refresh({ fresh: true });
 	});

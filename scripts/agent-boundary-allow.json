@@ -8,12 +8,6 @@
 			"reason": "Writes the advisor pointer into Pi's extensions folder (and logs where). It runs only through the Pi adapter's onAppStart. It stays at src/ because the pointer text carries this app's path to pi-extension/advisor.ts; moving it would change the file Pi reads."
 		},
 		{
-			"file": "src/advisor-main.js",
-			"rule": "pi-folder",
-			"contains": "pointer in ~/.pi/agent/extensions",
-			"reason": "Writes the advisor pointer into Pi's extensions folder (and logs where). It runs only through the Pi adapter's onAppStart. It stays at src/ because the pointer text carries this app's path to pi-extension/advisor.ts; moving it would change the file Pi reads."
-		},
-		{
 			"file": "src/context-panel.js",
 			"rule": "pi-status",
 			"contains": "statuses.get(\"crust-context\")",

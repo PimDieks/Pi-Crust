@@ -190,6 +190,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 		},
 		record: (p, record) => {
 			if (record.type === "agent_end") prLookup.invalidatePrefix(); // the agent may have pushed or opened a PR
+			if (record.type === "claude_pending") return setChatPending(chatId, record.pending); // a fork or rewound chat before its next message: kept so a restart restores it
 			if (record.type === "claude_session" && typeof record.sessionId === "string") setChatFile(chatId, record.sessionId); // the session of a Claude Agent chat is only known once it runs (a fork, a rewound chat: its new one)
 			if (record.type === "response" && settleMainRequest(record)) return; // answers to requests main itself sent
 			send("pi:record", { chatId, record });
@@ -214,7 +215,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 	// The driver injects crust-context.ts (context breakdown and models used, see context-panel.js), crust-guard.ts (asks to continue after
 	// every N tool calls: settings.json toolCallCheckIn, default 40, 0 = off) and advisor.ts (Anthropic's advisor tool, /advisor command).
 	// Pi's start arguments are unchanged; another agent gets no `pi` (it brings its own engine).
-	const handle = agent.start(isDefaultAgent ? { pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile } : { cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile, ...(startOpts || {}) }, sink);
+	const handle = agent.start(isDefaultAgent ? { pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile } : { cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile, chatId, ...(startOpts || {}) }, sink);
 	const chat = { id: chatId, agent, handle, cwd };
 	chats.set(chatId, chat);
 	if (!openList.some((e) => e.id === chatId)) {
@@ -251,6 +252,16 @@ function setChatFile(chatId, file) {
 	const e = openList.find((x) => x.id === chatId);
 	if (!e || typeof file !== "string" || !file || e.file === file) return;
 	e.file = file;
+	saveOpenChats();
+}
+
+// Where a Claude Agent chat stands before its next message (null once it has a session): saved with the tab list.
+function setChatPending(chatId, pending) {
+	const e = openList.find((x) => x.id === chatId);
+	if (!e) return;
+	const next = pending ? chatAgents.cleanPending(pending) : null;
+	if (JSON.stringify(next) === JSON.stringify(e.pending || null)) return;
+	e.pending = next;
 	saveOpenChats();
 }
 
@@ -370,6 +381,7 @@ ipcMain.handle("pi:forkChat", async (_e, chatId, o) => {
 	if (wt && wt.missing) return { ok: false, error: `Worktree ${wt.cwd} no longer exists` };
 	const id = newChatId();
 	startAgent(id, undefined, { fork: { title: spec.start.title, text: spec.text } }, wt, c.agent.id, { fork: spec.start });
+	setChatPending(id, spec.start); // saved at once: closing the app before its first message must not lose the tab
 	return { ok: true, chatId: id, text: spec.text, title: spec.start.title };
 });
 // "Open in main checkout" for a chat whose worktree is gone: the user's explicit choice.
@@ -378,7 +390,7 @@ ipcMain.handle("pi:openInMain", (_e, chatId) => {
 	if (!entry || chats.has(chatId)) return false;
 	entry.cwd = null;
 	saveOpenChats();
-	startAgent(chatId, entry.file || undefined, {}, null, entry.agent);
+	startAgent(chatId, entry.pending ? undefined : entry.file || undefined, entry.pending ? { fork: { title: entry.pending.title } } : {}, null, entry.agent, entry.pending ? { fork: entry.pending } : null);
 	return true;
 });
 ipcMain.handle("pi:sessionFile", (_e, chatId, file) => setChatFile(chatId, file));
@@ -434,7 +446,8 @@ async function restartChat(chatId, sessionFile) {
 	const wt = await resolveWt(cwd);
 	// Closed while we waited: don't bring a Pi back for a chat that is gone.
 	if (!openList.some((e) => e.id === chatId)) return false;
-	startAgent(chatId, file, {}, wt, agentId);
+	const pend = entry && entry.pending ? entry.pending : null; // a fork or rewound chat that has no session of its own yet restarts as itself
+	startAgent(chatId, pend ? undefined : file, pend ? { fork: { title: pend.title } } : {}, wt, agentId, pend ? { fork: pend } : null);
 	return true;
 }
 ipcMain.handle("pi:restart", (_e, chatId, sessionFile) => restartChat(chatId, sessionFile));
@@ -941,7 +954,8 @@ function openRepo(p) {
 	// Bring back the chats that were open for this repo, each resuming its session.
 	const saved = SELFTEST ? {} : readOpenChats()[REPO] || {};
 	openList = chatAgents.restoreEntries(saved, (f) => fs.existsSync(f)).map((e) => ({ id: newChatId(), ...e })); // each keeps its agent; a missing one is Pi
-	activeChatId = (openList.find((e) => e.file === saved.active) || openList[0])?.id || null;
+	activeChatId = (chatAgents.activeOf(saved, openList) || openList[0])?.id || null;
+	for (const e of openList) delete e.wasActive;
 	const list = [...openList];
 	if (!openList.length) startAgent(newChatId());
 	// A worktree chat is checked (async, cached) before its Pi starts; a vanished worktree is reported, not replaced by the repo.
@@ -958,7 +972,9 @@ function openRepo(p) {
 				send("pi:exit", { chatId: e.id, error: `This chat belongs to the agent "${e.agent}", which this version does not have.` });
 				continue;
 			}
-			startAgent(e.id, e.file, { restore: true, active: e.id === active }, wt, e.agent);
+			// A fork tab or rewound chat that never got its next message: the same chat again (title, the part of the old chat it shows).
+			if (e.pending) startAgent(e.id, undefined, { restore: true, active: e.id === active, fork: { title: e.pending.title } }, wt, e.agent, { fork: e.pending });
+			else startAgent(e.id, e.file, { restore: true, active: e.id === active }, wt, e.agent);
 		}
 	})();
 	return { ok: true, repo: REPO };

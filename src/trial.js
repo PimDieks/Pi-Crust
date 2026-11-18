@@ -63,7 +63,7 @@ function createTrialLog({ file, fsApi = fs, now = () => new Date() } = {}) {
 			const m = init && typeof init === "object" ? init : {};
 			write({
 				ev: "chat_start",
-				chat: chatNo,
+				chat: typeof chatNo === "string" ? safeName(chatNo, 80) : chatNo,
 				again: !!again,
 				engineVersion: safeName(m.claude_code_version, 40),
 				keySource: safeName(m.apiKeySource, 40),

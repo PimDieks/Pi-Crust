@@ -121,7 +121,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		const rows = [...document.querySelectorAll("#modal .rw-file")].map((n) => n.textContent.replace(/\s+/g, " ").trim());
 		check(rows.length === 2 && rows.some((r) => /made-by-shell\.txt/.test(r) && /DEL/.test(r)) && rows.some((r) => /notes\.txt/.test(r) && /MOD/.test(r)), `files listed: ${JSON.stringify(rows)}`);
 		const note = document.querySelector("#modal .rw-note")?.textContent || "";
-		check(/only in this tab until you send your next message/.test(note) && /reopens as it was before the rewind/.test(note), `the note about the saved conversation: "${note}"`);
+		check(/app's own snapshots/.test(note) && !/only in this tab|reopens as it was/.test(note), `the note in the rewind dialog: "${note}"`);
 		check(!/\bPi\b/.test(note.replace(/Pi Crust/g, "")), "the note says Pi");
 		check(vis(document.querySelector("#modal .rw-note")) && document.elementsFromPoint(...(() => { const r = document.querySelector("#modal .rw-note").getBoundingClientRect(); return [r.left + 10, r.top + r.height / 2]; })())[0].closest(".rw-note"), "the note is covered");
 		await shots("rewind-offer");
@@ -139,7 +139,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(chats.has(made.id) && active === made && made.state.ready && !made.dead, "the chat was replaced or stopped by the rewind");
 		check($("#input").value === MSG2, `the message box after the rewind: "${$("#input").value}"`);
 		const said = made.el.querySelector(".msg.notice")?.textContent || "";
-		check(/only in this tab until you send your next message/.test(said), `the notice after the rewind: "${said}"`);
+		check(/Rewound/.test(said) && !/only in this tab|reopens as it was/.test(said), `the notice after the rewind: "${said}"`);
 		check(await until(() => document.querySelector("#toasts .toast")?.textContent.includes("Restored")), "no 'Restored' toast with Undo");
 		check(fork.label === `Fork of ${MSG1}` && users(fork).length === 2, "the fork changed with the rewind");
 		await shots("rewind-result");

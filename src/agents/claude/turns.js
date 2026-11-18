@@ -67,6 +67,16 @@ function plan(turns, entryId) {
 	return { ok: true, keep, text: turns[i].text, at };
 }
 
+// The turns a fork or rewound chat shows before its next message: those of the old session up to the answer the cut ends at. view: "all",
+// "none" or the assistant uuid (a cut that cannot be found shows everything, never an empty chat that hides what the next answer rests on).
+function cutTurns(turns, view) {
+	const list = Array.isArray(turns) ? turns : [];
+	if (view === "none") return [];
+	if (view === "all" || !view) return list.slice();
+	const i = list.findIndex((t) => t.assistantUuid === view);
+	return i < 0 ? list.slice() : list.slice(0, i + 1);
+}
+
 // The stores. fs and dir are injected; every method fails soft (a store that cannot be read is empty, one that cannot be written is skipped).
 function createStores({ fs, dir }) {
 	const file = (...p) => path.join(dir(), ...p);
@@ -113,4 +123,4 @@ function createStores({ fs, dir }) {
 
 const forkTitle = (parentTitle) => `Fork of ${normText(parentTitle) || "chat"}`.slice(0, TITLE_MAX);
 
-module.exports = { turnsFromRows, forkMessages, plan, createStores, forkTitle, cleanTurn, normText, SAFE_ID };
+module.exports = { cutTurns, turnsFromRows, forkMessages, plan, createStores, forkTitle, cleanTurn, normText, SAFE_ID };

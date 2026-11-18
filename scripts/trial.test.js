@@ -156,3 +156,46 @@ test("an adapter chat writes one chat_start and one gate line per call, with no 
 	]);
 	for (const never of [KEY, "SECRETTEXT", "npm run", "private prompt", "notes.txt", cwd]) assert.ok(!text.includes(never), "not in the log: " + never);
 });
+
+test("chat_start is written once per chat start, not once per turn, and carries the tab's chat id", async () => {
+	const sdk = await import(pathToFileURL(path.join(__dirname, "claude-sdk-stand-in.mjs")).href);
+	sdk.reset();
+	const cwd = fs.mkdtempSync(path.join(tmp, "proj-"));
+	const file = path.join(tmp, "once.jsonl");
+	const adapter = createClaudeAdapter({
+		enginePath: () => ({ path: "C:/stub/claude.exe" }),
+		keystore: { read: async () => ({ source: "stored", key: KEY }), status: async () => ({ source: "stored" }), set: async () => ({ ok: true }), clear: async () => ({ ok: true }) },
+		configDir: path.join(tmp, "cfg2"),
+		isPackaged: () => false,
+		loadSdk: async () => sdk,
+		killTree: () => {},
+		getSettings: () => ({}),
+		env: {},
+	});
+	adapter.configure({ trial: createTrialLog({ file }) });
+	sdk.setScript([
+		...[1, 2, 3].flatMap((i) => [
+			{ type: "system", subtype: "init", session_id: "s1", model: "claude-haiku-5-5", permissionMode: "default", claude_code_version: "2.0.0", skills: [], plugins: [], mcp_servers: [], agents: [] },
+			{ type: "result", subtype: "success", is_error: false, result: "ok", total_cost_usd: 0, session_id: "s1" },
+			...(i < 3 ? [{ __await_user: true }] : []),
+		]),
+	]);
+	let results = 0;
+	const sink = { isCurrent: () => true, ready: () => {}, record: (h, r) => { if (r.type === "agent_end") results++; }, stderr() {}, exit() {}, ask: async () => "Allow once" };
+	const h = adapter.start({ cwd, mode: "plan", chatId: "chat-77" }, sink);
+	const until = async (f, ms = 4000) => {
+		const t = Date.now();
+		while (!f()) {
+			if (Date.now() - t > ms) throw new Error("timed out");
+			await new Promise((r) => setTimeout(r, 5));
+		}
+	};
+	for (let i = 1; i <= 3; i++) {
+		adapter.send(h, { type: "prompt", message: "turn " + i });
+		await until(() => results >= i);
+	}
+	adapter.stop(h);
+	const rows = fs.readFileSync(file, "utf8").trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l));
+	assert.equal(rows.filter((r) => r.ev === "chat_start").length, 1);
+	assert.equal(rows[0].chat, "chat-77");
+});

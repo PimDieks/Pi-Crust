@@ -193,8 +193,8 @@ A new Claude Agent chat opens with a setup card: step 1 is the key, step 2 is th
 
 **Rewind and fork.**
 - **Rewind** is the same Rewind as in a Pi chat. Files come back from the app's own snapshots (see [History](#history-checkpoints-rewind-and-screenshots)).
-- A rewound conversation is kept **only in its tab until you send your next message**. If you close Pi Crust before that, the chat reopens as it was before the rewind.
-- **Fork** (`/fork`) opens a new tab that continues from the end of the chat or from an earlier message. It is named "Fork of" and the title of the chat. Like a rewound chat, a new fork exists **only in its tab until you send its first message**. Before that it has no saved conversation of its own.
+- A rewound chat stays rewound if you close Pi Crust before sending your next message: it reopens as it was after the rewind.
+- **Fork** (`/fork`) opens a new tab that continues from the end of the chat or from an earlier message. It is named "Fork of" and the title of the chat. A new fork that has no message yet reopens as the same empty fork tab after a restart.
 
 **Safety.**
 - The four **permission modes** and the same **approval prompt** apply to Claude Agent chats too (see Permission modes in the Chat section). The mode selector, the prompt and its answers work as in a Pi chat.
@@ -202,6 +202,12 @@ A new Claude Agent chat opens with a setup card: step 1 is the key, step 2 is th
 - They are a **safety net, not a sandbox**. A command you approve can do anything you can. On Windows the engine has no sandbox of its own, so the modes and the prompt are the only guard.
 - A Claude Agent chat reads the project's `CLAUDE.md` as instructions (a file over 32 KB, a link, or one that leads out of the project folder is ignored). The project's own Claude settings and your own Claude settings are **not** loaded, so nothing in them can approve an action around the mode selector. Pi Crust gives the engine its own config folder, so a Claude sign-in you have on this computer is never used.
 - The API key is kept in the operating system's protected store. It is kept out of the commands the agent runs. A key in the `ANTHROPIC_API_KEY` environment variable is used only when you have not saved one in the app.
+
+**What a Claude Agent chat sends to Anthropic.**
+- Your prompts, and the files and command output the agent reads while it works, go to Anthropic through your own API key. Usage is billed to your Anthropic account. That is the whole purpose of the chat, and nothing else of yours is sent on purpose.
+- Pi Crust switches off the engine's other traffic with the engine's own documented switches: usage telemetry, error reporting, the automatic updater (the app downloads one checked engine version itself), the feedback command and the "How is Claude doing?" survey, feature-flag fetching, and the automatic download of the official plugin directory. Pi Crust sets these every time it starts the engine, whatever your own environment says.
+- The engine's built-in skills and workflows are switched off as well, so the agent starts with only your project's own instructions (`CLAUDE.md`) and its ordinary tools. A few small built-in plugins of the engine have no documented switch and stay on.
+- What stays: if a company proxy is set in your environment (`HTTPS_PROXY` and similar), the engine keeps using it. The agent's web fetch tool, when it is used, still checks the host name of a page with Anthropic before fetching it.
 
 ## Views
 

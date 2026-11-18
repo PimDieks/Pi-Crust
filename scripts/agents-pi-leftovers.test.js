@@ -58,3 +58,19 @@ test("main.js and the Figma bridge no longer know Pi's config folder, the check-
 	assert.ok(!/advisor-main/.test(main));
 	assert.ok(!/["']\.pi["']/.test(strip(src("figma-bridge-main.js"))));
 });
+
+test("the advisor pointer log line names the real extensions folder, also when PI_CODING_AGENT_DIR moves it", () => {
+	const { pointerMessage } = require("../src/advisor-main");
+	const moved = path.join(os.tmpdir(), "elsewhere-agent");
+	const line = pointerMessage("written", moved);
+	assert.ok(line.includes(path.join(moved, "extensions")), line);
+	assert.ok(!line.includes("~/.pi/agent"), line);
+	const was = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = moved;
+	try {
+		assert.ok(pointerMessage("kept").includes(path.join(moved, "extensions")));
+	} finally {
+		if (was === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = was;
+	}
+});

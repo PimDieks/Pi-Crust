@@ -223,6 +223,16 @@ test("start: the engine is told to scrub credentials from the tool subprocesses 
 	assert.strictEqual(t.sdk.calls[0].options.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
 });
 
+test("start: the engine's non-essential traffic is off (documented switches), also when the base env tries to turn them on or off", async () => {
+	const t = await rig({});
+	const env = { PATH: "p", CLAUDE_CODE_ENABLE_TELEMETRY: "1", DISABLE_TELEMETRY: "", CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: "0" };
+	t.adapter.start({ cwd: t.cwd, env, mode: "plan" }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	const o = t.sdk.calls[0].options.env;
+	for (const n of ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER", "DISABLE_UPDATES", "DISABLE_FEEDBACK_COMMAND", "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "CLAUDE_CODE_DISABLE_FEATURE_FLAGS", "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"]) assert.strictEqual(o.switches[n], "1", n);
+	assert.ok(!o.names.includes("CLAUDE_CODE_ENABLE_TELEMETRY"));
+});
+
 test("no config folder: nothing starts, with a readable error, and check fails too", async () => {
 	const t = await rig({ configDir: null });
 	t.adapter.start({ cwd: t.cwd }, t.sink);

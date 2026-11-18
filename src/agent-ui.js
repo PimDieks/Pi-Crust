@@ -133,7 +133,20 @@
 		if (!c) return;
 		chip.textContent = labelOf(c);
 		chip.dataset.agent = (c.agent && c.agent.id) || DEFAULT_AGENT;
-		chip.title = `This chat runs on ${labelOf(c)}`;
+		const other = !!(c.agent && c.agent.id && c.agent.id !== DEFAULT_AGENT);
+		// A Claude Agent chat's chip is also the way to its key, engine and spend limit (the Setup pill is about Pi and hides once Pi is set up).
+		// A Pi chat's chip stays a plain label.
+		if (other) {
+			chip.setAttribute("role", "button");
+			chip.tabIndex = 0;
+			chip.setAttribute("aria-label", `${labelOf(c)}: open setup for its key, engine and spend limit`);
+			chip.title = `This chat runs on ${labelOf(c)}. Click to open its setup (key, engine, spend limit).`;
+		} else {
+			chip.removeAttribute("role");
+			chip.removeAttribute("tabindex");
+			chip.removeAttribute("aria-label");
+			chip.title = `This chat runs on ${labelOf(c)}`;
+		}
 		input.placeholder = c.agent && c.agent.id && c.agent.id !== DEFAULT_AGENT ? placeholder0.replace(/^Ask Pi/, `Ask ${labelOf(c)}`) : placeholder0;
 		syncModes(c);
 		syncCommands(c);
@@ -152,6 +165,17 @@
 		m.innerHTML = '<svg viewBox="0 0 8 8" aria-hidden="true" fill="currentColor"><path d="M4 0.6L7.4 4 4 7.4 0.6 4z"/></svg>'; // a small filled diamond, drawn (no font glyph)
 		return m;
 	}
+
+	const openAgentSetup = () => {
+		if (chip.getAttribute("role") !== "button") return;
+		window.dispatchEvent(new CustomEvent("crust:open-setup", { detail: { source: "agent-chip", rows: "claude" } }));
+	};
+	chip.addEventListener("click", openAgentSetup);
+	chip.addEventListener("keydown", (e) => {
+		if (e.key !== "Enter" && e.key !== " ") return;
+		e.preventDefault();
+		openAgentSetup();
+	});
 
 	window.agentUi = { isDefault, syncModePlaceholder, label: labelOf, can, reason, slashReason, blocked, gate, describe, modeNotActive, sync, tabMark };
 

@@ -93,7 +93,7 @@ const DEFAULT_SESSIONS = [{ sessionId: "stand-in-session", summary: "Notes summa
 export function describeOptions(o = {}) {
 	const out = {};
 	for (const [k, v] of Object.entries(o)) {
-		if (k === "env") out.env = { ANTHROPIC_API_KEY: v && v.ANTHROPIC_API_KEY ? "key present" : "key absent", names: Object.keys(v || {}).sort(), CLAUDE_CONFIG_DIR: v && v.CLAUDE_CONFIG_DIR, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: v && v.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB };
+		if (k === "env") out.env = { ANTHROPIC_API_KEY: v && v.ANTHROPIC_API_KEY ? "key present" : "key absent", names: Object.keys(v || {}).sort(), CLAUDE_CONFIG_DIR: v && v.CLAUDE_CONFIG_DIR, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: v && v.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, switches: Object.fromEntries(Object.keys(v || {}).filter((n) => /^(DISABLE_|CLAUDE_CODE_DISABLE_)/.test(n)).map((n) => [n, v[n]])) };
 		else if (typeof v === "function") out[k] = "[function]";
 		else if (k === "hooks" && v && typeof v === "object") out.hooks = Object.fromEntries(Object.entries(v).map(([ev, ms]) => [ev, (ms || []).map((m) => ({ matcher: m.matcher || null, hooks: (m.hooks || []).length, onFailure: m.onFailure || null }))]));
 		else out[k] = v;

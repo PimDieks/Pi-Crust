@@ -42,14 +42,19 @@ function ensurePointer({ target, dir = agentDir() }) {
 	return "written";
 }
 
+// The log line names the folder the pointer really goes to (PI_CODING_AGENT_DIR may move it away from ~/.pi/agent).
+function pointerMessage(result, dir = agentDir()) {
+	return `[advisor] pointer in ${path.join(dir, "extensions")}: ${result}`;
+}
+
 function register() {
 	if (!require("electron").app.isPackaged && process.env.PI_CRUST_SELFTEST === "1") return; // a test run must not repoint the user's Pi at a test checkout
 	try {
 		const result = ensurePointer({ target: path.join(__dirname, "pi-extension", "advisor.ts") });
-		if (result !== "unchanged") console.log(`[advisor] pointer in ~/.pi/agent/extensions: ${result}`);
+		if (result !== "unchanged") console.log(pointerMessage(result));
 	} catch (err) {
 		console.warn(`[advisor] could not write the pointer: ${err.message}`);
 	}
 }
 
-module.exports = { register, ensurePointer, pointerSource, MARKER };
+module.exports = { pointerMessage, register, ensurePointer, pointerSource, MARKER };

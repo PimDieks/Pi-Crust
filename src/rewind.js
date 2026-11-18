@@ -137,7 +137,7 @@
 	}
 
 	// Said at the moment of a conversation rewind in a chat of another agent: what is different from Pi's, in plain words.
-	const SAVE_NOTE = (c) => `${agentLabel(c)} keeps the rewound conversation only in this tab until you send your next message. If you close Pi Crust before that, the chat reopens as it was before the rewind. Your files are restored from the app's own snapshots.`;
+	const SAVE_NOTE = () => "Your files are restored from the app's own snapshots."; // the rewound chat itself is kept across a restart (open-chats.json), so there is nothing to warn about
 	const otherAgent = (c) => !!c && !!window.agentUi && !window.agentUi.isDefault(c);
 
 	function askRewind({ mode, node, files, hasCp, c }) {
@@ -171,7 +171,7 @@
 				}
 				const conv = option(noConv ? `Conversation: ${window.agentUi.reason("fork", c)}` : "Conversation: continue from here, the message goes back to the composer", true, edit || noConv);
 				if (!edit) box.append(conv.lab);
-				if (!noConv && otherAgent(c)) box.append(el("p", "muted rw-note", SAVE_NOTE(c)));
+				if (!noConv && otherAgent(c)) box.append(el("p", "muted rw-note", SAVE_NOTE()));
 				const go = el("button", "", edit ? "Edit" : "Rewind");
 				go.type = "button";
 				const sync = () => (go.disabled = !(code.cb.checked || conv.cb.checked || edit));
@@ -255,7 +255,7 @@
 		await showCurrentSession(c);
 		const newFile = await sessionFileOf(c);
 		if (oldFile && newFile && oldFile !== newFile) await crust.checkpoints.copy(oldFile, newFile, cutoff, c.id);
-		withChat(c, () => addNotice(`${mode === "edit" ? "Editing an earlier message" : "Rewound to an earlier message"}${otherAgent(c) ? `. ${SAVE_NOTE(c)}` : ""}`));
+		withChat(c, () => addNotice(`${mode === "edit" ? "Editing an earlier message" : "Rewound to an earlier message"}`));
 		if (undo) toast(`Restored ${n} file${n === 1 ? "" : "s"}`, "info", undo);
 		c._prefill = f.data?.text || node._raw;
 		if (c === active) await applyPrefill(c);

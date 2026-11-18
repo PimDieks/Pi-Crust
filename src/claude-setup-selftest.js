@@ -331,6 +331,50 @@ selftestSteps.push(async ({ snap, wait }) => {
 		pc().querySelector('[data-action="continue"]').click();
 		check(await until(() => !pc() && !made.pause), "Continue did not close the pause card");
 		check(await until(() => made.state.ready && !input.readOnly && input.placeholder.startsWith("Ask Claude Agent"), 10000), "the chat did not come back after Continue");
+
+		// 6. the chip in a Claude Agent chat's header is the way to its key: it opens the Setup view at the Claude Agent rows, also once Pi is set up
+		{
+			const chip = $("#agent-chip");
+			window.agentUi.sync(made);
+			check(chip.getAttribute("role") === "button" && chip.tabIndex === 0, `Claude chip role/tabindex: ${chip.getAttribute("role")}/${chip.tabIndex}`);
+			check(/Claude Agent/.test(chip.getAttribute("aria-label") || "") && /setup/i.test(chip.getAttribute("aria-label") || "") && /key/i.test(chip.getAttribute("aria-label") || ""), `Claude chip name: "${chip.getAttribute("aria-label")}"`);
+			const cursor = getComputedStyle(chip).cursor;
+			check(cursor === "pointer", `Claude chip cursor: ${cursor}`);
+			// The ring comes from :focus-visible, which a scripted focus in a hidden window never matches: the rule itself is checked.
+			const ringRule = [...document.styleSheets].flatMap((sh) => [...sh.cssRules]).find((r) => r.selectorText && /\.agent-chip\[role="button"\]:focus-visible/.test(r.selectorText));
+			check(ringRule && /2px/.test(ringRule.style.outline) && /accent/.test(ringRule.style.outline), `Claude chip focus rule: ${ringRule && ringRule.cssText}`);
+			await shots("chip-header", undefined, "#chat-pane");
+			// a Pi chat's chip does nothing new
+			const pi = [...chats.values()].find((x) => x.agent && x.agent.id === "pi");
+			if (pi) {
+				activate(pi);
+				window.agentUi.sync(pi);
+				check(!chip.hasAttribute("role") && chip.tabIndex === -1 && !chip.hasAttribute("aria-label"), `Pi chip is a control: role=${chip.getAttribute("role")} tabindex=${chip.tabIndex}`);
+				chip.click();
+				await wait(300);
+				check($("#onboarding").hidden, "a click on a Pi chat's chip opened the Setup view");
+				activate(made);
+				window.agentUi.sync(made);
+			} else check(false, "no Pi chat to compare the chip with");
+			// click: the Setup view opens, the first Claude Agent row is visible and holds the focus
+			chip.click();
+			check(await until(() => !$("#onboarding").hidden), "the chip did not open the Setup view");
+			check(await until(() => !!document.activeElement?.closest?.(".sc-row"), 4000), `focus after the chip: ${document.activeElement?.tagName}.${document.activeElement?.className}`);
+			await wait(300);
+			const firstRow = document.querySelector('#ob-rows .ob-row[data-id="claude-key"]');
+			const box = $("#ob-rows").getBoundingClientRect();
+			const rr = firstRow?.getBoundingClientRect();
+			check(rr && rr.height > 0 && rr.top >= box.top - 1 && rr.bottom <= box.bottom + 1, `the Claude Agent key row is not in view: ${JSON.stringify(rr)} in ${JSON.stringify(box)}`);
+			await shots("chip-opens-setup", undefined, "#onboarding");
+			window.crustOnboarding.close({ restore: true });
+			await wait(200);
+			// the keyboard does the same
+			chip.focus();
+			chip.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+			check(await until(() => !$("#onboarding").hidden), "Enter on the chip did not open the Setup view");
+			window.crustOnboarding.close({ restore: false });
+			await wait(200);
+		}
 	} catch (e) {
 		problems.push(`threw ${e && e.message}`);
 	} finally {

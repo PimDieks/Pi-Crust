@@ -206,5 +206,35 @@ test("a Pi chat's start arguments are byte-identical to before; every start goes
 	assert.ok(src.includes(`isDefaultAgent ? ${m[1]} :`), "the Pi branch passes the same argument object, character for character");
 	// startAgent callers (new chat, reopen, restart, restore) pass the chat's agent; none starts with a fixed one.
 	const calls = src.match(/startAgent\([^\n]*\)/g);
-	for (const re of [/wanted\)/, /entry\.agent\)/, /agentId\)/, /e\.agent\)/]) assert.ok(calls.some((c) => re.test(c)), String(re));
+	for (const re of [/wanted\)/, /entry\.agent[,)]/, /agentId[,)]/, /e\.agent[,)]/]) assert.ok(calls.some((c) => re.test(c)), String(re));
+});
+
+test("pending: a fork tab with no session yet and a rewound chat are written and restored where they stood (order, cwd, active), and Pi-only files stay byte-identical", () => {
+	const fork = { from: "sess-parent", at: "uuid-08", view: "uuid-08", parent: "sess-parent", title: "Fork of Sky chat" };
+	const rewound = { from: "sess-own", at: null, view: "none", parent: null, title: null };
+	const list = [
+		{ id: "a", file: piFile, cwd: null, agent: "pi" },
+		{ id: "b", file: null, cwd: "/wt", agent: "claude", pending: fork }, // a new fork: no session id yet
+		{ id: "c", file: "sess-own", cwd: null, agent: "claude", pending: rewound }, // rewound: its old session id must not bring the old chat back
+		{ id: "d", file: "sess-other", cwd: null, agent: "claude" },
+	];
+	const rec = JSON.parse(JSON.stringify(serialize(list, "b")));
+	assert.deepEqual(rec.files, [piFile, "sess-other"], "a pending chat is not listed under its file");
+	assert.equal(rec.activeAt, 1);
+	assert.equal(rec.active, null);
+	const back = restore(rec, exists);
+	assert.deepEqual(back.map((e) => [e.agent, e.file, e.cwd, e.pending || null]), [["pi", piFile, null, null], ["claude", null, "/wt", fork], ["claude", null, null, rewound], ["claude", "sess-other", null, null]]);
+	assert.equal(CA.activeOf(rec, back), back[1]);
+	// an active ordinary chat is found by its file, none by default
+	assert.equal(CA.activeOf(JSON.parse(JSON.stringify(serialize(list, "d"))), restore(JSON.parse(JSON.stringify(serialize(list, "d"))), exists)).file, "sess-other");
+	assert.equal(CA.activeOf({ files: [piFile], active: null }, restore({ files: [piFile] }, exists)), null);
+	// Pi only: no pending, no activeAt, as before
+	assert.deepEqual(serialize([{ id: "a", file: piFile, cwd: null, agent: "pi" }], "a"), { files: [piFile], active: piFile, cwds: {} });
+	// junk is dropped, never thrown on; a Pi chat never carries one
+	const junk = { files: [], pending: [null, 5, { i: 0, agent: "claude", pending: "x" }, { i: 0, agent: "pi", pending: fork }, { i: 0, agent: "claude", pending: { view: 3 } }, { i: 0, agent: "claude", cwd: 7, pending: { view: "none", from: null, title: "x".repeat(500) } }] };
+	const j = restore(junk, exists);
+	assert.equal(j.length, 1);
+	assert.equal(j[0].cwd, null);
+	assert.equal(j[0].pending.title.length, 200);
+	assert.equal(serialize([{ id: "a", file: piFile, cwd: null, agent: "pi", pending: fork }], "a").pending, undefined);
 });

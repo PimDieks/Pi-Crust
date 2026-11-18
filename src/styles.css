@@ -1331,6 +1331,9 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 /* Agents (phase 7): the chip in the chat header, the mark on a Claude Agent tab, the split "New chat" button, and controls an agent cannot use.
    No new overlay: the menu is the existing .wt-menu on the popover layer, the reason line sits in the composer's flow. */
 .agent-chip { display: inline-flex; align-items: center; height: calc(var(--control-h) - 8px); padding: 0 var(--space-xs); border: 1px solid var(--border); border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
+.agent-chip[role="button"] { cursor: pointer; }
+.agent-chip[role="button"]:hover { background: var(--hover); }
+.agent-chip[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .agent-chip[data-agent]:not([data-agent="pi"]) { color: var(--text-action-on-surface); border-color: color-mix(in srgb, var(--text-action-on-surface) 45%, var(--border)); }
 .split-btn { display: inline-flex; align-items: center; }
 .split-btn > button.icon { border-radius: 0; }

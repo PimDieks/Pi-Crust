@@ -24,6 +24,24 @@ const DEFAULT_MAX_BUDGET_USD = 5;
 const DEFAULT_MAX_TURNS = 100;
 const CLAUDE_MD_CAP_BYTES = 32 * 1024;
 const NO_KEY = "No Anthropic API key is set. Add one in the Claude Agent key panel, or set ANTHROPIC_API_KEY.";
+// Documented switches that turn off the engine's non-essential traffic (all documented at code.claude.com/docs/en/env-vars unless noted):
+// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: auto-updates, telemetry, error reporting, /feedback, release notes, status checks, feature-flag fetching.
+// DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING, DISABLE_FEEDBACK_COMMAND, CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: each one named too (data-usage page).
+// DISABLE_AUTOUPDATER and DISABLE_UPDATES: the app pins the engine version; no update, not even a manual one.
+// CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: the umbrella does not cover it (the official plugin directory download).
+// CLAUDE_CODE_DISABLE_FEATURE_FLAGS: feature-flag fetching. CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: the skills and workflows that ship with the engine.
+const PRIVACY_SWITCHES = [
+	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+	"DISABLE_TELEMETRY",
+	"DISABLE_ERROR_REPORTING",
+	"DISABLE_AUTOUPDATER",
+	"DISABLE_UPDATES",
+	"DISABLE_FEEDBACK_COMMAND",
+	"CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
+	"CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL",
+	"CLAUDE_CODE_DISABLE_FEATURE_FLAGS",
+	"CLAUDE_CODE_DISABLE_BUNDLED_SKILLS",
+];
 const NO_CONFIG_DIR = "Claude Agent has no app config folder, so it was not started (it would otherwise use another Claude sign-in).";
 const NO_ENGINE = "The Claude Agent engine is not installed yet.";
 // Slash commands the SDK would run itself when a message starts with "/" (they can change settings, add folders, plugins, MCP servers or hooks,
@@ -168,6 +186,9 @@ function createClaudeAdapter(deps = {}) {
 		// Documented (code.claude.com/docs/en/env-vars): strips credentials such as ANTHROPIC_API_KEY from the environments of Bash
 		// commands, hooks and stdio MCP servers; on Linux Bash also gets its own PID namespace, out of reach of the engine's /proc.
 		env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
+		// The engine's own traffic to Anthropic and others, off by the documented switches (code.claude.com/docs/en/env-vars and /data-usage).
+		// The only traffic left is the model request with the person's own key. Set after the strip, so nothing inherited can turn one back on.
+		for (const n of PRIVACY_SWITCHES) env[n] = "1";
 		return env;
 	}
 
@@ -309,11 +330,27 @@ function createClaudeAdapter(deps = {}) {
 		handle.track = status.newTrack();
 		handle.meta = { cwd: opts.cwd, sessionId: opts.sessionRef || null, modelId: null, chosen: false, effort: null, streaming: false, lastAssistantText: null, commands: [], permissionMode: null, lastContext: null };
 		handle.limits = {};
-		handle.traceNo = ++chatNo;
+		const traceNo = ++chatNo;
+		handle.traceNo = typeof opts.chatId === "string" && opts.chatId ? opts.chatId : traceNo; // the tab's chat id when the app passes it
+		handle.traceGen = 0; // the engine generation whose chat_start is already written
 		const fk = opts.fork && typeof opts.fork === "object" ? opts.fork : null;
 		if (fk) {
 			handle.turns = (Array.isArray(fk.turns) ? fk.turns : []).map(turnsLib.cleanTurn).filter(Boolean);
 			handle.pendingFork = { from: typeof fk.from === "string" && fk.from ? fk.from : null, view: fk.view || "none", at: typeof fk.at === "string" && fk.at ? fk.at : null };
+			if (!Array.isArray(fk.turns) && handle.pendingFork.from) {
+				// Restored after a restart: the app stored where the chat stands, not its turns. They are those of the old session up to the cut.
+				const from = handle.pendingFork.from;
+				const view = handle.pendingFork.view;
+				const stored = stores.loadTurns(from);
+				if (stored) handle.turns = turnsLib.cutTurns(stored, view);
+				else
+					handle.turnsLoading = history
+						.loadRows(from, { cwd: opts.cwd })
+						.then((rows) => {
+							handle.turns = turnsLib.cutTurns(turnsLib.turnsFromRows(rows), view);
+						})
+						.catch(() => {});
+			}
 			handle.forkInfo = { parent: typeof fk.parent === "string" ? fk.parent : null, at: handle.pendingFork.at, title: typeof fk.title === "string" ? fk.title : null };
 		} else if (opts.sessionRef) {
 			// A restored chat: its turns come back from the store; a session without one (an older chat) is read from the SDK's history.
@@ -404,11 +441,13 @@ function createClaudeAdapter(deps = {}) {
 						if (gen !== handle.gen) return "superseded";
 						if (init && Array.isArray(init.commands)) handle.meta.commands = init.commands;
 						onReady(init || {});
+						if (gen === 1 && handle.pendingFork) sink.record(handle, pendingRecord(handle)); // a fork, or a chat restored as one: the app keeps where it stands
 						for await (const message of q) {
 							if (gen !== handle.gen) return "superseded";
 							if (sink.isCurrent && !sink.isCurrent(handle)) continue;
 							observe(handle, message);
-							if (message && message.type === "system" && message.subtype === "init" && cfg.trial) {
+							if (message && message.type === "system" && message.subtype === "init" && cfg.trial && handle.traceGen !== gen) {
+								handle.traceGen = gen; // the engine sends an init message every turn; the log wants one per chat start
 								try {
 									cfg.trial.chatStart(handle.traceNo, { ...message, agents: Array.isArray(message.agents) ? message.agents : init && init.agents }, handle.mode, gen > 1);
 								} catch {}
@@ -507,6 +546,7 @@ function createClaudeAdapter(deps = {}) {
 			h.meta.sessionId = was.sessionId;
 			return { ok: false, error: scrub(e && e.message ? e.message : e, h.key) };
 		}
+		h.sink.record(h, pendingRecord(h));
 		return { ok: true, text: p.text };
 	}
 
@@ -525,6 +565,10 @@ function createClaudeAdapter(deps = {}) {
 		return { ok: true, text: p.text, start: { ...start, title: turnsLib.forkTitle(title) } };
 	}
 
+	// Where a chat stands before its next message (a fork, or a rewound chat): the app keeps this in its tab list so a restart restores the same
+	// chat. null once the chat has a session of its own. It goes back to adapter.start as opts.fork; the turns are rebuilt from the old session.
+	const pendingRecord = (h) => ({ type: "claude_pending", pending: h.pendingFork ? { from: h.pendingFork.from, at: h.pendingFork.at, view: h.pendingFork.view, parent: (h.forkInfo && h.forkInfo.parent) || null, title: (h.forkInfo && h.forkInfo.title) || null } : null });
+
 	// Records to the sink, remembering what the requests need (session, model, streaming, last answer text).
 	function emit(h, records) {
 		for (const r of records) {
@@ -533,6 +577,7 @@ function createClaudeAdapter(deps = {}) {
 				if (h.pendingFork && r.sessionId && r.sessionId !== h.pendingFork.from) {
 					// The chat's own session exists now (a rewound or forked chat sent its first message): the cut of the old one is history.
 					h.pendingFork = null;
+					h.sink.record(h, pendingRecord(h));
 					if (h.forkInfo && h.forkInfo.parent) stores.linkFork(r.sessionId, h.forkInfo);
 				}
 				m.sessionId = r.sessionId || m.sessionId;
