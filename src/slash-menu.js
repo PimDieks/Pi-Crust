@@ -56,8 +56,10 @@
 		const q = input.value.slice(1);
 		const prev = items[active]?.name;
 		items = match(q);
-		active = Math.max(0, items.findIndex((c) => c.name === prev));
 		if (!items.length) return close();
+		// The highlight goes to the same command as before when it is still available, else to the first available one (none when all are disabled).
+		const prevAt = items.findIndex((c) => c.name === prev && !c.disabledWhy);
+		active = prevAt >= 0 ? prevAt : items.findIndex((c) => !c.disabledWhy);
 		menu.replaceChildren(
 			...items.map((c, i) => {
 				const row = el("div", `pal-item${i === active ? " active" : ""}`);
@@ -74,11 +76,12 @@
 					row.classList.add("is-disabled");
 					row.setAttribute("aria-disabled", "true");
 					row.title = c.disabledWhy;
+					row.dataset.reason = c.disabledWhy; // the reason line under the chat shows it while the row is hovered
 					row.append(el("span", "desc", c.disabledWhy));
 				} else if (c.description) row.append(el("span", "desc", c.description));
 				row.append(el("span", "kind slash-badge", c.source));
 				row.onmousedown = (e) => e.preventDefault(); // keep focus in the input
-				row.onmousemove = () => setActive(i, false);
+				row.onmousemove = () => !c.disabledWhy && setActive(i, false);
 				row.onclick = () => accept(i, false);
 				return row;
 			}),
@@ -93,11 +96,24 @@
 		if (!rows.length) return;
 		rows[active]?.classList.remove("active");
 		rows[active]?.setAttribute("aria-selected", "false");
+		if (i < 0) {
+			active = -1; // every row is disabled: nothing is highlighted
+			input.removeAttribute("aria-activedescendant");
+			return;
+		}
 		active = (i + rows.length) % rows.length;
 		rows[active].classList.add("active");
 		rows[active].setAttribute("aria-selected", "true");
 		input.setAttribute("aria-activedescendant", rows[active].id);
 		if (scroll) rows[active].scrollIntoView({ block: "nearest" });
+	}
+	// The arrow keys go to the next available row in that direction (wrapping); disabled rows are skipped.
+	function step(dir) {
+		const n = items.length;
+		for (let k = 1; k <= n; k++) {
+			const j = (((active < 0 ? (dir > 0 ? -1 : 0) : active) + dir * k) % n + n) % n;
+			if (!items[j].disabledWhy) return setActive(j);
+		}
 	}
 
 	function close() {
@@ -149,8 +165,8 @@
 		(e) => {
 			if (!open || e.isComposing) return;
 			const k = e.key;
-			if (k === "ArrowDown") setActive(active + 1);
-			else if (k === "ArrowUp") setActive(active - 1);
+			if (k === "ArrowDown") step(1);
+			else if (k === "ArrowUp") step(-1);
 			else if (k === "Tab" && !e.shiftKey) accept(active, false);
 			else if (k === "Enter" && !e.shiftKey) accept(active, true);
 			else if (k === "Escape") close();

@@ -135,7 +135,7 @@
 		const key = root.contains(keep) ? keep.dataset?.action && keep.closest(".ob-row")?.dataset.id + ":" + keep.dataset.action : null;
 		const shown = shownRows();
 		const first = shown.find((r) => !r.optional && r.state !== "ready" && r.action)?.id;
-		rowsEl.replaceChildren(...shown.map((r) => rowEl(r, r.id === first)));
+		rowsEl.replaceChildren(...shown.map((r) => rowEl(r, r.id === first)), ...(window.claudeSetupUi?.panelRows() || [])); // the Claude Agent rows only once a chat of it was started; never counted
 		rowsEl.setAttribute("aria-busy", String(!health && checking > 0));
 		const ready = !!health?.ready;
 		startBtn.disabled = !ready;

@@ -1123,7 +1123,7 @@ function keepWorkingLast() {
 function renderStatus() {
 	if (!view || view !== active) return;
 	const parts = [];
-	if (!state.ready) parts.push(`Starting ${agentLabel()}…`);
+	if (!state.ready && !view.needsSetup) parts.push(`Starting ${agentLabel()}…`); // a chat waiting for its setup card is not starting
 	for (const [k, v] of state.statuses) if (v && !["permission-mode", "crust-context", "copilot-usage"].includes(k)) parts.push(v.replace(/\x1b\[[0-9;]*m/g, ""));
 	$("#status-line").replaceChildren(...parts.map((p) => el("span", "", p)));
 	$("#widgets").textContent = [...state.widgets.values()].map((l) => l.join("\n")).join("\n");
@@ -1171,6 +1171,9 @@ function handleRecord(r) {
 			return;
 		case "agent_end":
 			finishTurn(chat);
+			return;
+		case "claude_paused":
+			window.claudeSetupUi?.pauseCard(chat, r); // the pause card at the end of the conversation
 			return;
 		case "queue_update":
 			state.queue = { steering: r.steering || [], followUp: r.followUp || [] };
@@ -2050,6 +2053,8 @@ async function submit({ steer = false } = {}) {
 	const typed = input.value.trim();
 	const picks = active ? active.picks : [];
 	if (!typed && !picks.length) return;
+	const gated = window.claudeSetupUi?.gateReason(active); // setup not finished, or the chat is paused at its spend limit
+	if (gated) return toast(gated, "warning");
 	if (!state.ready) return notReadyToast();
 	const blocks = picks.filter((p) => typeof p === "string");
 	const images = picks.filter((p) => typeof p !== "string").map(({ type, data, mimeType }) => ({ type, data, mimeType }));

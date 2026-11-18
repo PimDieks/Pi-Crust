@@ -40,6 +40,18 @@ contextBridge.exposeInMainWorld("crust", {
 		onStarted: on("pi:started"),
 		onReady: on("pi:ready"),
 	},
+	claude: {
+		// The Claude Agent's first-use setup (claude-setup-main.js). The key goes in once and never comes back: state() holds no key.
+		state: () => ipcRenderer.invoke("claude:state"),
+		saveKey: (key) => ipcRenderer.invoke("claude:saveKey", key),
+		removeKey: () => ipcRenderer.invoke("claude:removeKey"),
+		enginePlan: () => ipcRenderer.invoke("claude:enginePlan"),
+		engineDownload: (token) => ipcRenderer.invoke("claude:engineDownload", token),
+		engineCancel: () => ipcRenderer.invoke("claude:engineCancel"),
+		setLimit: (usd) => ipcRenderer.invoke("claude:setLimit", usd),
+		fakeSet: (cmd) => ipcRenderer.invoke("claude:fakeSet", cmd), // self-test only: main registers it only with the test switches
+		onSetup: on("claude:setup"),
+	},
 	app: {
 		isFocused: () => ipcRenderer.invoke("app:isFocused"),
 		badge: (n) => ipcRenderer.invoke("app:badge", n),

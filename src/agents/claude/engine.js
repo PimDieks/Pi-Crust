@@ -505,6 +505,10 @@ function createEngine({
 			else state = { state: "missing" };
 			return state;
 		},
+		// What the setup card says before anyone clicks: the version and the size of the download (null when no engine is published here).
+		info() {
+			return { version, downloadBytes: pin ? pin.size : null, installedBytes: pin ? pin.unpackedSize : null };
+		},
 		onChange(fn) {
 			listeners.add(fn);
 			return () => listeners.delete(fn);

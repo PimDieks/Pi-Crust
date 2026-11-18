@@ -163,6 +163,7 @@ export async function runGate(options, call) {
 	return { ...entry, outcome: r && r.behavior === "allow" ? "allow" : "deny", result: r };
 }
 
+export const REJECTED_KEY = "sk-ant-test-rejected-0000";
 export function query({ prompt, options }) {
 	const entry = { gates: [], options: describeOptions(options), rawEnvHasKey: !!(options && options.env && options.env.ANTHROPIC_API_KEY), calls: [], log: [], closed: false, interrupted: 0, modes: [] };
 	calls.push(entry);
@@ -173,6 +174,11 @@ export function query({ prompt, options }) {
 		logFile({ fn, args });
 	};
 	async function* run() {
+		// A key check (a string prompt) with this made-up key is answered like the API answers a wrong key: used by the setup self-test, no request goes anywhere.
+		if (typeof prompt === "string" && options && options.env && options.env.ANTHROPIC_API_KEY === REJECTED_KEY) {
+			yield { type: "result", subtype: "success", is_error: true, result: "Invalid API key - Fix external API key", session_id: "stand-in-session" };
+			return;
+		}
 		const it = typeof prompt === "string" ? null : prompt[Symbol.asyncIterator]();
 		const nextUser = async () => {
 			const r = await Promise.race([it.next(), new Promise((res) => (stopWait = () => res({ done: true })))]);

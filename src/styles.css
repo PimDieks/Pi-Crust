@@ -482,7 +482,8 @@ select option { background: var(--panel-2); color: var(--text); }
 
 /* Composer extras */
 #perm-mode { field-sizing: content; font-size: var(--fs-sm); font-weight: 500; border-radius: var(--radius-full); background-color: var(--selected); }
-#perm-mode.mode-none, #perm-mode:disabled { background-color: transparent; color: var(--muted); border: 1px dashed var(--border); cursor: help; }
+#perm-mode.mode-none, #perm-mode:disabled { background-color: transparent; color: var(--muted); cursor: help; }
+#perm-mode:disabled { opacity: 0.45; border-color: transparent; } /* the same look as .is-disabled in both themes: no outline, just faded */
 #perm-mode.mode-plan { background-color: var(--fills-action-muted); color: var(--text-action-on-surface); }
 #perm-mode.mode-ask-edits, #perm-mode.mode-ask-commands { background-color: var(--fills-minor-muted); color: var(--text-minor); }
 
@@ -605,7 +606,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .pane.collapsed, .splitter.collapsed { display: none; }
 
 /* Slash-command autocomplete above the chat input */
-.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2xs)); max-height: 312px; overflow: auto; padding: var(--space-2xs); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); z-index: var(--layer-popover); }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-sm)); max-height: 312px; overflow: auto; padding: var(--space-2xs); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); z-index: var(--layer-popover); }
 .slash-menu[hidden] { display: none; }
 .slash-menu .pal-item { min-height: 22px; flex: none; }
 .slash-menu .slash-name { font-family: var(--mono); font-size: var(--fs-sm); flex: none; }
@@ -1341,3 +1342,33 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 button.is-disabled:hover { background: none; color: inherit; }
 .pal-item.is-disabled.active { background: var(--hover); }
 .reason-line { padding: var(--space-3xs) var(--space-sm); font-size: var(--fs-xs); color: var(--muted); }
+
+/* Claude Agent: setup card, pause card, Setup panel rows (claude-setup.js). In the page flow: no layer of their own. */
+.setup-card, .pause-card { align-self: center; width: min(560px, calc(100% - 2 * var(--space-md))); margin: var(--space-md) auto; padding: var(--space-md); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: var(--space-sm); flex: none; }
+.setup-card h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.sc-intro, .pc-text { margin: 0; color: var(--text-secondary); font-size: var(--fs-sm); }
+.pc-text { color: var(--text); font-size: var(--fs-md); }
+.sc-steps { display: flex; flex-direction: column; gap: var(--space-3xs); }
+.sc-step, .ob-row.sc-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: var(--space-sm); padding: var(--space-sm); border-radius: var(--radius-sm); background: var(--panel-2); }
+.sc-mark { width: 20px; height: 20px; border: 1px solid var(--border); border-radius: var(--radius-full); display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); }
+.sc-step[data-state="done"] .sc-mark, .sc-row.ready .sc-mark { color: var(--text-success); border-color: currentColor; }
+.sc-step[data-state="failed"] .sc-mark, .sc-row.failed .sc-mark { color: var(--err); border-color: currentColor; }
+.sc-mark.sc-spin { border-color: var(--border); border-top-color: var(--accent); animation: sc-turn 0.9s linear infinite; }
+@keyframes sc-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sc-mark.sc-spin { animation: none; border-top-color: var(--accent); } }
+.sc-head { display: flex; align-items: baseline; gap: var(--space-sm); flex-wrap: wrap; }
+.sc-title { font-weight: 500; }
+.sc-size { color: var(--muted); font-size: var(--fs-xs); }
+.sc-step[data-state="failed"] .sc-line, .sc-row.failed .sc-line { color: var(--err); }
+.sc-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); justify-content: flex-end; }
+.pc-actions { justify-content: flex-start; }
+.sc-bar { height: 4px; border-radius: var(--radius-full); background: var(--hover); overflow: hidden; margin-top: var(--space-2xs); }
+.sc-bar > span { display: block; height: 100%; background: var(--accent-2); border-radius: var(--radius-full); transition: width 0.2s var(--ease); }
+.sc-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); margin-top: var(--space-xs); }
+.sc-field input { flex: 1 1 180px; min-width: 0; height: var(--control-h); padding: 0 var(--space-xs); background: var(--hover); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text); font: inherit; }
+.pc-label { color: var(--text-secondary); font-size: var(--fs-sm); }
+.pc-limit input { flex: 0 0 90px; }
+.pc-error { color: var(--err); }
+.setup-card .sc-step { grid-template-columns: 22px minmax(0, 1fr); }
+.setup-card .sc-step .sc-actions { grid-column: 2; justify-content: flex-start; margin-top: var(--space-2xs); } /* the chat pane is narrow: the buttons go under the text */
+.setup-card .sc-step .sc-actions:empty { display: none; }

@@ -70,10 +70,11 @@
 	let hovered = null;
 	const live = (n) => (n && n.isConnected && n.closest?.("[data-reason]") ? n.closest("[data-reason]") : null);
 	function showReason() {
-		const n = live(document.activeElement) || live(hovered);
+		// Only a control that is hovered or focused right now, or a menu row that is highlighted right now: nothing else keeps the line.
+		const n = live(document.activeElement) || live(hovered) || live(document.querySelector("#slash-menu:not([hidden]) .pal-item.active"));
 		const text = n ? n.dataset.reason : "";
-		line.textContent = text || "";
-		line.hidden = !text;
+		if (line.textContent !== (text || "")) line.textContent = text || ""; // only when it changes: the observer below watches this subtree
+		if (line.hidden !== !text) line.hidden = !text;
 	}
 	document.addEventListener("focusin", showReason);
 	document.addEventListener("focusout", () => setTimeout(showReason, 0));
@@ -86,6 +87,9 @@
 		showReason();
 	});
 	new MutationObserver(showReason).observe($("#queue"), { childList: true, subtree: true });
+	new MutationObserver(showReason).observe($("#composer"), { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden"] });
+	// An offscreen window sends no focus events, and typing moves focus without one: look again whenever the user types.
+	for (const ev of ["input", "keydown", "keyup"]) document.addEventListener(ev, () => setTimeout(showReason, 0), true);
 
 	const isDefault = (c = active) => !(c && c.agent && c.agent.id && c.agent.id !== DEFAULT_AGENT);
 	// A chat of another agent that has not started (no key or engine yet): nothing can run, so no mode is enforced for a true reason.
@@ -135,6 +139,7 @@
 		syncCommands(c);
 		$("#ask").setAttribute("aria-label", `${labelOf(c)} asks`);
 		syncModePlaceholder(c);
+		window.claudeSetupUi?.syncComposer(c); // setup or pause: the message box disabled with its reason
 		showReason();
 	}
 
@@ -232,7 +237,7 @@
 			check(!/claude code/i.test(document.body.innerText), "the words Claude Code are on screen");
 				// 2. every text that names this chat's agent uses its label
 				check(agentLabel({ agent: { id: "claude", label: "claude" } }) === "Claude Agent", "an unstarted Claude chat's label is the raw id");
-				check(/Starting Claude Agent…/.test($("#status-line").textContent) && !/Pi/.test($("#status-line").textContent), `status line: "${$("#status-line").textContent}"`);
+				check(!/Starting/.test($("#status-line").textContent) && !/Pi/.test($("#status-line").textContent), `status line: "${$("#status-line").textContent}"`);
 				check($("#ask").getAttribute("aria-label") === "Claude Agent asks", "the ask region still says Pi");
 				const paneText = $("#chat-pane").innerText + " " + [...$("#chat-pane").querySelectorAll("[title],[aria-label],[placeholder]")].map((n) => [n.title, n.getAttribute("aria-label"), n.getAttribute("placeholder")].join(" ")).join(" ");
 				const piWords = (paneText.match(/.{0,20}Pi.{0,20}/g) || []).filter((t) => !/Pi Crust/.test(t));
@@ -260,7 +265,7 @@
 				await tabsRow("tab-row");
 			const marks = [...document.querySelectorAll(".chat-tab .ct-agent")];
 			check(marks.length === 1 && marks[0].getAttribute("aria-label") === "Claude Agent" && marks[0].closest(".chat-tab")?.getAttribute("aria-selected") === "true", `tab marks: ${marks.length}`);
-			check(input.placeholder.startsWith("Ask Claude Agent"), "the placeholder still says Pi");
+			check(input.placeholder === "Finish setup to send a message" && input.readOnly, `the message box of a chat not yet set up: "${input.placeholder}"`);
 			check(!made.state.ready, "the Claude chat is ready: the not-started checks below do not apply");
 			const modes = [...modeSel.options].filter((o) => o.value).map((o) => o.value).join();
 			check(modes === "plan,ask-edits,ask-commands,trusted", `Claude mode list: ${modes}`);
@@ -310,6 +315,59 @@
 			check(["/model", "/copy", "/new", "/setup"].every((n) => names.includes(n)), "an app command that works for Claude Agent is missing");
 			const enabled = rows.find((r) => r.name === "/model");
 			check(enabled && !enabled.off, "/model is disabled");
+			// (a) with the menu open and nothing hovered, the reason line is empty
+			check(!vis(line) && line.textContent === "", `reason line with the slash menu open: "${line.textContent}"`);
+			// (b) the first highlighted row is the first available one; the arrow keys skip disabled rows
+			const hiName = () => document.querySelector("#slash-menu .pal-item.active .slash-name")?.textContent;
+			const key = (k) => input.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+			const firstOn = rows.find((r) => !r.off)?.name;
+			const lastOn = [...rows].reverse().find((r) => !r.off)?.name;
+			check(rows[0].off && hiName() === firstOn && document.querySelector("#slash-menu .pal-item.active")?.getAttribute("aria-disabled") !== "true", `highlighted: ${hiName()}, first available: ${firstOn}`);
+			key("ArrowUp");
+			check(hiName() === lastOn, `ArrowUp from the first available row went to ${hiName()}, not ${lastOn}`);
+			key("ArrowDown");
+			check(hiName() === firstOn, `ArrowDown went to ${hiName()}, not ${firstOn}`);
+			for (let i = 0; i < rows.length + 2; i++) {
+				key("ArrowDown");
+				if (document.querySelector("#slash-menu .pal-item.active")?.getAttribute("aria-disabled") === "true") {
+					check(false, `an arrow key highlighted the disabled row ${hiName()}`);
+					break;
+				}
+			}
+			// (c) the disabled mode selector looks the same in both themes: faded, no dashed outline
+			{
+				const was = themeSetting();
+				for (const th of ["light", "dark"]) {
+					setTheme(th);
+					await wait(250);
+					const cs = getComputedStyle(modeSel);
+					check(modeSel.disabled && cs.borderTopStyle !== "dashed" && Math.abs(Number(cs.opacity) - 0.45) < 0.02, `disabled mode selector (${th}): border ${cs.borderTopStyle}, opacity ${cs.opacity}`);
+				}
+				setTheme(was);
+				await wait(200);
+			}
+			// the gap between the open slash menu (and the @ menu) and the message box: at least 6px
+			{
+				const was = themeSetting();
+				const gapOf = (menu) => $("#composer").getBoundingClientRect().top - menu.getBoundingClientRect().bottom;
+				const sm = $("#slash-menu");
+				check(vis(sm) && gapOf(sm) >= 6, `gap between the slash menu and the message box: ${gapOf(sm)}px`);
+				for (const th of ["light", "dark"]) {
+					setTheme(th);
+					await wait(300);
+					const m = sm.getBoundingClientRect();
+					const c = $("#composer").getBoundingClientRect();
+					await crust.selftest.capture(`slash-gap-${th}`, { x: Math.max(0, c.left - 4), y: Math.max(0, m.bottom - 56), width: Math.min(c.width + 8, 560), height: c.top - m.bottom + 56 + 44, scale: 2 });
+				}
+				setTheme(was);
+				await wait(200);
+				typeInto("@");
+				await wait(500);
+				const mm = document.querySelector(".mention-menu");
+				if (vis(mm)) check(gapOf(mm) >= 6, `gap between the @ menu and the message box: ${gapOf(mm)}px`);
+				typeInto("/");
+				await wait(250);
+			}
 			console.error(`SELFTEST agents disabled: ${[...Object.entries(want), ["Steer (queue)", REASON_OF.steering], ["Mode selector until the agent reports", modeSel.title]].map(([k, v]) => `${k} = ${v}`).join(" | ")}`);
 			// the model popover has no Pi-only panels
 			openContextPanel();

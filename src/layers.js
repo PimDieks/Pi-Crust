@@ -67,6 +67,25 @@ selftestSteps.push(async ({ snap, wait }) => {
 		askOverlay("perm-ask", { title: 'Allow this command?\ngit commit -m "Fix login"\nMode: Ask before commands', options: PERM_OPTIONS }),
 		// The long command takes part in the explicit cases only (alone, toasts, slash menu, welcome view), not in the pair matrix.
 		askOverlay("perm-ask-long", { title: `Allow this command?\nThis command is ${LONG_COMMAND.length} characters long. Read all of it before you allow it.\n${LONG_COMMAND}\nMode: Ask before commands`, options: PERM_OPTIONS }, { with: [] }),
+		// The Claude Agent's setup card (top of the chat) and pause card (end of the conversation): in the chat's flow, no layer of their own.
+		{
+			name: "claude-setup-card",
+			layer: "base",
+			with: ["toast", "update-card"],
+			root: () => $(".setup-card"),
+			open: () => window.claudeSetupUi.testOpen("setup"),
+			controls: () => [...$(".setup-card").querySelectorAll("button")],
+			close: () => window.claudeSetupUi.testClose("setup"),
+		},
+		{
+			name: "claude-pause-card",
+			layer: "base",
+			with: ["toast", "update-card"],
+			root: () => $(".pause-card"),
+			open: () => window.claudeSetupUi.testOpen("pause"),
+			controls: () => [...$(".pause-card").querySelectorAll("button")],
+			close: () => window.claudeSetupUi.testClose("pause"),
+		},
 		{
 			name: "diff-add",
 			layer: "panel",

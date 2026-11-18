@@ -111,6 +111,8 @@ const chatAgents = require("./chat-agents");
 const agents = createRegistry();
 const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6
 agents.register(require("./agents/claude")); // phase 7: inert until the UI offers it; Pi stays the default
+let claudeSetup = null; // first-use setup of the Claude Agent (claude-setup-main.js): its key and its engine
+const setupWaiting = new Set(); // chats of an agent that is not set up yet: they start by themselves once both steps are done
 const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: structuredClone(a.capabilities) }); // a copy: the renderer's message never aliases the adapter's object // what the renderer is told about a chat's agent
 
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
@@ -153,6 +155,20 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 		send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, agent: agentInfo(agent), ...hint });
 		send("pi:exit", { chatId, error: agent.strings.notInstalled, errorCode: "ENOENT", notInstalled: true });
 		return null;
+	}
+	if (!isDefaultAgent && agent.id === "claude" && claudeSetup) {
+		claudeSetup.markStarted(); // the Setup panel lists the Claude Agent's key and engine from now on
+		if (!claudeSetup.isReady()) {
+			// No key or no engine yet: nothing starts. The chat shows its setup card (needsSetup); both steps done starts it (setupWaiting).
+			if (!openList.some((e) => e.id === chatId)) {
+				openList.push({ id: chatId, file: sessionFile || null, cwd, agent: agent.id });
+				saveOpenChats();
+			}
+			setupWaiting.add(chatId);
+			send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, agent: agentInfo(agent), needsSetup: true, ...hint });
+			return null;
+		}
+		setupWaiting.delete(chatId);
 	}
 	// An old user copy of permission-modes in ~/.pi/agent/extensions would also load: two prompt layers. The app talks to
 	// OUR extension through /crust-mode (no clash with a second /mode), and the user is told once. The folder is only read.
@@ -349,6 +365,7 @@ ipcMain.handle("pi:closeChat", async (_e, chatId) => {
 	openList = openList.filter((e) => e.id !== chatId);
 	saveOpenChats();
 	held.clear(chatId);
+	setupWaiting.delete(chatId);
 	const c = chats.get(chatId);
 	chats.delete(chatId);
 	c?.agent.stop(c.handle);
@@ -799,7 +816,7 @@ ipcMain.on("ui:focus", () => {
 });
 // PI_CRUST_SELFTEST_ONLY=timeline,annotate: run only those tour steps (by feature script name; "core" = the built-in tour).
 const SELFTEST_ONLY = SELFTEST ? (process.env.PI_CRUST_SELFTEST_ONLY || "").split(",").map((s) => s.trim().toLowerCase().replace(/\.js$/, "")).filter(Boolean) : [];
-ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY, selftestNoPrompt: SELFTEST && process.env.PI_CRUST_SELFTEST_NOPROMPT === "1", selftestNoPi: SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1" }));
+ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY, selftestNoPrompt: SELFTEST && process.env.PI_CRUST_SELFTEST_NOPROMPT === "1", selftestNoPi: SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1", selftestClaudeFake: !!(claudeSetup && claudeSetup.fake), selftestClaudeBreak: SELFTEST && process.env.PI_CRUST_SELFTEST_CLAUDE_BREAK === "1" }));
 
 // ---------------------------------------------------------------------------
 // Repos: recent list, discovery, switching.
@@ -1535,6 +1552,10 @@ require("./update-main").register(ctx);
 require("./mendix-main").register(ctx);
 piAgent.onAppStart(ctx);
 require("./local-main").register(ctx);
+claudeSetup = require("./claude-setup-main").register(ctx);
+claudeSetup.onReady(() => {
+	for (const id of [...setupWaiting]) restartChat(id, openList.find((e) => e.id === id)?.file).catch(() => {}); // both steps are done: the chats that waited start now
+});
 
 app.whenReady().then(() => {
 	if (!isPrimary) return;
