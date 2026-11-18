@@ -43,7 +43,6 @@ let chatSeq = 0;
 // ---------------------------------------------------------------------------
 const { pathKey, nvmWinHome, onPath } = require("./env-path");
 const piLocator = require("./agents/pi/locate");
-const piSessions = require("./agents/pi/sessions");
 function buildEnvWin() {
 	const extra = [];
 	const home = nvmWinHome();
@@ -107,7 +106,9 @@ function send(channel, payload) {
 // Pi over RPC (strict JSONL: split on LF only, never readline).
 // ---------------------------------------------------------------------------
 // The process itself (spawn, framing, readiness probe, kill) lives in agents/pi/process.js.
-const agents = require("./agents/registry").createRegistry();
+const { createRegistry, DEFAULT_ID: DEFAULT_AGENT_ID } = require("./agents/registry");
+const chatAgents = require("./chat-agents");
+const agents = createRegistry();
 const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6
 agents.register(require("./agents/claude")); // phase 7: inert until the UI offers it; Pi stays the default
 const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: structuredClone(a.capabilities) }); // a copy: the renderer's message never aliases the adapter's object // what the renderer is told about a chat's agent
@@ -131,7 +132,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 	if (!agent) throw new Error(`unknown agent "${agentId}"`);
 	if (wt && wt.missing) {
 		if (!openList.some((e) => e.id === chatId)) {
-			openList.push({ id: chatId, file: sessionFile || null, cwd: wt.cwd });
+			openList.push({ id: chatId, file: sessionFile || null, cwd: wt.cwd, agent: agent.id });
 			saveOpenChats();
 		}
 		const error = `Worktree ${wt.cwd} no longer exists`;
@@ -140,12 +141,13 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 		return null;
 	}
 	const cwd = wt ? wt.cwd : null;
-	const pi = findPi();
-	if (!pi) {
+	const isDefaultAgent = agent.id === DEFAULT_AGENT_ID; // Pi's own steps (locating it, the old-copy hint) stay Pi's; another agent starts through its adapter
+	const pi = isDefaultAgent ? findPi() : null;
+	if (isDefaultAgent && !pi) {
 		// Pi isn't installed: report it without starting anything. (Never a bare `pi` with the project as the working folder: on
 		// Windows a pi.exe lying in the project would be the one that runs.)
 		if (!openList.some((e) => e.id === chatId)) {
-			openList.push({ id: chatId, file: sessionFile || null, cwd });
+			openList.push({ id: chatId, file: sessionFile || null, cwd, agent: agent.id });
 			saveOpenChats();
 		}
 		send("pi:started", { chatId, cwd: cwd || REPO, worktree: cwd ? { cwd, branch: wt.branch || null } : null, sessionFile: sessionFile || null, agent: agentInfo(agent), ...hint });
@@ -154,7 +156,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 	}
 	// An old user copy of permission-modes in ~/.pi/agent/extensions would also load: two prompt layers. The app talks to
 	// OUR extension through /crust-mode (no clash with a second /mode), and the user is told once. The folder is only read.
-	const oldCopy = permissionOldCopy();
+	const oldCopy = isDefaultAgent ? permissionOldCopy() : null;
 	if (oldCopy) hint = { ...hint, oldPermissionCopy: oldCopy };
 	// What the Pi driver reports (agents/pi/process.js); each call carries the handle, and a replaced one is dropped there.
 	const sink = {
@@ -186,11 +188,12 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 	};
 	// The driver injects crust-context.ts (context breakdown and models used, see context-panel.js), crust-guard.ts (asks to continue after
 	// every N tool calls: settings.json toolCallCheckIn, default 40, 0 = off) and advisor.ts (Anthropic's advisor tool, /advisor command).
-	const handle = agent.start({ pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile }, sink);
+	// Pi's start arguments are unchanged; another agent gets no `pi` (it brings its own engine).
+	const handle = agent.start(isDefaultAgent ? { pi, cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile } : { cwd: cwd || REPO, env: ENV, settings: readSettings(), sessionRef: sessionFile }, sink);
 	const chat = { id: chatId, agent, handle, cwd };
 	chats.set(chatId, chat);
 	if (!openList.some((e) => e.id === chatId)) {
-		openList.push({ id: chatId, file: sessionFile || null, cwd });
+		openList.push({ id: chatId, file: sessionFile || null, cwd, agent: agent.id });
 		saveOpenChats();
 	} else if (sessionFile) setChatFile(chatId, sessionFile);
 	if (cwd) watchWorktree(cwd);
@@ -213,10 +216,7 @@ function readOpenChats() {
 function saveOpenChats() {
 	if (SELFTEST || !REPO) return;
 	const all = readOpenChats();
-	const files = [...new Set(openList.map((e) => e.file).filter(Boolean))];
-	const cwds = {};
-	for (const e of openList) if (e.file && e.cwd) cwds[e.file] = e.cwd; // chats in a worktree reopen there
-	all[REPO] = { files, active: openList.find((e) => e.id === activeChatId)?.file || null, cwds };
+	all[REPO] = chatAgents.serializeOpenChats(openList, activeChatId); // `agents` (non-Pi chats only) is ignored by older apps
 	try {
 		fs.mkdirSync(path.dirname(OPEN_CHATS_FILE()), { recursive: true });
 		fs.writeFileSync(OPEN_CHATS_FILE(), JSON.stringify(all, null, 2));
@@ -314,25 +314,28 @@ const sessionArg = (f) => (typeof f === "string" && f ? f : undefined);
 
 ipcMain.handle("pi:send", (_e, chatId, record) => (record?.type === "extension_ui_response" ? answerUi(chatId, record, "desktop") : piSend(chatId, record)));
 // Returns the new chat's id, or null. Also used by Remote.
-async function newChat(sessionFile, opts) {
+// `agentId` is the chat's agent for good (undefined = Pi); an id the registry does not know is refused.
+async function newChat(sessionFile, opts, agentId) {
 	if (!REPO) return null;
+	const wanted = chatAgents.resolveNewChatAgent(agentId, agents);
+	if (wanted === null) return null;
 	let wt = null;
 	if (opts && opts.cwd) {
 		wt = typeof opts.cwd === "string" ? await resolveWt(opts.cwd) : null;
 		if (!wt || wt.missing) return null; // not a worktree of this repo: don't fall back to the main checkout silently
 	}
 	const id = newChatId();
-	startAgent(id, sessionArg(sessionFile), {}, wt);
+	startAgent(id, sessionArg(sessionFile), {}, wt, wanted);
 	return id;
 }
-ipcMain.handle("pi:newChat", (_e, f, o) => newChat(f, o));
+ipcMain.handle("pi:newChat", (_e, f, o, agentId) => newChat(f, o, agentId));
 // "Open in main checkout" for a chat whose worktree is gone: the user's explicit choice.
 ipcMain.handle("pi:openInMain", (_e, chatId) => {
 	const entry = openList.find((e) => e.id === chatId);
 	if (!entry || chats.has(chatId)) return false;
 	entry.cwd = null;
 	saveOpenChats();
-	startAgent(chatId, entry.file || undefined, {}, null);
+	startAgent(chatId, entry.file || undefined, {}, null, entry.agent);
 	return true;
 });
 ipcMain.handle("pi:sessionFile", (_e, chatId, file) => setChatFile(chatId, file));
@@ -374,7 +377,9 @@ async function restartChat(chatId, sessionFile) {
 	refreshPi();
 	const oldChat = chats.get(chatId);
 	const old = oldChat?.handle;
-	const cwd = openList.find((e) => e.id === chatId)?.cwd || null;
+	const entry = openList.find((e) => e.id === chatId);
+	const cwd = entry?.cwd || null;
+	const agentId = oldChat?.agent.id || entry?.agent; // a restarted chat keeps its own agent
 	chats.delete(chatId);
 	oldChat?.agent.stop(old);
 	const file = sessionArg(sessionFile);
@@ -383,7 +388,7 @@ async function restartChat(chatId, sessionFile) {
 	const wt = await resolveWt(cwd);
 	// Closed while we waited: don't bring a Pi back for a chat that is gone.
 	if (!openList.some((e) => e.id === chatId)) return false;
-	startAgent(chatId, file, {}, wt);
+	startAgent(chatId, file, {}, wt, agentId);
 	return true;
 }
 ipcMain.handle("pi:restart", (_e, chatId, sessionFile) => restartChat(chatId, sessionFile));
@@ -889,8 +894,7 @@ function openRepo(p) {
 	send("repo:changed", { repo: REPO });
 	// Bring back the chats that were open for this repo, each resuming its session.
 	const saved = SELFTEST ? {} : readOpenChats()[REPO] || {};
-	const files = [...new Set(saved.files || [])].filter((f) => typeof f === "string" && fs.existsSync(f));
-	openList = files.map((file) => ({ id: newChatId(), file, cwd: typeof saved.cwds?.[file] === "string" ? saved.cwds[file] : null }));
+	openList = chatAgents.restoreEntries(saved, (f) => fs.existsSync(f)).map((e) => ({ id: newChatId(), ...e })); // each keeps its agent; a missing one is Pi
 	activeChatId = (openList.find((e) => e.file === saved.active) || openList[0])?.id || null;
 	const list = [...openList];
 	if (!openList.length) startAgent(newChatId());
@@ -901,7 +905,14 @@ function openRepo(p) {
 		for (const e of list) {
 			const wt = await resolveWt(e.cwd);
 			if (REPO !== mine || !openList.includes(e)) return;
-			startAgent(e.id, e.file, { restore: true, active: e.id === active }, wt);
+			if (!agents.has(e.agent)) {
+				// An agent this build does not have: the tab stays with the reason, it is not dropped and not turned into a Pi chat.
+				const stub = { id: e.agent, label: e.agent, capabilities: {} };
+				send("pi:started", { chatId: e.id, cwd: e.cwd || REPO, worktree: null, sessionFile: e.file || null, agent: stub, restore: true, active: e.id === active });
+				send("pi:exit", { chatId: e.id, error: `This chat belongs to the agent "${e.agent}", which this version does not have.` });
+				continue;
+			}
+			startAgent(e.id, e.file, { restore: true, active: e.id === active }, wt, e.agent);
 		}
 	})();
 	return { ok: true, repo: REPO };
@@ -1099,8 +1110,13 @@ ipcMain.handle("sessions:list", async () => {
 	try {
 		for (const wt of await require("./worktree-main").listWorktrees(REPO, ENV)) if (realOf(wt.path) !== REPO_REAL && fs.existsSync(wt.path)) worktrees.push({ cwd: wt.path, branch: wt.branch });
 	} catch {}
-	return piSessions.listSessions({ repo: REPO, worktrees });
+	const { sessions, status } = await chatAgents.listAllSessions({ adapters: agents.list(), repo: REPO, worktrees });
+	sessionsStatus = status;
+	return sessions;
 });
+// Per agent: did its last history list work, and why not. For the history picker of a later UI task.
+let sessionsStatus = {};
+ipcMain.handle("sessions:status", () => sessionsStatus);
 
 // ---------------------------------------------------------------------------
 // Terminal: a login shell in the repo through node-pty.

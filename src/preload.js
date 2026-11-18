@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld("crust", {
 		send: (chatId, record) => ipcRenderer.invoke("pi:send", chatId, record),
 		restart: (chatId, sessionFile) => ipcRenderer.invoke("pi:restart", chatId, sessionFile),
 		openInMain: (chatId) => ipcRenderer.invoke("pi:openInMain", chatId),
-		newChat: (sessionFile, opts) => ipcRenderer.invoke("pi:newChat", sessionFile, opts),
+		newChat: (sessionFile, opts, agentId) => ipcRenderer.invoke("pi:newChat", sessionFile, opts, agentId),
 		sessionFile: (chatId, file) => ipcRenderer.invoke("pi:sessionFile", chatId, file),
 		activeChat: (chatId) => ipcRenderer.invoke("pi:activeChat", chatId),
 		stop: (chatId) => ipcRenderer.invoke("pi:stop", chatId),
