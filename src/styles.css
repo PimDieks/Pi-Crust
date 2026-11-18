@@ -1237,7 +1237,12 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .fp-file { display: flex; flex-direction: column; gap: var(--space-xs); }
 
 /* --- Setup: the welcome view, the header pill and the first-task card (onboarding.js, first-task.js). Own block: keep apart from other edits. --- */
-#onboarding { position: fixed; inset: 0; z-index: 30; /* the modal layer (#modal-backdrop is 30 too and comes later in the page, so confirms sit above this view) */ display: flex; overflow: auto; padding: var(--space-xl) var(--panel-pad); box-sizing: border-box; background: var(--bg); transition: opacity var(--dur) var(--ease), display var(--dur) allow-discrete, overlay var(--dur) allow-discrete; opacity: 1; }
+/* Order of the layers here (plain numbers on purpose: the ui-layers branch is introducing named tokens, which will replace them):
+   the welcome view above the app (30, the "overlay" layer), the confirms above the view (55), toasts above both (58), so an error
+   such as a failed "git init" is always visible. The sign-in panel and the repo picker (50) also sit above the view. */
+#modal-backdrop { z-index: 55; } /* confirms: above the view (30), the sign-in panel and the repo picker (50) */
+#toasts { z-index: 58; } /* toasts: above the view and every confirm */
+#onboarding { position: fixed; inset: 0; z-index: 30; /* the view: above the app */ display: flex; overflow: auto; padding: var(--space-xl) var(--panel-pad); box-sizing: border-box; background: var(--bg); transition: opacity var(--dur) var(--ease), display var(--dur) allow-discrete, overlay var(--dur) allow-discrete; opacity: 1; }
 #onboarding[hidden] { display: none; opacity: 0; } /* without display:none the faded view stayed on top and swallowed clicks */
 #onboarding .ob-col { width: min(600px, 100%); margin: auto; display: flex; flex-direction: column; gap: var(--space-md); }
 .ob-mark-img { width: 40px; height: 40px; border-radius: var(--radius-md); display: block; }

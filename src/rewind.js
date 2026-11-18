@@ -219,7 +219,7 @@
 			undoId = r.undoId;
 			lastUndo.set(root, undoId);
 			n = r.files.length;
-			emitCrust("rewind:restored", c, { files: n }); // the first-task card reads it
+			emitCrust("rewind:restored", c, { files: n, paths: r.files.map((f) => f.path) }); // the first-task card reads it
 			refreshChangesSoon();
 			refreshTree();
 		}

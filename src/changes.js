@@ -145,7 +145,7 @@ async function loadChanges() {
 		.map(([path, code]) => ({ path, code, label: statusLabel(code) }))
 		.sort((a, b) => a.path.localeCompare(b.path));
 	$("#changes-count").textContent = changes.length ? String(changes.length) : "";
-	emitCrust("changes:loaded", changes.length, chatId); // the first-task card reads it
+	emitCrust("changes:loaded", changes.length, chatId, changes.map((c) => c.path)); // the first-task card reads it
 	if (activeTab === "changes") renderChanges();
 	refreshGitBar();
 }

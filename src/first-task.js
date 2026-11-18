@@ -1,5 +1,6 @@
 // The guided first task: a card above the message box with three steps (ask, change, undo). Each step ticks from a real event:
-// Pi's records (crust.pi.onRecord), the Changes list (hook changes:loaded) and a finished restore (hook rewind:restored).
+// Pi's records (crust.pi.onRecord), the changed paths with README.md's stamp (snapshots, see below) and a finished restore (hook rewind:restored).
+// The card belongs to the chat that was active when it started: records, snapshots and restores of other chats never tick it.
 // The card puts the suggested text in the message box. It never sends: the user presses Enter.
 // The steps and their rules are in first-task-logic.js. "Hide" puts the card away (onboarding.firstTaskHiddenAt); it comes back from the
 // welcome view, the palette, /setup's view and the Help menu. Done is saved once, at the end (onboarding.firstTaskDoneAt).
@@ -16,6 +17,21 @@
 	let hidden = false; // the user put it away (remembered in settings)
 	let announced = "";
 	let pointTimer = null;
+
+	// Snapshots: the changed paths of a chat's folder plus README.md's modification time, so "README.md itself changed because of this
+	// turn" can be told even when the README was already modified. The source is replaceable for the self-test.
+	const defaultSource = async (chatId) => {
+		const [st, rd] = await Promise.all([crust.fs.gitStatus(false, chatId), crust.fs.stat(FirstTask.README).catch(() => null)]);
+		return { paths: Object.keys(st?.files || {}), readme: rd && rd.exists ? rd.mtime : null };
+	};
+	let source = defaultSource;
+	async function snapshot(chatId, baseline, paths) {
+		if (!chatId || (state.phase !== "step1" && state.phase !== "step2") || chatId !== state.chatId) return;
+		try {
+			const got = paths ? { paths, readme: (await defaultSource(chatId)).readme } : await source(chatId);
+			if (chatId === state.chatId) apply({ type: "snapshot", chatId, baseline: !!baseline, paths: got.paths, readme: got.readme });
+		} catch {}
+	}
 
 	const live = el("span", "fp-sr");
 	live.setAttribute("role", "status");
@@ -122,8 +138,15 @@
 			say(now === 4 ? FirstTask.DONE_TEXT : `Step ${before} done. Step ${now} of 3: ${FirstTask.STEPS[now - 1].title}.`);
 			if (now === 4) completed();
 		} else if (FirstTask.view(state).failed && ev.type === "record") say(FirstTask.RETRY_HINT);
-		// A turn that may have changed files just ended: ask for the Changes list now, it feeds step 2.
-		if (ev.type === "record" && ev.record?.type === "agent_end" && FirstTask.stepOf(state) === 2) refreshChangesSoon();
+		// Step 2 needs the changed paths as a turn begins and after it ends: take them now (the Changes list refreshes too).
+		if (ev.type === "record" && FirstTask.stepOf(state) === 2 && ev.chatId === state.chatId) {
+			if (ev.record?.type === "agent_start") snapshot(state.chatId, true);
+			if (ev.record?.type === "agent_end") {
+				snapshot(state.chatId, false);
+				refreshChangesSoon();
+			}
+		}
+		if (before === 1 && now === 2) snapshot(state.chatId, true);
 		render();
 	}
 	// Pi's records, from the same channel the chat reads (the self-test feeds recorded ones through this same function).
@@ -131,8 +154,8 @@
 		if (state.phase === "step1" || state.phase === "step2") apply({ type: "record", chatId, record });
 	};
 	crust.pi.onRecord(({ chatId, record }) => onRecord(chatId, record));
-	onCrust("changes:loaded", (count) => apply({ type: "changes", count }));
-	onCrust("rewind:restored", (chat, { files }) => apply({ type: "restore", chatId: chat.id, files }));
+	onCrust("changes:loaded", (_count, chatId, paths) => snapshot(chatId, false, paths));
+	onCrust("rewind:restored", (chat, { files, paths }) => apply({ type: "restore", chatId: chat.id, files, paths }));
 
 	async function completed() {
 		await save("firstTaskDoneAt");
@@ -147,7 +170,8 @@
 	function start() {
 		hidden = false;
 		shown = true;
-		state = FirstTask.reduce(FirstTask.initial(), { type: "start" });
+		state = FirstTask.reduce(FirstTask.initial(), { type: "start", chatId: active?.id });
+		snapshot(state.chatId, true);
 		save("firstTaskHiddenAt", true);
 		render();
 		card.querySelector(".ft-act .btn")?.focus();
@@ -157,7 +181,10 @@
 	function show() {
 		hidden = false;
 		save("firstTaskHiddenAt", true);
-		if (state.phase === "idle" || state.phase === "done") state = FirstTask.reduce(FirstTask.initial(), { type: "start" });
+		if (state.phase === "idle" || state.phase === "done") {
+			state = FirstTask.reduce(FirstTask.initial(), { type: "start", chatId: active?.id });
+			snapshot(state.chatId, true);
+		}
 		shown = true;
 		render();
 		card.querySelector(".ft-act .btn")?.focus();
@@ -179,7 +206,8 @@
 	function restore(onb) {
 		hidden = !!onb?.firstTaskHiddenAt;
 		if (onb?.doneAt && !onb.firstTaskDoneAt && !hidden && state.phase === "idle") {
-			state = FirstTask.reduce(FirstTask.initial(), { type: "start" });
+			state = FirstTask.reduce(FirstTask.initial(), { type: "start", chatId: active?.id });
+			snapshot(state.chatId, true);
 			shown = true;
 			render();
 		}
@@ -195,6 +223,7 @@
 		state: () => state,
 		onRecord,
 		apply,
+		_setSource: (fn) => (source = fn || defaultSource),
 	};
 
 	// --- selftest ---------------------------------------------------------------------------------
@@ -271,14 +300,32 @@
 		t("step 2 text", $("#input").value === FirstTask.STEPS[1].prompt && msgs() === sent0, `input="${$("#input").value.slice(0, 40)}…"`);
 		await shot("2-change");
 
-		// a turn that ends, with a new file in Changes (hook changes:loaded, as loadChanges emits it)
+		// the changed paths come from a replaceable source (the real one asks git and stats README.md; a test never depends on this repo's state)
+		let list = { paths: ["notes.txt"], readme: null };
+		window.crustFirstTask._setSource(async () => list);
+		// another chat's records never tick this card (it belongs to the chat it started in)
+		onRecord("some-other-chat", { type: "agent_start" });
+		onRecord("some-other-chat", asst("…"));
+		onRecord("some-other-chat", { type: "agent_end", messages: [] });
+		await wait(100);
+		t("other chat's turn ignored", FirstTask.stepOf(state) === 2 && state.chatId === active.id);
+		// a turn that changes some other file: no tick
 		rec({ type: "agent_start" });
-		emitCrust("changes:loaded", state.baseline + 1); // one file more than when the turn began (this repo already has changes of its own)
+		await wait(150); // the baseline snapshot of the changed paths
+		list = { paths: ["notes.txt", "other.js"], readme: null };
+		rec(asst("…"));
+		rec({ type: "agent_end", messages: [] });
+		await wait(250);
+		t("another file changing does not tick step 2", FirstTask.stepOf(state) === 2, `paths=${JSON.stringify(list.paths)}`);
+		// a turn that changes README.md itself: the baseline is taken as the turn begins, the paths again after it ends
+		rec({ type: "agent_start" });
+		await wait(150);
+		list = { paths: ["notes.txt", "other.js", "README.md"], readme: 5 };
 		rec(asst("…"));
 		await wait(100);
 		t("no tick before the turn ends", FirstTask.stepOf(state) === 2);
 		rec({ type: "agent_end", messages: [] });
-		await wait(150);
+		await wait(300);
 		t("step 2 done", FirstTask.stepOf(state) === 3 && JSON.stringify(marks()) === JSON.stringify(["done:✓", "done:✓", "now:●"]) && /Rewind/.test(card.textContent) && /Restore the files/.test(card.textContent), `marks=${marks()}`);
 		// step 3: the button lights up Rewind on your last message (a stand-in message with the real bar's class names)
 		const fake = el("div", "msg user", "my message");
@@ -292,11 +339,17 @@
 		await wait(200);
 		t("step 3 points at Rewind", fake.classList.contains("ft-point") && document.activeElement === rw && getComputedStyle(bar).opacity === "1");
 		await shot("3-undo");
-		// a restore of nothing, then of a file
-		emitCrust("rewind:restored", active, { files: 0 });
+		// a restore of nothing, of another file, then of README.md
+		emitCrust("rewind:restored", active, { files: 0, paths: [] });
 		await wait(100);
 		t("restore of nothing", FirstTask.stepOf(state) === 3);
-		emitCrust("rewind:restored", active, { files: 1 });
+		emitCrust("rewind:restored", active, { files: 1, paths: ["other.js"] });
+		await wait(100);
+		t("restore of another file does not tick step 3", FirstTask.stepOf(state) === 3);
+		emitCrust("rewind:restored", { id: "some-other-chat" }, { files: 1, paths: ["README.md"] });
+		await wait(100);
+		t("another chat's rewind does not tick step 3", FirstTask.stepOf(state) === 3);
+		emitCrust("rewind:restored", active, { files: 1, paths: ["README.md"] });
 		await wait(300);
 		const saved = await crust.health.onboarding();
 		t("done", FirstTask.stepOf(state) === 4 && card.textContent.includes("You've seen the loop: ask, change, undo. Pi Crust remembers this.") && !!saved.firstTaskDoneAt && !fake.classList.contains("ft-point"), `done text=${card.querySelector(".ft-done")?.textContent} firstTaskDoneAt=${!!saved.firstTaskDoneAt}`);
@@ -361,6 +414,7 @@
 		await crust.health.onboardingSet("firstTaskHiddenAt", null);
 		await crust.health.onboardingSet("doneAt", null);
 		await crust.health.stubSet({});
+		window.crustFirstTask._setSource(null);
 		setTheme(was);
 		console.error(`SELFTEST first-task shots: ${shots.join(" ; ")}`);
 	}, "first-task");

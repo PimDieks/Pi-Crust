@@ -1,6 +1,10 @@
 // Setup: the welcome view (first launch, and from every way back in), the "Setup: x of y" pill in the chat header and the checklist.
 // Rows come from crust.health.check() (health-main.js, words in health-logic.js); this file only draws them and runs their one button.
 //  - First launch (no onboarding.doneAt or skippedAt): the view opens by itself, in place of the repo picker (atStart, called by repos.js).
+//    Existing users who just updated are the same case, but when the first check finds every required row ready and a project is open,
+//    setup is quietly marked done: no view, no first-task card, no pill. Only people with something missing see the welcome view.
+//  - No check at startup once setup is done and the last check was ready (onboarding.lastReadyAt, kept by main). A check runs when the
+//    view opens, on "Check again", when Pi fails to start, and after an install or a sign-in.
 //  - "Skip for now" (Escape too) closes it and leaves the pill until every required row is done. "Start" needs them all and
 //    hands over to the first-task card (first-task.js).
 //  - It opens on the `crust:open-setup` window event (Pi missing), from the pill, the palette, /setup and the Help menu.
@@ -18,6 +22,7 @@
 	const skipBtn = $("#ob-skip");
 	const recheckBtn = $("#ob-recheck");
 	const taskLink = $("#ob-first-task");
+	const appEl = $("#app");
 
 	const LABELS = { pi: "Pi", auth: "Model provider", git: "Git", project: "Project", figma: "Figma" };
 	const MARK = { ready: "✓", todo: "○", unknown: "–" };
@@ -31,6 +36,8 @@
 	let announced = "";
 	let focusPending = false; // the view just opened: once the first answer is in, focus goes to the highlighted button
 	let install = null; // { row, running, steps: [{ id, text, state }], error, details, manual }: kept while the view is closed
+	let checking = 0; // checks in flight
+	let liveRows = {}; // rows that came in while a check is still running ("health:row"), by id
 
 	const announce = (text) => {
 		if (text === announced) return;
@@ -52,7 +59,21 @@
 			row.append(el("span", "mark", s.state === "done" ? "✓" : s.state === "fail" ? "✕" : "…"), el("span", "", s.text));
 			box.append(row);
 		}
-		if (install.running) box.append(el("div", "ob-bar"));
+		if (install.running) {
+				box.append(el("div", "ob-bar"));
+				const cancel = el("button", "ob-link", install.cancelling ? "Stopping…" : "Cancel install");
+				cancel.type = "button";
+				cancel.dataset.action = "cancel-install";
+				cancel.onclick = () => {
+					if (install.cancelling) return;
+					install.cancelling = true;
+					record("installCancel", {}, null);
+					crust.health.installCancel();
+					announce("Stopping the install.");
+					render();
+				};
+				box.append(cancel);
+			}
 		if (install.error) {
 			box.append(el("div", "ob-step fail", install.error));
 			if (install.manual?.length) {
@@ -97,16 +118,25 @@
 		return li;
 	}
 
-	function skeleton() {
-		return ["pi", "auth", "git", "project", "figma"].map((id) => rowEl({ id, label: LABELS[id], state: "unknown", optional: id === "figma", line: "Checking…", action: null }, false));
+	const skeletonRow = (id) => ({ id, label: LABELS[id], state: "unknown", optional: id === "figma", line: "Checking…", action: null });
+	// The last answer, with the rows of a check that is still running laid over it: each row shows as soon as its facts are in.
+	function shownRows() {
+		const base = health ? health.rows : ["pi", "auth", "git", "project", "figma"].map(skeletonRow);
+		return base.map((r) => liveRows[r.id] || r);
 	}
+	crust.health.onRow?.((row) => {
+		if (!checking || !row?.id) return;
+		liveRows[row.id] = row;
+		render();
+	});
 
 	function render() {
 		const keep = document.activeElement;
 		const key = root.contains(keep) ? keep.dataset?.action && keep.closest(".ob-row")?.dataset.id + ":" + keep.dataset.action : null;
-		const first = firstId();
-		rowsEl.replaceChildren(...(health ? health.rows.map((r) => rowEl(r, r.id === first)) : skeleton()));
-		rowsEl.setAttribute("aria-busy", String(!health));
+		const shown = shownRows();
+		const first = shown.find((r) => !r.optional && r.state !== "ready" && r.action)?.id;
+		rowsEl.replaceChildren(...shown.map((r) => rowEl(r, r.id === first)));
+		rowsEl.setAttribute("aria-busy", String(!health && checking > 0));
 		const ready = !!health?.ready;
 		startBtn.disabled = !ready;
 		startBtn.textContent = onb.firstTaskDoneAt ? "Close" : "Start";
@@ -138,10 +168,13 @@
 	async function refresh({ fresh = true, figma = opened } = {}) {
 		const mine = ++seq;
 		let r;
+		if (!checking++) liveRows = {};
 		try {
 			r = await (fresh ? crust.health.recheck({ figma }) : crust.health.check({ figma }));
 		} catch {
 			return health;
+		} finally {
+			if (!--checking) liveRows = {};
 		}
 		if (mine !== seq) return health;
 		health = r;
@@ -165,6 +198,7 @@
 		opener = document.activeElement;
 		crust.browser.hide(true, "setup");
 		root.hidden = false;
+		appEl.inert = true; // nothing behind the view takes focus or clicks
 		pill.hidden = true;
 		render();
 		skipBtn.focus();
@@ -178,6 +212,7 @@
 		if (!opened) return;
 		opened = false;
 		root.hidden = true;
+		appEl.inert = false;
 		crust.browser.hide(false, "setup");
 		if (restore) {
 			const back = opener && opener.isConnected && opener !== document.body ? opener : $("#input");
@@ -226,11 +261,13 @@
 	}
 	crust.health.onInstallProgress(applyProgress);
 
-	async function doInstall(row, button) {
+	// The confirm is enforced in main: installPlan hands out a one-time token for exactly the list shown, install needs it. When what is
+	// missing changed meanwhile, main refuses and the list is shown again (once).
+	async function doInstall(row, button, again = false) {
 		const only = row.action.id === "install-git" ? ["git"] : undefined;
 		const arg = only ? { only } : {};
 		const p = await crust.health.installPlan(arg);
-		record("installPlan", arg, { ok: p.plan.ok, needs: p.needs, lines: p.plan.lines });
+		record("installPlan", arg, { ok: p.plan.ok, needs: p.needs, lines: p.plan.lines, token: !!p.token });
 		if (!p.plan.ok) {
 			install = { row: row.id, running: false, steps: [], error: p.plan.error === "Nothing to install." ? "Nothing is missing. Choose Check again." : p.plan.error, manual: p.plan.manual || [], details: "" };
 			render();
@@ -241,8 +278,13 @@
 		install = { row: row.id, running: true, steps: [], error: "", manual: [], details: "" };
 		render();
 		announce("Installing. This can take a few minutes.");
-		const r = await crust.health.install(arg);
-		record("install", arg, { ok: r.ok, dryRun: !!r.dryRun, lines: (r.lines || []).length });
+		const r = await crust.health.install({ token: p.token });
+		record("install", arg, { ok: r.ok, dryRun: !!r.dryRun, lines: (r.lines || []).length, changed: !!r.changed, cancelled: !!r.cancelled });
+		if (r.changed && !again) {
+			install = null;
+			render();
+			return doInstall(row, button, true); // what is missing changed: ask again with the new list
+		}
 		if (!install) install = { row: row.id, steps: [], manual: [], details: "" };
 		install.running = false;
 		if (r.health) {
@@ -257,6 +299,7 @@
 			else install = null; // the row now says what is installed
 			announce(health?.ready ? "Installed. Everything needed is set up." : `Installed. Setup: ${counts()} done.`);
 		} else {
+			install.cancelling = false;
 			install.error = r.error || "The install did not finish.";
 			install.manual = r.manual || [];
 			install.details = r.details || "";
@@ -288,17 +331,23 @@
 	}
 
 	// Make it a Git project: a confirm that names the folder, then `git init` and nothing else.
+	// Main names the folder and hands out a one-time token for exactly that folder; `git init` needs it.
 	async function makeGitProject(row, button) {
-		const repo = health?.facts?.project?.repo || info.repo;
+		const plan = record("initGitPlan", {}, await crust.repos.initGitPlan());
+		if (!plan.ok) {
+			toast(plan.error || "Couldn't make this a Git project", "error");
+			await refresh({ fresh: true });
+			return back(button);
+		}
 		const answer = await showDialog({
 			method: "confirm",
 			title: "Make this a Git project?",
-			message: `Pi Crust will run "git init" in:\n${repo}\n\nNothing is added or committed. Your files stay as they are.`,
+			message: `Pi Crust will run "git init" in:\n${plan.folder}\n\nNothing is added or committed. Your files stay as they are.`,
 			yesLabel: "Make it a Git project",
 			noLabel: "Cancel",
 		});
 		if (!answer.confirmed) return back(button);
-		const r = record("initGit", {}, await crust.repos.initGit());
+		const r = record("initGit", {}, await crust.repos.initGit(plan.token));
 		if (!r.ok) toast(r.error || "Couldn't make this a Git project", "error");
 		else {
 			refreshTree();
@@ -377,14 +426,41 @@
 	async function atStart({ force = false } = {}) {
 		onb = (await crust.health.onboarding()) || {};
 		if (info.selftest && !force) return false; // a test run opens it only when asked
-		if (!onb.doneAt && !onb.skippedAt) {
-			open("first-launch");
-			return true;
+		// Setup done and the last check said ready: no check at all at startup.
+		if (onb.doneAt && onb.lastReadyAt) {
+			window.crustFirstTask?.restore(onb);
+			return false;
 		}
-		refresh({ fresh: false, figma: false }); // for the pill
-		window.crustFirstTask?.restore(onb);
-		return false;
+		// Done or skipped, but the last check was not ready: look once, for the pill.
+		if (onb.doneAt || onb.skippedAt) {
+			refresh({ fresh: false, figma: false });
+			window.crustFirstTask?.restore(onb);
+			return false;
+		}
+		// Never set up: a new user, or an existing one who just updated. Without a project nothing can be ready, so skip the check.
+		if (info.repo) {
+			const r = await refresh({ fresh: false, figma: false });
+			if (r?.ready) {
+				await quietDone();
+				return false;
+			}
+		}
+		open("first-launch");
+		return true;
 	}
+	// An existing user whose machine is already set up: setup counts as done, and the first-task card stays away (still there in the
+	// view's link, the palette and the Help menu).
+	async function quietDone() {
+		await mark("doneAt");
+		await mark("firstTaskHiddenAt");
+		window.crustFirstTask?.restore(onb);
+		paintPill();
+	}
+	// Pi failed to start (not found, or it crashed): look again, for the pill and the view. Not while a check is already running.
+	crust.pi.onExit?.((e) => {
+		if (!(e && (e.notInstalled || e.error || (e.code != null && e.code !== 0)))) return;
+		if (!checking && !install?.running) refresh({ fresh: true });
+	});
 
 	// Ways back in: the palette (here), /setup (slash.js), the header pill, the Help menu, the model panel and the Pi-missing message.
 	const prevActions = window.crustPaletteActions;
@@ -403,6 +479,8 @@
 		isOpen: () => opened,
 		state: () => ({ health, onb, install, opened }),
 		_setInstall: (v) => ((install = v), render()),
+		_quietDone: quietDone,
+		_seq: () => seq,
 		_render: render,
 		_paintPill: paintPill,
 		_setOnb: (v) => (onb = v),
@@ -470,8 +548,9 @@
 		// first launch, nothing set up: opens by itself and the repo picker stays shut
 		switchTab("browser");
 		await wait(300);
-		const opens = await atStart({ force: true });
+		await crust.health.onboardingSet("lastReadyAt", null);
 		await crust.health.stubSet({ pi: "missing", node: "missing", auth: "none", git: "missing", project: "none", figma: "not_reachable" });
+		const opens = await atStart({ force: true });
 		await refresh({ fresh: true, figma: true });
 		const b0 = await crust.selftest.bounds();
 		say("first launch", opens === true && opened && matches() && $("#repo-picker").hidden && !startBtn.textContent.startsWith("Close") && startBtn.disabled && dom()[0].hot && dom().filter((r) => r.hot).length === 1, `rows=${dom().map((r) => r.id + ":" + r.mark).join(",")} start.disabled=${startBtn.disabled} picker.hidden=${$("#repo-picker").hidden}`);
@@ -480,12 +559,18 @@
 		const bg = getComputedStyle(root).backgroundColor;
 		const rb = root.getBoundingClientRect();
 		say("view fills the window, opaque", rb.width === innerWidth && rb.height === innerHeight && !/rgba\(.*,\s*0(\.\d+)?\)$/.test(bg) && bg === getComputedStyle(document.body).backgroundColor, `box=${rb.width}x${rb.height} window=${innerWidth}x${innerHeight} bg=${bg}`);
-		toast("Selftest toast: must stay behind the view", "warning", { label: "Toast button", onClick() {} });
+		say("app behind the view is inert", appEl.inert === true && !appEl.contains(document.activeElement), `inert=${appEl.inert}`);
+		toast("Selftest toast: must show above the view", "error", { label: "Toast button", onClick() {} });
 		await wait(100);
 		layerCheck("view buttons uncovered, toast present", "#onboarding button");
 		const tb = $("#toasts .toast").getBoundingClientRect();
 		const te = document.elementFromPoint(tb.left + tb.width / 2, tb.top + tb.height / 2);
-		say("toast stays behind the view", !!te && root.contains(te), `top element=${te?.tagName}.${te?.className}`);
+		const tz = Number(getComputedStyle($("#toasts")).zIndex);
+		say("toast is visible above the view", !!te && $("#toasts").contains(te) && tz > Number(getComputedStyle(root).zIndex) && tz > Number(getComputedStyle($("#modal-backdrop")).zIndex), `top element=${te?.tagName}.${te?.className} toast z=${tz} view z=${getComputedStyle(root).zIndex} confirm z=${getComputedStyle($("#modal-backdrop")).zIndex}`);
+		const tbtn = $("#toasts .toast button");
+		const tbr = tbtn.getBoundingClientRect();
+		const tbe = document.elementFromPoint(tbr.left + tbr.width / 2, tbr.top + tbr.height / 2);
+		say("toast button reachable over the view", tbe === tbtn || tbtn.contains(tbe));
 		await shot("1-nothing-set-up");
 		$("#toasts").replaceChildren();
 
@@ -525,6 +610,8 @@
 		gitBtn?.click();
 		await wait(300);
 		say("install progress", prog?.getAttribute("role") === "status" && prog.getAttribute("aria-live") === "polite" && !!prog.querySelector(".ob-bar") && !rowsEl.querySelector('.ob-row[data-id="pi"] .btn') && gitBtn?.getAttribute("aria-disabled") === "true" && !dialogOpen && calls.length === before, `steps=${prog?.querySelectorAll(".ob-step").length} otherButtonsDisabled=${gitBtn?.getAttribute("aria-disabled")}`);
+		const cancelBtn = rowsEl.querySelector('.ob-progress [data-action="cancel-install"]');
+		say("install cancel button", !!cancelBtn && cancelBtn.textContent === "Cancel install", `button=${cancelBtn?.textContent}`);
 		await shot("4-install-progress");
 		applyProgress({ kind: "done", id: "git" });
 		_setInstall({ row: "pi", running: false, steps: [{ id: "node", text: "Installing Node.js (current LTS)", state: "done" }, { id: "pi", text: "Installing Pi, the coding agent: exit 1", state: "fail" }], error: "The installer stopped (exit code 1).", manual: ["Open a new terminal and run: npm install -g @earendil-works/pi-coding-agent", "Then come back to Pi Crust and choose Check again."], details: "details" });
@@ -581,7 +668,8 @@
 		rowsEl.querySelector('[data-action="init-git"]').click();
 		await waitFor(() => dialogOpen);
 		const gmsg = $("#modal p")?.textContent || "";
-		say("git init confirm", dialogOpen && $("#modal h2").textContent === "Make this a Git project?" && gmsg.includes('"git init" in:\n/stub/notes') && /Nothing is added or committed\./.test(gmsg), `"${gmsg.replace(/\n/g, " / ")}"`);
+		const gplan = calls.find((c) => c.name === "initGitPlan")?.result;
+		say("git init confirm", dialogOpen && gplan?.ok && !!gplan.token && $("#modal h2").textContent === "Make this a Git project?" && gmsg.includes(`"git init" in:\n${gplan.folder}`) &&/Nothing is added or committed\./.test(gmsg), `"${gmsg.replace(/\n/g, " / ")}"`);
 		layerCheck("git init confirm buttons uncovered", "#modal button");
 		await shot("9-git-init-confirm");
 		$("#modal .modal-actions .secondary").click();
@@ -593,6 +681,17 @@
 		await waitFor(() => calls.some((c) => c.name === "initGit"), 8000);
 		const gi = calls.find((c) => c.name === "initGit")?.result;
 		say("git init asks main", gi?.ok === true && gi.selftest === true, JSON.stringify(gi));
+		const spent = await crust.repos.initGit(gplan.token); // the token was used by the click above: a second call does nothing
+		const bare = await crust.repos.initGit(undefined);
+		say("git init needs a fresh token", spent.ok === false && spent.noToken === true && bare.ok === false && bare.noToken === true, JSON.stringify([spent, bare]));
+		// a failed git init shows its error above the view
+		const realPlan = crust.repos.initGitPlan;
+		toast("Selftest: git init failed", "error");
+		await wait(100);
+		const ft = [...document.querySelectorAll("#toasts .toast")].at(-1).getBoundingClientRect();
+		const fe = document.elementFromPoint(ft.left + ft.width / 2, ft.top + ft.height / 2);
+		say("git init error toast is visible", !!fe && $("#toasts").contains(fe), `top=${fe?.tagName}.${fe?.className}`);
+		$("#toasts").replaceChildren();
 		await setState({ pi: "unknown" });
 		say("cant tell", matches() && dom()[0].mark === "–" && dom()[0].sr.startsWith("Can't tell") && dom()[0].btn === "Check again" && dom()[0].hot);
 		focusPending = false;
@@ -618,6 +717,47 @@
 		await crust.selftest.resize(1680, 1000);
 		await wait(400);
 		await setState({});
+
+		// --- startup (atStart, forced): existing users and the no-probe rule ---
+		const resetOnb = async () => {
+			for (const k of ["doneAt", "skippedAt", "firstTaskDoneAt", "firstTaskHiddenAt", "lastReadyAt"]) await crust.health.onboardingSet(k, null);
+		};
+		if (opened) close();
+		// an existing user: nothing set up yet in settings, every required row ready, a project open -> done quietly
+		await resetOnb();
+		await crust.health.stubSet({});
+		const quiet = await atStart({ force: true });
+		await wait(300);
+		const qo = await crust.health.onboarding();
+		say("existing user: quietly done", quiet === false && !opened && root.hidden && !!qo.doneAt && !!qo.firstTaskHiddenAt && !qo.firstTaskDoneAt && pill.hidden && !window.crustFirstTask.visible() && !appEl.inert, `opened=${opened} doneAt=${!!qo.doneAt} card=${window.crustFirstTask.visible()} pill.hidden=${pill.hidden} info.repo=${!!info.repo}`);
+		// the same first check with something missing: the welcome view opens
+		close();
+		await resetOnb();
+		await crust.health.stubSet({ pi: "missing", node: "missing" });
+		const loud = await atStart({ force: true });
+		const lo = await crust.health.onboarding();
+		say("something missing: welcome view opens", loud === true && opened && !root.hidden && !lo.doneAt && appEl.inert, `opened=${opened} doneAt=${!!lo.doneAt}`);
+		close();
+		say("view closed: app is not inert", appEl.inert === false);
+		// setup done and the last check was ready: no check at startup at all
+		await resetOnb();
+		await crust.health.onboardingSet("doneAt");
+		await crust.health.onboardingSet("lastReadyAt");
+		await crust.health.stubSet({ pi: "missing", node: "missing" }); // would show a pill if anyone looked
+		const s0 = seq;
+		const quietStart = await atStart({ force: true });
+		await wait(300);
+		say("done and ready: no check at startup", quietStart === false && seq === s0 && !opened, `checks=${seq - s0}`);
+		// done, but the last check was not ready: one look, for the pill
+		await crust.health.onboardingSet("lastReadyAt", null);
+		const s1 = seq;
+		await atStart({ force: true });
+		await waitFor(() => seq > s1 && !checking, 5000);
+		say("done but last check not ready: one check", seq === s1 + 1 && !pill.hidden, `checks=${seq - s1} pill.hidden=${pill.hidden}`);
+		await resetOnb();
+		onb = (await crust.health.onboarding()) || {};
+		await crust.health.stubSet({});
+		await refresh({ fresh: true });
 
 		// the pill: some required rows left, view closed
 		await setState({ auth: "none", project: "none", figma: "ready" });

@@ -79,7 +79,7 @@ let info = { repo: "", devUrl: "" };
 // sessions.js only emit. Events: turn:start(chat), turn:settled(chat,{aborted}), user:rendered(chat,node,message,history),
 // assistant:turn(chat,root), text:final(chat,blockEl,raw), tool:end(chat,{toolName,toolCallId,args,result,isError,history}),
 // chat:cleared(chat), chat:activated(chat), chat:closed(chat), models:loaded(chat,stateData), ask:added(chat,spec),
-// changes:loaded(count,chatId), rewind:restored(chat,{files}).
+// changes:loaded(count,chatId,paths), rewind:restored(chat,{files,paths}).
 // ===========================================================================
 const crustHooks = new Map();
 function onCrust(name, fn) {
