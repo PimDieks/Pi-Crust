@@ -59,6 +59,15 @@
 	--scrim: #2e3f4240;
 }
 :root {
+	/* Layer order, lowest to highest. Every overlay that floats over the page takes one of these (never a bare number);
+	   anything that needs an answer (confirm) sits above everything else. Local z-index 1/2/5 inside one component are fine.
+	   A new overlay also gets a case in the `layers` selftest step (src/layers.js). */
+	--layer-base: 0;
+	--layer-panel: 15; /* floating bits over the content: the diff "add to chat" pill */
+	--layer-popover: 20; /* menus and popovers: slash menu, worktree menu, context panel, timeline popover */
+	--layer-toast: 30; /* notifications and the update card */
+	--layer-modal: 40; /* full-screen layers: repo picker, command palette, image preview */
+	--layer-confirm: 50; /* questions that need an answer: Pi's dialogs and the app's own confirmations */
 	/* semantic-sizes, mode "compact" */
 	--radius-xs: 2px;
 	--radius-sm: 4px;
@@ -308,7 +317,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .pick-pill.image { padding-left: 2px; cursor: zoom-in; }
 .pick-pill .pp-thumb { width: 14px; height: 14px; object-fit: cover; border-radius: 999px; flex: none; }
 #composer.dropping { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); }
-.image-preview { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 85%, transparent); cursor: zoom-out; }
+.image-preview { position: fixed; inset: 0; z-index: var(--layer-modal); display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 85%, transparent); cursor: zoom-out; }
 .image-preview img { max-width: 90vw; max-height: 90vh; border-radius: var(--radius-md); box-shadow: var(--elevation-3); }
 .pick-pill .pp-label { overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
 .pick-pill .pp-remove { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: var(--fs-md); line-height: 1; border-radius: 999px; }
@@ -327,12 +336,12 @@ select option { background: var(--panel-2); color: var(--text); }
 
 /* Toasts and modal */
 /* Over the chat, right-aligned above the composer; placeToasts() in renderer.js sets right / bottom / max-width. */
-#toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; z-index: 20; max-width: 420px; }
+#toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; z-index: var(--layer-toast); max-width: 420px; }
 #toasts > * { max-width: 100%; }
 .toast { background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: 10px var(--space-sm); white-space: pre-wrap; font-size: var(--fs-sm); box-shadow: var(--elevation-2); }
 .toast.warning { border-left-color: var(--warn); }
 .toast.error { border-left-color: var(--err); }
-#modal-backdrop { position: fixed; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; z-index: 30; }
+#modal-backdrop { position: fixed; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; z-index: var(--layer-confirm); }
 #modal-backdrop[hidden] { display: none; }
 #modal { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-xl); width: min(560px, 90vw); box-shadow: var(--elevation-3); }
 #modal h2 { margin: 0 0 8px; font-size: var(--fs-lg); font-weight: 700; white-space: pre-wrap; }
@@ -420,7 +429,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .dl.del { background: color-mix(in srgb, var(--fills-error) 12%, transparent); }
 .dl.hunk { color: var(--accent-2); background: var(--hover); padding-top: 2px; padding-bottom: 2px; }
 .dl.meta { color: var(--muted); }
-#diff-add { position: fixed; z-index: 15; display: inline-flex; align-items: center; gap: var(--space-3xs); height: var(--control-h); padding: 0 var(--space-sm); border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--panel-2); color: var(--text); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; box-shadow: var(--elevation-2); }
+#diff-add { position: fixed; z-index: var(--layer-panel); display: inline-flex; align-items: center; gap: var(--space-3xs); height: var(--control-h); padding: 0 var(--space-sm); border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--panel-2); color: var(--text); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; box-shadow: var(--elevation-2); }
 #diff-add[hidden] { display: none; }
 #diff-add:hover { border-color: var(--accent); }
 #diff-add svg { color: var(--accent); width: 12px; height: 12px; }
@@ -473,7 +482,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .history-item.current { border-color: var(--levels-2-up); }
 
 /* Command palette */
-#palette-backdrop { position: fixed; inset: 0; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: 40; }
+#palette-backdrop { position: fixed; inset: 0; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: var(--layer-modal); }
 #palette-backdrop[hidden] { display: none; }
 #palette { width: min(640px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-3); overflow: hidden; }
 #palette-input { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 10px var(--space-md); font-size: var(--fs-lg); outline: none; }
@@ -493,7 +502,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .repo-switch { background: none; border: 0; height: 28px; padding: 0 var(--space-xs); margin-left: calc(-1 * var(--space-xs)); border-radius: var(--radius-full); cursor: pointer; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-switch:hover { background: var(--hover); }
 .repo-switch::after { content: " ▾"; color: var(--muted); font-size: var(--fs-xs); }
-#repo-picker { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); display: flex; align-items: center; justify-content: center; z-index: 50; }
+#repo-picker { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); display: flex; align-items: center; justify-content: center; z-index: var(--layer-modal); }
 #repo-picker[hidden] { display: none; }
 .picker-card { width: min(640px, 92vw); background: var(--panel); border-radius: var(--radius-md); padding: var(--space-xl); box-shadow: var(--elevation-3); }
 .picker-card h1 { font-size: var(--fs-title); line-height: var(--lh-title); font-weight: 700; margin: 0 0 var(--space-xl); } /* Title XXS */
@@ -536,7 +545,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .graph-more { padding: var(--space-xs) var(--panel-pad); color: var(--muted); font-size: var(--fs-sm); }
 .graph-more button { background: none; border: 0; color: var(--accent-2); cursor: pointer; padding: 0; }
 /* Pi Crust update card, first in the notifications (app-update.js) */
-#app-update-host { position: fixed; left: 16px; bottom: 16px; z-index: 20; max-width: calc(100vw - 32px); }
+#app-update-host { position: fixed; left: 16px; bottom: 16px; z-index: var(--layer-toast); max-width: calc(100vw - 32px); }
 #app-update-host:empty { display: none; }
 .toast.app-update { display: flex; align-items: flex-start; gap: var(--space-sm); white-space: normal; width: 340px; }
 .app-update > svg { width: var(--icon); height: var(--icon); flex: none; margin-top: 1px; color: var(--accent-2); }
@@ -569,7 +578,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .pane.collapsed, .splitter.collapsed { display: none; }
 
 /* Slash-command autocomplete above the chat input */
-.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2xs)); max-height: 312px; overflow: auto; padding: var(--space-2xs); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); z-index: 30; }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2xs)); max-height: 312px; overflow: auto; padding: var(--space-2xs); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); z-index: var(--layer-popover); }
 .slash-menu[hidden] { display: none; }
 .slash-menu .pal-item { min-height: 22px; flex: none; }
 .slash-menu .slash-name { font-family: var(--mono); font-size: var(--fs-sm); flex: none; }
@@ -632,7 +641,7 @@ select option { background: var(--panel-2); color: var(--text); }
 #ctx-panel .ctx-model-opt .check { color: var(--accent); }
 #ctx-panel .ctx-model-opt.selected .ctx-label { color: var(--text); font-weight: 500; }
 #ctx-panel .ctx-model-opt .ctx-num { font-size: var(--fs-xs); }
-#ctx-panel { position: fixed; z-index: 50; width: 360px; max-height: calc(100vh - 70px); overflow: auto; padding: var(--space-sm) 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); font-size: var(--fs-sm); color: var(--text); }
+#ctx-panel { position: fixed; z-index: var(--layer-popover); width: 360px; max-height: calc(100vh - 70px); overflow: auto; padding: var(--space-sm) 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); font-size: var(--fs-sm); color: var(--text); }
 #ctx-panel .subs-list { display: flex; flex-direction: column; margin: 0 -6px; }
 #ctx-panel .subs-row { display: flex; align-items: center; gap: 6px; border-radius: var(--radius-xs); }
 #ctx-panel .subs-row:hover { background: var(--hover); }
@@ -883,7 +892,7 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .tl-item:hover, .tl-item[aria-expanded="true"] { border-color: var(--accent); }
 .tl-item img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .tl-item .tl-n { position: absolute; left: var(--space-3xs); bottom: var(--space-3xs); min-width: var(--chip-h); height: var(--chip-h); line-height: var(--chip-h); padding: 0 var(--space-2xs); border-radius: var(--radius-full); background: var(--panel-2); color: var(--text); font-size: var(--fs-xs); font-weight: 500; text-align: center; }
-.tl-pop { position: fixed; z-index: 20; display: flex; flex-direction: column; gap: var(--space-xs); padding: var(--space-sm); overflow: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); animation: crust-pop var(--dur) var(--ease); }
+.tl-pop { position: fixed; z-index: var(--layer-popover); display: flex; flex-direction: column; gap: var(--space-xs); padding: var(--space-sm); overflow: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--elevation-2); animation: crust-pop var(--dur) var(--ease); }
 .tl-pop-head { display: flex; align-items: baseline; gap: var(--space-xs); }
 .tl-prompt { margin: 0; font-size: var(--fs-sm); color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .tl-single { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); }
@@ -1064,7 +1073,7 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .ct-wt-icon svg { width: var(--icon); height: var(--icon); }
 .ct-branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The chevron menu next to ＋ is a .slash-menu (box, rows) placed under its button instead of above the input. */
-.wt-menu { position: fixed; left: auto; bottom: auto; max-height: none; min-width: calc(var(--control-h) * 9); display: flex; flex-direction: column; z-index: 40; transform-origin: top right; }
+.wt-menu { position: fixed; left: auto; bottom: auto; max-height: none; min-width: calc(var(--control-h) * 9); display: flex; flex-direction: column; z-index: var(--layer-popover); transform-origin: top right; }
 .wt-menu .pal-item { width: 100%; border: 0; background: none; text-align: left; font: inherit; font-size: var(--fs-md); color: var(--text); }
 .wt-menu .pal-item:hover, .wt-menu .pal-item:focus-visible { background: var(--selected); outline: none; }
 .view-menu { width: 360px; max-width: calc(100vw - 16px); }
