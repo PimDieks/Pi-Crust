@@ -158,6 +158,22 @@ const FAILED = "The permission check failed, so the call was denied. Nothing was
 const ABORTED = "The call was cancelled before it was approved. Nothing was run.";
 const NO_ANSWER = "The user did not approve this call. Nothing was run. Ask the user what to do.";
 
+// The one decision, shared by the PreToolUse hook and canUseTool so that both see the same thing. Returns null for an answer the logic
+// should never give (callers deny), else { d, lname, kind, g } where d.action is "allow", "ask" or "block".
+function judge({ mode, toolName, input, grants, cwd, shell, protect }) {
+	const lname = logicName(toolName);
+	const kind = logic.classify(lname);
+	const g = toolName === "PowerShell" ? psGrants(grants) : grants;
+	const judged = judgedInput(toolName, input);
+	let d = logic.decide({ mode, toolName: lname, input: judged, cwd, grants: g, protect, shell });
+	if (!d || (d.action !== "allow" && d.action !== "ask" && d.action !== "block")) return null;
+	if (mode !== "trusted" && d.action !== "block" && readsEnviron(kind, judged)) {
+		if (mode === "plan") d = { action: "block", reason: "Plan mode is read-only and may not read a process environment (/proc/.../environ). Nothing was run." };
+		else d = ENVIRON_ASK;
+	}
+	return { d, lname, kind, g };
+}
+
 // ask(prompt, { signal, toolName, input }) -> Promise of the chosen option text (or anything else, which denies).
 //   prompt = { title, options, risky } straight from the shared logic.
 // grants: this chat's grants (logic.createGrants()), kept in memory only. The adapter clears them on mode change and tab close.
@@ -169,16 +185,10 @@ function makeCanUseTool({ getMode, ask, grants = logic.createGrants(), cwd, shel
 		try {
 			if (signal && signal.aborted) return deny(ABORTED);
 			const mode = getMode();
-			const lname = logicName(toolName);
-			const kind = logic.classify(lname);
-			const g = toolName === "PowerShell" ? psGrants(grants) : grants;
-			const judged = judgedInput(toolName, input);
-			let d = logic.decide({ mode, toolName: lname, input: judged, cwd: val(cwd), grants: g, protect: val(protect), shell: val(shell) });
-			if (!d || (d.action !== "allow" && d.action !== "ask" && d.action !== "block")) return deny(FAILED);
-			if (mode !== "trusted" && d.action !== "block" && readsEnviron(kind, judged)) {
-				if (mode === "plan") return deny("Plan mode is read-only and may not read a process environment (/proc/.../environ). Nothing was run.");
-				d = ENVIRON_ASK;
-			}
+			const j = judge({ mode, toolName, input, grants, cwd: val(cwd), shell: val(shell), protect: val(protect) });
+			if (!j) return deny(FAILED);
+			const { lname, kind, g } = j;
+			let d = j.d;
 			if (d.action === "block") return deny(d.reason);
 			if (d.action === "ask") d = plainPrompt(d, toolName, lname, kind);
 			let verdict = d;
@@ -219,4 +229,46 @@ function makeCanUseTool({ getMode, ask, grants = logic.createGrants(), cwd, shel
 }
 const ABORTED_MARK = Symbol("aborted");
 
-module.exports = { TOOL_TABLE, SDK_MODES, sdkModeFor, logicName, makeCanUseTool };
+// The PreToolUse hook (phase 7, T3 capture section 9): the SDK approves the Agent tool and reads inside the project by itself, so canUseTool
+// alone never sees them; a hook sees every call of the main loop and of subagents. This hook denies what the rules block and answers "ask"
+// for everything else, which sends the call on to canUseTool, the single place that allows. It never answers "allow" and never "defer".
+// Fail closed: anything unexpected (a throw, a timeout of our own code, an unknown input shape, a missing tool name) is a deny.
+// The mode is the chat's (getMode), never the hook input's permission_mode; a subagent call (agent_id) is judged like the main loop's.
+const HOOK_TIMEOUT_MS = 5000;
+const HOOK_DENY_REASON = "The permission check failed, so the call was denied. Nothing was run.";
+const hookAnswer = (decision, reason) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: decision, ...(reason ? { permissionDecisionReason: String(reason) } : {}) } });
+const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+
+function makePreToolUseHook({ getMode, grants = logic.createGrants(), cwd, shell, protect, timeoutMs = HOOK_TIMEOUT_MS } = {}) {
+	const val = (v) => (typeof v === "function" ? v() : v);
+	async function decideHook(input) {
+		if (!isObj(input) || input.hook_event_name !== "PreToolUse") return hookAnswer("deny", HOOK_DENY_REASON);
+		const toolName = input.tool_name;
+		if (typeof toolName !== "string" || toolName === "" || !isObj(input.tool_input)) return hookAnswer("deny", HOOK_DENY_REASON);
+		const mode = await getMode();
+		if (!logic.isMode(mode)) return hookAnswer("deny", HOOK_DENY_REASON);
+		const j = judge({ mode, toolName, input: input.tool_input, grants, cwd: val(cwd), shell: val(shell), protect: val(protect) });
+		if (!j) return hookAnswer("deny", HOOK_DENY_REASON);
+		if (j.d.action === "block") return hookAnswer("deny", j.d.reason || HOOK_DENY_REASON);
+		return hookAnswer("ask");
+	}
+	return async function preToolUseHook(input) {
+		let timer;
+		try {
+			const timeout = new Promise((resolve) => (timer = setTimeout(() => resolve(hookAnswer("deny", HOOK_DENY_REASON)), timeoutMs)));
+			return await Promise.race([decideHook(input), timeout]);
+		} catch {
+			return hookAnswer("deny", HOOK_DENY_REASON);
+		} finally {
+			clearTimeout(timer);
+		}
+	};
+}
+
+// options.hooks for the SDK: one matcher without a pattern (matches every tool) and onFailure "block", so a failure of the hook machinery
+// itself blocks the call instead of letting it go ahead. The timeout (seconds) is the SDK's, ours is shorter.
+function makeHooks(opts = {}) {
+	return { PreToolUse: [{ hooks: [makePreToolUseHook(opts)], timeout: 30, onFailure: "block" }] };
+}
+
+module.exports = { TOOL_TABLE, SDK_MODES, sdkModeFor, logicName, makeCanUseTool, makePreToolUseHook, makeHooks, judge };

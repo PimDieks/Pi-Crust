@@ -1,0 +1,183 @@
+{
+ "note": "Normalised from a real run (hook-gate, three passes, mode default): hook inputs in order, and the calls that reached canUseTool. Paths are <proj>/ and <outside>/; ids and prompts are redacted.",
+ "passes": {
+  "A-hook-decides-nothing": {
+   "hookMode": "none",
+   "calls": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/notes.txt"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<outside>/o.txt"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "PowerShell",
+     "tool_input": {
+      "command": "if ($env:ANTHROPIC_API_KEY) { 'present' } else { 'absent' }",
+      "description": "Check whether ANTHROPIC_API_KEY is set"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Agent",
+     "tool_input": {
+      "description": "Count lines in data.txt",
+      "prompt": "<redacted>",
+      "subagent_type": "general-purpose"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/data.txt"
+     },
+     "agent_id": "agent-sub-1",
+     "agent_type": "general-purpose",
+     "permission_mode": "default"
+    }
+   ],
+   "reachedCanUseTool": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<outside>/o.txt"
+     }
+    },
+    {
+     "tool_name": "PowerShell",
+     "tool_input": {
+      "command": "if ($env:ANTHROPIC_API_KEY) { 'present' } else { 'absent' }",
+      "description": "Check whether ANTHROPIC_API_KEY is set"
+     }
+    }
+   ]
+  },
+  "B-hook-asks-every-call": {
+   "hookMode": "ask",
+   "calls": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/notes.txt"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<outside>/o.txt"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "PowerShell",
+     "tool_input": {
+      "command": "if ($env:ANTHROPIC_API_KEY) { 'present' } else { 'absent' }",
+      "description": "Check whether ANTHROPIC_API_KEY is set"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Agent",
+     "tool_input": {
+      "description": "Count lines in data.txt",
+      "prompt": "<redacted>",
+      "subagent_type": "general-purpose"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/data.txt"
+     },
+     "agent_id": "agent-sub-1",
+     "agent_type": "general-purpose",
+     "permission_mode": "default"
+    }
+   ],
+   "reachedCanUseTool": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/notes.txt"
+     }
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<outside>/o.txt"
+     }
+    },
+    {
+     "tool_name": "PowerShell",
+     "tool_input": {
+      "command": "if ($env:ANTHROPIC_API_KEY) { 'present' } else { 'absent' }",
+      "description": "Check whether ANTHROPIC_API_KEY is set"
+     }
+    },
+    {
+     "tool_name": "Agent",
+     "tool_input": "<redacted>"
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/data.txt"
+     }
+    }
+   ]
+  },
+  "C-hook-denies-agent-rewrites-read": {
+   "hookMode": "rewrite",
+   "calls": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/notes.txt"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Agent",
+     "tool_input": {
+      "description": "Count lines in data.txt",
+      "prompt": "<redacted>",
+      "subagent_type": "general-purpose"
+     },
+     "permission_mode": "default"
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/data.txt"
+     },
+     "permission_mode": "default"
+    }
+   ],
+   "reachedCanUseTool": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/data.txt"
+     }
+    },
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "<proj>/data.txt"
+     }
+    }
+   ]
+  }
+ }
+}

@@ -2,12 +2,17 @@
 // query({ prompt, options }) replays scripted messages after the first user message and logs what it was given. The log never holds
 // a key: options.env is reduced to { ANTHROPIC_API_KEY: "key present" | "key absent", names: [...] }.
 // Script: PI_CRUST_CLAUDE_SCRIPT=<json array, or a .jsonl fixture>, or setScript([...]) / setFixture(file, { awaitUser: [index...] }).
+// A script entry { "__tool_call": { tool_name, tool_input, agent_id?, permission_mode? } } runs one tool call through the gate like the real SDK:
+// every PreToolUse hook first (deny blocks; "ask" goes on to canUseTool; "allow" skips it; a hook that throws blocks only when its matcher says
+// onFailure "block", else the call goes on); with no hook decision the SDK approves the Agent tool and a Read inside cwd by itself and sends
+// the rest to canUseTool. Every call is logged in the entry's `gates` as { call, hooks, viaCanUseTool, outcome }.
 // A script entry { "__await_user": true } makes the replay wait for the next user message (a second prompt after an interrupt).
 // Log: the exported `calls` (one entry per query: options, calls (strings), log (every SDK call as { fn, args }), interrupted, modes),
 // `fnCalls` (listSessions / getSessionMessages / getSessionInfo, which are module functions), and PI_CRUST_CLAUDE_SDK_LOG=<file>.
 // Answers: supportedModels, getContextUsage, supportedCommands, listSessions, getSessionMessages come from setModels(), setContextUsage(),
 // setSessions(), setSessionMessages({ id: [...] }) (defaults are small, real-shaped, normalised).
 import fs from "node:fs";
+import path from "node:path";
 
 export const calls = [];
 export const fnCalls = [];
@@ -87,6 +92,7 @@ export function describeOptions(o = {}) {
 	for (const [k, v] of Object.entries(o)) {
 		if (k === "env") out.env = { ANTHROPIC_API_KEY: v && v.ANTHROPIC_API_KEY ? "key present" : "key absent", names: Object.keys(v || {}).sort(), CLAUDE_CONFIG_DIR: v && v.CLAUDE_CONFIG_DIR, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: v && v.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB };
 		else if (typeof v === "function") out[k] = "[function]";
+		else if (k === "hooks" && v && typeof v === "object") out.hooks = Object.fromEntries(Object.entries(v).map(([ev, ms]) => [ev, (ms || []).map((m) => ({ matcher: m.matcher || null, hooks: (m.hooks || []).length, onFailure: m.onFailure || null }))]));
 		else out[k] = v;
 	}
 	return out;
@@ -118,8 +124,47 @@ function loadScript() {
 	return f.endsWith(".jsonl") ? fixtureScript(f) : JSON.parse(fs.readFileSync(f, "utf8"));
 }
 
+// The real SDK's own approvals, seen in capture-hook-gate pass A: the Agent tool and reads inside the project never reach canUseTool.
+const SDK_AUTO = (options, name, input) => {
+	if (name === "Agent" || name === "Task") return true;
+	const p = input && typeof input.file_path === "string" ? input.file_path : null;
+	const cwd = options && options.cwd;
+	return name === "Read" && !!p && !!cwd && path.resolve(cwd, p).toLowerCase().startsWith(path.resolve(cwd).toLowerCase() + path.sep);
+};
+export async function runGate(options, call) {
+	const name = call.tool_name;
+	const hookInput = { session_id: "stand-in-session", transcript_path: "", cwd: options && options.cwd, hook_event_name: "PreToolUse", tool_name: name, tool_input: call.tool_input, tool_use_id: call.tool_use_id || "toolu_stand_in", permission_mode: call.permission_mode || (options && options.permissionMode) || "default", ...(call.agent_id ? { agent_id: call.agent_id, agent_type: call.agent_type || "general-purpose" } : {}) };
+	const entry = { call, hooks: [], viaCanUseTool: false };
+	const matchers = (options && options.hooks && options.hooks.PreToolUse) || [];
+	let hookAllow = false;
+	for (const m of matchers) {
+		if (m.matcher && !new RegExp("^(?:" + m.matcher + ")$").test(name)) continue;
+		for (const h of m.hooks || []) {
+			let out;
+			try {
+				out = await h(hookInput, hookInput.tool_use_id, { signal: new AbortController().signal });
+			} catch (e) {
+				entry.hooks.push({ threw: true });
+				if (m.onFailure === "block") return { ...entry, outcome: "deny", reason: "hook failed" };
+				continue;
+			}
+			const hs = out && out.hookSpecificOutput;
+			const dec = hs && hs.permissionDecision;
+			entry.hooks.push(dec || "none");
+			if (dec === "deny") return { ...entry, outcome: "deny", reason: hs.permissionDecisionReason };
+			if (dec === "allow") hookAllow = true;
+			if (dec === "ask") entry.asked = true;
+		}
+	}
+	if (hookAllow) return { ...entry, outcome: "allow" };
+	if (!entry.asked && SDK_AUTO(options, name, call.tool_input)) return { ...entry, outcome: "allow", sdkAuto: true };
+	entry.viaCanUseTool = true;
+	const r = typeof options.canUseTool === "function" ? await options.canUseTool(name, call.tool_input, { signal: new AbortController().signal, toolUseID: hookInput.tool_use_id, ...(call.agent_id ? { agentID: call.agent_id } : {}) }) : { behavior: "deny" };
+	return { ...entry, outcome: r && r.behavior === "allow" ? "allow" : "deny", result: r };
+}
+
 export function query({ prompt, options }) {
-	const entry = { options: describeOptions(options), rawEnvHasKey: !!(options && options.env && options.env.ANTHROPIC_API_KEY), calls: [], log: [], closed: false, interrupted: 0, modes: [] };
+	const entry = { gates: [], options: describeOptions(options), rawEnvHasKey: !!(options && options.env && options.env.ANTHROPIC_API_KEY), calls: [], log: [], closed: false, interrupted: 0, modes: [] };
 	calls.push(entry);
 	logFile({ options: entry.options });
 	let stopWait = null;
@@ -141,6 +186,10 @@ export function query({ prompt, options }) {
 			if (entry.closed) return;
 			if (m && m.__await_user) {
 				if (!it || !(await nextUser())) return;
+				continue;
+			}
+			if (m && m.__tool_call) {
+				entry.gates.push(await runGate(options, m.__tool_call));
 				continue;
 			}
 			yield m;

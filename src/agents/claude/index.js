@@ -11,7 +11,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const A = require("../adapter");
 const { killTree } = require("../../kill-tree");
-const { sdkModeFor, makeCanUseTool } = require("./permissions");
+const { sdkModeFor, makeCanUseTool, makeHooks } = require("./permissions");
 const { createTranslator } = require("./translate");
 const requests = require("./requests");
 const { createHistory } = require("./history");
@@ -234,10 +234,14 @@ function createClaudeAdapter(deps = {}) {
 					cwd: opts.cwd,
 				});
 				handle.canUseTool = canUseTool;
+				// The gate sits in a PreToolUse hook (it sees every call, subagents and reads inside the project too): it denies what the rules
+				// block and sends everything else to canUseTool, the only place that allows. The mode is this chat's, never the hook input's.
+				const hooks = makeHooks({ getMode: () => handle.mode, grants: canUseTool.grants, cwd: opts.cwd });
 				const lim = opts.settings || cfg.getSettings() || {};
 				handle.limits = { budgetUsd: num(lim.claudeMaxBudgetUsd, DEFAULT_MAX_BUDGET_USD), maxTurns: Math.floor(num(lim.claudeMaxTurns, DEFAULT_MAX_TURNS)) };
 				const options = buildOptions(opts, key, {
 					canUseTool,
+					hooks,
 					// Lets stop() tree-kill the engine process (the SDK does not give us its pid otherwise).
 					spawnClaudeCodeProcess: (so) => {
 						const child = require("node:child_process").spawn(so.command, so.args, { cwd: so.cwd, env: so.env, stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal: so.signal });
