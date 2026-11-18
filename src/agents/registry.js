@@ -20,6 +20,10 @@ function createRegistry() {
 		has: (id) => adapters.has(id),
 		list: () => [...adapters.values()],
 		ids: () => [...adapters.keys()],
+		// What plugins get (ctx.agents): the lookups only, no register.
+		readOnly() {
+			return Object.freeze({ get: this.get, has: this.has, list: this.list, ids: this.ids });
+		},
 	};
 }
 

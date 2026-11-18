@@ -109,7 +109,7 @@ function send(channel, payload) {
 // The process itself (spawn, framing, readiness probe, kill) lives in agents/pi/process.js.
 const agents = require("./agents/registry").createRegistry();
 const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6
-const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: a.capabilities }); // what the renderer is told about a chat's agent
+const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: structuredClone(a.capabilities) }); // a copy: the renderer's message never aliases the adapter's object // what the renderer is told about a chat's agent
 
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
 // `wt` (from resolveWt) is null for the repo itself, { cwd, branch } for a chat in its own worktree (see worktree-main.js), or
@@ -1442,7 +1442,7 @@ function badgeIcon(count) {
 // What feature modules (src/<feature>-main.js, each exporting register(ctx)) get to work with.
 // Getters, because repo, window and browser view change over the app's life.
 const ctx = {
-	agents,
+	agents: agents.readOnly(), // lookups only: a local plugin cannot register an agent
 	get repo() {
 		return REPO;
 	},

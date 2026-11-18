@@ -82,6 +82,24 @@ test("registry: register, get, default, duplicate, invalid", () => {
 	assert.throws(() => r.register(bad), /missing function send/);
 	assert.deepStrictEqual(r.ids(), ["pi"]);
 });
+test("registry.readOnly(): lookups only, no register; agentInfo-style capability copies do not alias the adapter", () => {
+	const r = createRegistry();
+	r.register(good());
+	const v = r.readOnly();
+	assert.strictEqual(v.register, undefined);
+	assert.strictEqual(v.get().id, "pi");
+	assert.deepStrictEqual(v.ids(), ["pi"]);
+	assert.strictEqual(v.has("pi"), true);
+	assert.ok(Object.isFrozen(v));
+	assert.throws(() => { "use strict"; v.register = () => {}; }, TypeError);
+	r.register(Object.assign(good(), { id: "second" })); // the owner can still add; the view follows
+	assert.deepStrictEqual(v.ids(), ["pi", "second"]);
+});
+test("main.js hands plugins the read-only view and a copy of the capabilities", () => {
+	const main = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "main.js"), "utf8");
+	assert.match(main, /agents: agents\.readOnly\(\)/);
+	assert.match(main, /capabilities: structuredClone\(a\.capabilities\)/);
+});
 // Drift guard: the written-down contract must still match the code that consumes it.
 test("record types and ui methods are still handled by the renderer", () => {
 	const src = fs.readFileSync(path.join(__dirname, "..", "src", "renderer.js"), "utf8");
