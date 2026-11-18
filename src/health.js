@@ -125,6 +125,10 @@
 		const p = await crust.health.installPlan();
 		const planOk = p.needs.join() === "node,git,pi" && p.plan.ok && p.plan.lines.length === 3 && /Git, from the winget package Git.Git|Git, from the Homebrew formula git/.test(p.plan.text) && /Nothing else on this computer is changed./.test(p.plan.text);
 		console.error(`SELFTEST health-install plan: needs=[${p.needs}] lines=${p.plan.lines.length} -> ${planOk ? "OK" : "MISMATCH"}`);
+		await crust.health.stubSet({ pi: "missing", node: "old" }); // Git is installed
+		const noGit = await crust.health.installPlan();
+		console.error(`SELFTEST health-install git present: needs=[${noGit.needs}] steps=${noGit.plan.steps.map((s) => s.id)} gitLine=${/Git/.test(noGit.plan.text)} -> ${noGit.needs.join() === "node,pi" && !/Git/.test(noGit.plan.text) && noGit.plan.steps.length === 2 ? "OK" : "MISMATCH"}`);
+		await crust.health.stubSet({ pi: "missing", node: "old", git: "missing" });
 		const only = await crust.health.installPlan({ only: ["git"] });
 		console.error(`SELFTEST health-install only git: needs=[${only.needs}] steps=${only.plan.steps.map((s) => s.id)} -> ${only.needs.join() === "git" && only.plan.steps.length === 1 ? "OK" : "MISMATCH"}`);
 		const r = await crust.health.install({ only: ["pi", "git"] });

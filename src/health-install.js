@@ -150,7 +150,7 @@ function register(ctx) {
 	let running = false;
 	// What is missing right now, from the health check (never from the window), narrowed by `only` when given.
 	async function needsNow(only) {
-		const h = await ctx.health.check({});
+		const h = await ctx.health.check({ fresh: true }); // look again now: a tool installed meanwhile must not be listed
 		return Array.isArray(only) ? h.needs.filter((id) => only.includes(id)) : h.needs;
 	}
 	ipcMain.handle("health:installPlan", async (_e, o) => {

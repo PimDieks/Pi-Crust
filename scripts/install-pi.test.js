@@ -163,3 +163,62 @@ test("a real dry run through the runner on this machine changes nothing and repo
 	assert.equal(r.ok, true, r.error);
 	assert.equal(r.lines.filter((l) => l.startsWith("WOULD ")).length, 3);
 });
+
+// --- what is missing decides the list (the IPC handlers, with the real health logic and a stub machine) -----------------
+const L = require("../src/health-logic");
+function handlers(stub, platform = "win32") {
+	const map = {};
+	const sent = [];
+	const spawned = [];
+	const ctx = {
+		ipcMain: { handle: (name, fn) => (map[name] = fn) },
+		selftest: true,
+		env: process.env,
+		send: (ch, e) => sent.push(e),
+		health: { check: async () => L.buildHealth(L.stubFacts(stub)) },
+	};
+	H.register(ctx);
+	return { map, sent, spawned };
+}
+
+test("Git is installed: the plan has no Git line and no Git step", async () => {
+	const h = handlers({ pi: "missing", node: "missing" });
+	const r = await h.map["health:installPlan"]({}, {});
+	assert.deepEqual(r.needs, ["node", "pi"]);
+	assert.deepEqual(r.plan.steps.map((s) => s.id), ["node", "pi"]);
+	assert.ok(!/Git/.test(r.plan.text), r.plan.text);
+});
+
+test("Git is installed: the runner is asked for node and pi only (dry run)", { skip: !(HAVE_PS || HAVE_SH) && "no shell" }, async () => {
+	const h = handlers({ pi: "missing", node: "missing" });
+	const r = await h.map["health:install"]({}, {});
+	assert.equal(r.ok, true, r.error);
+	assert.equal(r.dryRun, true);
+	const would = r.lines.filter((l) => l.startsWith("WOULD "));
+	assert.equal(would.length, 2, would.join(", "));
+	assert.ok(!would.some((l) => /git/i.test(l)), would.join(", "));
+});
+
+test("Git missing too: all three are listed, in order", async () => {
+	const h = handlers({ pi: "missing", node: "missing", git: "missing" });
+	const r = await h.map["health:installPlan"]({}, {});
+	assert.deepEqual(r.plan.steps.map((s) => s.id), ["node", "git", "pi"]);
+});
+
+test("everything is installed: nothing to plan, nothing to run, and no row offers an install button", async () => {
+	const h = handlers({});
+	const r = await h.map["health:installPlan"]({}, {});
+	assert.deepEqual(r.needs, []);
+	assert.equal(r.plan.ok, false);
+	const run = await h.map["health:install"]({}, {});
+	assert.equal(run.ok, false);
+	assert.equal(run.error, "Nothing to install.");
+	const rows = L.buildHealth(L.stubFacts({})).rows;
+	assert.ok(!rows.some((x) => x.action && /^(install|update)-/.test(x.action.id)));
+});
+
+test("Pi fine, only Git missing: the Git button plans Git alone", async () => {
+	const h = handlers({ git: "missing" });
+	const r = await h.map["health:installPlan"]({}, { only: ["git"] });
+	assert.deepEqual(r.plan.steps.map((s) => s.id), ["git"]);
+});

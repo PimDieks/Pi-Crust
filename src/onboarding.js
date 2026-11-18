@@ -470,13 +470,14 @@
 		say("pi missing", matches() && d1[0].hot && d1[0].btn === "Install Pi" && d1[1].btn === null && d1[2].mark === "✓" && startBtn.disabled && d1[4].mark === "–" && /Optional/.test(d1[4].sr + rowsEl.children[4].textContent), `${d1.map((r) => r.id + ":" + r.mark + ":" + (r.btn || "-")).join(" ")}`);
 		await shot("2-pi-missing");
 		// --- install: the confirm lists exactly what main will install, Cancel changes nothing, Install runs the (dry-run) script ---
-		await setState({ pi: "missing", node: "missing", git: "missing" });
+		// Git is installed (the common case): the confirm lists Node.js and Pi, no Git line, and the runner is asked for those only
+		await setState({ pi: "missing", node: "missing" });
 		calls.length = 0;
 		rowsEl.querySelector('[data-action="install-pi"]').click();
 		await waitFor(() => dialogOpen);
 		const msg = $("#modal p")?.textContent || "";
 		const plan = calls.find((c) => c.name === "installPlan")?.result;
-		say("install confirm", dialogOpen && plan?.ok && plan.lines.length === 3 && plan.lines.every((l) => msg.includes(l)) && /^Pi Crust will install:/.test(msg) && /Nothing else on this computer is changed\./.test(msg) && /Pi, the coding agent, from the npm package @earendil-works\/pi-coding-agent/.test(msg) && !install, `lines=${plan?.lines.length} title="${$("#modal h2")?.textContent}"`);
+		say("install confirm", dialogOpen && plan?.ok && plan.lines.length === 2 && plan.needs.join() === "node,pi" && plan.lines.every((l) => msg.includes(l)) && !/Git/.test(msg) && /^Pi Crust will install:/.test(msg) && /Nothing else on this computer is changed\./.test(msg) && /Pi, the coding agent, from the npm package @earendil-works\/pi-coding-agent/.test(msg) && !install, `lines=${plan?.lines.length} needs=[${plan?.needs}] git=${/Git/.test(msg)} title="${$("#modal h2")?.textContent}"`);
 		await shot("3-install-confirm");
 		$("#modal .modal-actions .secondary").click(); // Cancel
 		await wait(200);
@@ -487,7 +488,8 @@
 		await waitFor(() => calls.some((c) => c.name === "install"), 30000);
 		const inst = calls.find((c) => c.name === "install")?.result;
 		const would = install?.steps.filter((s) => s.text.startsWith("Would run:")).length;
-		say("install dry run", inst?.ok && inst.dryRun && would === 3 && install.steps.at(-1).text === "Test run: nothing was installed." && !install.running && health.rows[0].state === "todo" && !!rowsEl.querySelector(".ob-progress"), `would=${would} piStillMissing=${health.rows[0].state === "todo"}`);
+		say("install dry run", inst?.ok && inst.dryRun && would === 2 && !install.steps.some((x) => /git/i.test(x.text)) && install.steps.at(-1).text === "Test run: nothing was installed." && !install.running && health.rows[0].state === "todo" && !!rowsEl.querySelector(".ob-progress"), `would=${would} piStillMissing=${health.rows[0].state === "todo"}`);
+		await setState({ pi: "missing", node: "missing", git: "missing" }); // the progress states below show a Git row with its own button
 		// progress, as it looks while the script runs (the events are fed in by hand; the real stream is covered by the health-install step)
 		_setInstall({ row: "pi", running: true, steps: [{ id: "node", text: "Installing Node.js (current LTS)", state: "done" }, { id: "git", text: "Installing Git", state: "run" }], error: "", manual: [], details: "" });
 		const prog = rowsEl.querySelector(".ob-progress");
@@ -502,6 +504,18 @@
 		say("install failed", !!rowsEl.querySelector(".ob-progress .ob-manual li") && [...rowsEl.querySelectorAll(".ob-progress .ob-link")].some((b) => b.textContent === "Copy details") && !!rowsEl.querySelector('[data-action="install-pi"]'), "manual steps, Copy details and the button to try again");
 		await shot("4b-install-failed");
 		_setInstall(null);
+		// Git missing too: the same button lists all three, Cancel changes nothing
+		await setState({ pi: "missing", node: "missing", git: "missing" });
+		calls.length = 0;
+		rowsEl.querySelector('[data-action="install-pi"]').click();
+		await waitFor(() => dialogOpen);
+		const plan3 = calls.find((c) => c.name === "installPlan")?.result;
+		say("install confirm with Git missing", plan3?.ok && plan3.needs.join() === "node,git,pi" && /Git, from/.test($("#modal p")?.textContent || ""), `lines=${plan3?.lines.length}`);
+		$("#modal .modal-actions .secondary").click();
+		await wait(200);
+		// everything installed: no install or update button on any row
+		await setState({});
+		say("nothing missing, no install button", !rowsEl.querySelector('[data-action="install-pi"], [data-action="update-pi"], [data-action="install-git"]') && health.needs.length === 0, `buttons=${[...rowsEl.querySelectorAll("[data-action]")].map((b) => b.dataset.action)}`);
 
 		// signed out, no project, everything required done, each in turn
 		await setState({ auth: "none" });
