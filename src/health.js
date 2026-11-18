@@ -128,6 +128,7 @@
 		const only = await crust.health.installPlan({ only: ["git"] });
 		console.error(`SELFTEST health-install only git: needs=[${only.needs}] steps=${only.plan.steps.map((s) => s.id)} -> ${only.needs.join() === "git" && only.plan.steps.length === 1 ? "OK" : "MISMATCH"}`);
 		const r = await crust.health.install({ only: ["pi", "git"] });
+		await new Promise((res) => setTimeout(res, 400)); // progress events and the result travel on different channels: let the last events land
 		const would = (r.lines || []).filter((l) => l.startsWith("WOULD ")).length;
 		const stillMissing = r.health.rows[0].state === "todo"; // a dry run installed nothing, so Pi is still missing
 		console.error(`SELFTEST health-install dry run: ok=${r.ok} dryRun=${r.dryRun} would=${would} events=[${events.join(" ")}] piStillMissing=${stillMissing} -> ${r.ok && r.dryRun && would === 2 && stillMissing && events[0] === "start" && events.at(-1) === "end" ? "OK" : "MISMATCH"}`);

@@ -206,12 +206,131 @@
 	}
 
 	// --- row buttons ---------------------------------------------------------------------------
+	// Every call a button makes is recorded with its answer; the self-test reads these records, not a log line.
+	const calls = [];
+	const record = (name, args, result) => (calls.push({ name, args, result }), result);
+	const back = (button) => button?.isConnected && button.focus(); // after a dialog the app puts focus in the message box: bring it back
+
+	// Install: the list of what will be installed and from where (from main, never from this window), a confirm, progress, a re-check.
+	function applyProgress(e) {
+		if (!install?.running) return;
+		const steps = install.steps;
+		if (e.kind === "step") steps.push({ id: e.id, text: `Installing ${e.text}`, state: "run" });
+		else if (e.kind === "done") steps.filter((s) => s.id === e.id && s.state === "run").forEach((s) => (s.state = "done"));
+		else if (e.kind === "fail") steps.filter((s) => s.id === e.id && s.state === "run").forEach((s) => ((s.state = "fail"), (s.text = `${s.text}: ${e.text}`)));
+		else if (e.kind === "would") steps.push({ id: e.id, text: `Would run: ${e.text}`, state: "done" });
+		else return;
+		const last = steps.at(-1);
+		if (last) announce(last.text);
+		render();
+	}
+	crust.health.onInstallProgress(applyProgress);
+
+	async function doInstall(row, button) {
+		const only = row.action.id === "install-git" ? ["git"] : undefined;
+		const arg = only ? { only } : {};
+		const p = await crust.health.installPlan(arg);
+		record("installPlan", arg, { ok: p.plan.ok, needs: p.needs, lines: p.plan.lines });
+		if (!p.plan.ok) {
+			install = { row: row.id, running: false, steps: [], error: p.plan.error === "Nothing to install." ? "Nothing is missing. Choose Check again." : p.plan.error, manual: p.plan.manual || [], details: "" };
+			render();
+			return back(button);
+		}
+		const answer = await showDialog({ method: "confirm", title: "Install what's missing?", message: p.plan.text, yesLabel: "Install", noLabel: "Cancel" });
+		if (!answer.confirmed) return back(button);
+		install = { row: row.id, running: true, steps: [], error: "", manual: [], details: "" };
+		render();
+		announce("Installing. This can take a few minutes.");
+		const r = await crust.health.install(arg);
+		record("install", arg, { ok: r.ok, dryRun: !!r.dryRun, lines: (r.lines || []).length });
+		if (!install) install = { row: row.id, steps: [], manual: [], details: "" };
+		install.running = false;
+		if (r.health) {
+			health = r.health;
+			lastAt = Date.now();
+		}
+		if (r.ok) {
+			if (r.dryRun) {
+				install.steps = (r.lines || []).filter((l) => l.startsWith("WOULD ")).map((l) => ({ id: l.slice(6).split(":")[0], text: `Would run: ${l.slice(6).split(": ").slice(1).join(": ")}`, state: "done" }));
+				install.steps.push({ id: "dry", text: "Test run: nothing was installed.", state: "done" });
+			}
+			else install = null; // the row now says what is installed
+			announce(health?.ready ? "Installed. Everything needed is set up." : `Installed. Setup: ${counts()} done.`);
+		} else {
+			install.error = r.error || "The install did not finish.";
+			install.manual = r.manual || [];
+			install.details = r.details || "";
+			announce(`The install stopped. ${install.error}`);
+		}
+		render();
+		if (opened && !root.contains(document.activeElement)) focusFirst();
+	}
+
+	// Sign in: the provider list in the model panel, above this view. Back from the browser (window focus) or when the panel is
+	// closed, the check runs again.
+	let panelWatch = null;
+	function signIn() {
+		record("openContextPanel", { focusSubs: true }, null);
+		openContextPanel({ focusSubs: true });
+		panelWatch ||= new MutationObserver(() => {
+			if (document.querySelector("#ctx-panel")) return;
+			panelWatch.disconnect();
+			panelWatch = null;
+			if (opened) refresh({ fresh: true }).then(() => !root.contains(document.activeElement) && focusFirst());
+		});
+		panelWatch.observe(document.body, { childList: true });
+	}
+
+	// Choose folder: the existing picker, above this view. The repo-changed event checks again.
+	function chooseFolder() {
+		record("openRepoPicker", { cancellable: true }, null);
+		openRepoPicker({ cancellable: true });
+	}
+
+	// Make it a Git project: a confirm that names the folder, then `git init` and nothing else.
+	async function makeGitProject(row, button) {
+		const repo = health?.facts?.project?.repo || info.repo;
+		const answer = await showDialog({
+			method: "confirm",
+			title: "Make this a Git project?",
+			message: `Pi Crust will run "git init" in:\n${repo}\n\nNothing is added or committed. Your files stay as they are.`,
+			yesLabel: "Make it a Git project",
+			noLabel: "Cancel",
+		});
+		if (!answer.confirmed) return back(button);
+		const r = record("initGit", {}, await crust.repos.initGit());
+		if (!r.ok) toast(r.error || "Couldn't make this a Git project", "error");
+		else {
+			refreshTree();
+			loadChanges();
+		}
+		await refresh({ fresh: true });
+		if (opened && !root.contains(document.activeElement)) focusFirst();
+	}
+
+	// Figma: out of this view, into the Design tab's Figma panel (it checks by itself when it opens).
+	async function setupFigma() {
+		record("openFigmaPanel", {}, null);
+		if (!onb.skippedAt && !onb.doneAt) await mark("skippedAt");
+		close({ restore: false });
+		switchTab("design");
+		window.crustFigma?.openPanel();
+		$("#figma-pill")?.focus();
+	}
+
 	const ACTIONS = {
 		recheck: () => refresh({ fresh: true, figma: true }),
+		"install-pi": doInstall,
+		"update-pi": doInstall,
+		"install-git": doInstall,
+		"sign-in": signIn,
+		"choose-folder": chooseFolder,
+		"init-git": makeGitProject,
+		"setup-figma": setupFigma,
 	};
 	function runAction(row, button) {
 		const fn = ACTIONS[row.action.id];
-		if (fn) return fn(row, button);
+		return fn ? fn(row, button) : null;
 	}
 
 	// --- events --------------------------------------------------------------------------------
@@ -277,6 +396,7 @@
 		_render: render,
 		_paintPill: paintPill,
 		_setOnb: (v) => (onb = v),
+		calls,
 	};
 	window.addEventListener("crust:onboarding-changed", async () => {
 		onb = (await crust.health.onboarding()) || {};
@@ -304,6 +424,10 @@
 			}
 		};
 		const dom = () => [...rowsEl.querySelectorAll(".ob-row")].map((li) => ({ id: li.dataset.id, cls: li.className, mark: li.querySelector(".ob-mark").textContent, sr: li.querySelector(".fp-sr").textContent, line: li.querySelector(".ob-line").textContent, btn: li.querySelector(".btn")?.textContent || null, hot: !!li.querySelector(".btn:not(.secondary)") }));
+		const waitFor = async (fn, ms = 4000) => {
+			for (let t = 0; t < ms && !fn(); t += 50) await wait(50);
+		};
+		const _setInstall = (v) => ((install = v), render());
 		const setState = async (stub) => {
 			await crust.health.stubSet(stub);
 			await refresh({ fresh: true, figma: true });
@@ -335,16 +459,88 @@
 		const d1 = dom();
 		say("pi missing", matches() && d1[0].hot && d1[0].btn === "Install Pi" && d1[1].btn === null && d1[2].mark === "✓" && startBtn.disabled && d1[4].mark === "–" && /Optional/.test(d1[4].sr + rowsEl.children[4].textContent), `${d1.map((r) => r.id + ":" + r.mark + ":" + (r.btn || "-")).join(" ")}`);
 		await shot("2-pi-missing");
+		// --- install: the confirm lists exactly what main will install, Cancel changes nothing, Install runs the (dry-run) script ---
+		await setState({ pi: "missing", node: "missing", git: "missing" });
+		calls.length = 0;
+		rowsEl.querySelector('[data-action="install-pi"]').click();
+		await waitFor(() => dialogOpen);
+		const msg = $("#modal p")?.textContent || "";
+		const plan = calls.find((c) => c.name === "installPlan")?.result;
+		say("install confirm", dialogOpen && plan?.ok && plan.lines.length === 3 && plan.lines.every((l) => msg.includes(l)) && /^Pi Crust will install:/.test(msg) && /Nothing else on this computer is changed\./.test(msg) && /Pi, the coding agent, from the npm package @earendil-works\/pi-coding-agent/.test(msg) && !install, `lines=${plan?.lines.length} title="${$("#modal h2")?.textContent}"`);
+		await shot("3-install-confirm");
+		$("#modal .modal-actions .secondary").click(); // Cancel
+		await wait(200);
+		say("install cancel", !dialogOpen && !install && !calls.some((c) => c.name === "install") && document.activeElement?.dataset.action === "install-pi", `focus="${document.activeElement?.textContent}"`);
+		rowsEl.querySelector('[data-action="install-pi"]').click();
+		await waitFor(() => dialogOpen);
+		$("#modal .modal-actions button:last-child").click(); // Install
+		await waitFor(() => calls.some((c) => c.name === "install"), 30000);
+		const inst = calls.find((c) => c.name === "install")?.result;
+		const would = install?.steps.filter((s) => s.text.startsWith("Would run:")).length;
+		say("install dry run", inst?.ok && inst.dryRun && would === 3 && install.steps.at(-1).text === "Test run: nothing was installed." && !install.running && health.rows[0].state === "todo" && !!rowsEl.querySelector(".ob-progress"), `would=${would} piStillMissing=${health.rows[0].state === "todo"}`);
+		// progress, as it looks while the script runs (the events are fed in by hand; the real stream is covered by the health-install step)
+		_setInstall({ row: "pi", running: true, steps: [{ id: "node", text: "Installing Node.js (current LTS)", state: "done" }, { id: "git", text: "Installing Git", state: "run" }], error: "", manual: [], details: "" });
+		const prog = rowsEl.querySelector(".ob-progress");
+		const gitBtn = rowsEl.querySelector('[data-action="install-git"]');
+		const before = calls.length;
+		gitBtn?.click();
+		await wait(300);
+		say("install progress", prog?.getAttribute("role") === "status" && prog.getAttribute("aria-live") === "polite" && !!prog.querySelector(".ob-bar") && !rowsEl.querySelector('.ob-row[data-id="pi"] .btn') && gitBtn?.getAttribute("aria-disabled") === "true" && !dialogOpen && calls.length === before, `steps=${prog?.querySelectorAll(".ob-step").length} otherButtonsDisabled=${gitBtn?.getAttribute("aria-disabled")}`);
+		await shot("4-install-progress");
+		applyProgress({ kind: "done", id: "git" });
+		_setInstall({ row: "pi", running: false, steps: [{ id: "node", text: "Installing Node.js (current LTS)", state: "done" }, { id: "pi", text: "Installing Pi, the coding agent: exit 1", state: "fail" }], error: "The installer stopped (exit code 1).", manual: ["Open a new terminal and run: npm install -g @earendil-works/pi-coding-agent", "Then come back to Pi Crust and choose Check again."], details: "details" });
+		say("install failed", !!rowsEl.querySelector(".ob-progress .ob-manual li") && [...rowsEl.querySelectorAll(".ob-progress .ob-link")].some((b) => b.textContent === "Copy details") && !!rowsEl.querySelector('[data-action="install-pi"]'), "manual steps, Copy details and the button to try again");
+		await shot("4b-install-failed");
+		_setInstall(null);
 
 		// signed out, no project, everything required done, each in turn
 		await setState({ auth: "none" });
 		say("signed out", matches() && dom()[1].hot && dom()[1].btn === "Sign in" && !dom()[0].hot && startBtn.disabled);
 		await shot("5-signed-out");
+		// sign in: the model panel opens above this view; closing it checks again (the stub flips to "signed in" meanwhile)
+		calls.length = 0;
+		rowsEl.querySelector('[data-action="sign-in"]').click();
+		await wait(400);
+		say("sign in button", calls.some((c) => c.name === "openContextPanel" && c.args.focusSubs === true) && !!$("#ctx-panel") && opened && Number(getComputedStyle($("#ctx-panel")).zIndex) > Number(getComputedStyle(root).zIndex), `panel=${!!$("#ctx-panel")} z=${getComputedStyle($("#ctx-panel")).zIndex}>${getComputedStyle(root).zIndex}`);
+		await crust.health.stubSet({});
+		closeContextPanel();
+		await waitFor(() => health.rows[1].state === "ready", 4000);
+		say("sign in checks again", health.rows[1].state === "ready" && health.rows[1].line === "Signed in to Claude." && !$("#ctx-panel") && rowsEl.querySelector('.ob-row[data-id="auth"]').classList.contains("ready"), `auth="${health.rows[1].line}"`);
+		await setState({ auth: "none" });
 		await setState({ project: "none" });
 		say("no project", matches() && dom()[3].hot && dom()[3].btn === "Choose folder" && startBtn.disabled);
 		await shot("6-no-project");
+		// choose folder: the existing picker opens above this view (and Escape closes only the picker)
+		const seenPicker = [];
+		const realPicker = window.openRepoPicker;
+		window.openRepoPicker = (...a) => (seenPicker.push(a), realPicker(...a));
+		calls.length = 0;
+		rowsEl.querySelector('[data-action="choose-folder"]').click();
+		await wait(500);
+		const pk = $("#repo-picker");
+		say("choose folder", seenPicker.length === 1 && seenPicker[0][0]?.cancellable === true && !pk.hidden && opened && Number(getComputedStyle(pk).zIndex) > Number(getComputedStyle(root).zIndex), `picker.hidden=${pk.hidden} calls=${seenPicker.length}`);
+		$("#picker-filter").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+		await wait(400);
+		window.openRepoPicker = realPicker;
+		say("escape closes the picker only", pk.hidden && opened && !root.hidden);
 		await setState({ project: "notgit" });
 		say("not a git project", matches() && dom()[3].hot && dom()[3].btn === "Make it a Git project");
+		// make it a Git project: the confirm names the folder; Cancel runs nothing; Yes asks main (a selftest runs no git at all)
+		calls.length = 0;
+		rowsEl.querySelector('[data-action="init-git"]').click();
+		await waitFor(() => dialogOpen);
+		const gmsg = $("#modal p")?.textContent || "";
+		say("git init confirm", dialogOpen && $("#modal h2").textContent === "Make this a Git project?" && gmsg.includes('"git init" in:\n/stub/notes') && /Nothing is added or committed\./.test(gmsg), `"${gmsg.replace(/\n/g, " / ")}"`);
+		await shot("9-git-init-confirm");
+		$("#modal .modal-actions .secondary").click();
+		await wait(200);
+		say("git init cancel", !dialogOpen && !calls.some((c) => c.name === "initGit") && document.activeElement?.dataset.action === "init-git");
+		rowsEl.querySelector('[data-action="init-git"]').click();
+		await waitFor(() => dialogOpen);
+		$("#modal .modal-actions button:last-child").click();
+		await waitFor(() => calls.some((c) => c.name === "initGit"), 8000);
+		const gi = calls.find((c) => c.name === "initGit")?.result;
+		say("git init asks main", gi?.ok === true && gi.selftest === true, JSON.stringify(gi));
 		await setState({ pi: "unknown" });
 		say("cant tell", matches() && dom()[0].mark === "–" && dom()[0].sr.startsWith("Can't tell") && dom()[0].btn === "Check again" && dom()[0].hot);
 		focusPending = false;
@@ -375,6 +571,14 @@
 		// the pill follows the health, and a failed state shows no stale "all ready"
 		await setState({ pi: "missing", node: "missing" });
 		say("pill returns", !pill.hidden && pill.textContent === "Setup: 2 of 4");
+		// Figma: closes the view, opens the Design tab's Figma panel and puts focus on its pill
+		await crust.health.stubSet({ figma: "not_reachable" });
+		await open("test");
+		await refresh({ fresh: true, figma: true });
+		rowsEl.querySelector('[data-action="setup-figma"]').click();
+		await waitFor(() => !!window.crustFigma?.state().open, 6000);
+		say("figma", !opened && root.hidden && activeTab === "design" && window.crustFigma.state().open && document.activeElement === $("#figma-pill") && !!(await crust.health.onboarding()).skippedAt, `tab=${activeTab} panelOpen=${window.crustFigma?.state().open} focus="${document.activeElement?.id}"`);
+		switchTab("browser");
 		await crust.health.stubSet({});
 		await refresh({ fresh: true });
 		await crust.health.onboardingSet("skippedAt", null);

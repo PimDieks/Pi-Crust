@@ -144,7 +144,7 @@ function createHealth(d) {
 	return { detectPi, detectNode, detectGit, detectProject, detectDevServer, facts, check: async (o = {}) => L.buildHealth(await facts(o), { home }) };
 }
 
-const ONBOARDING_KEYS = ["doneAt", "skippedAt", "firstTaskDoneAt"];
+const ONBOARDING_KEYS = ["doneAt", "skippedAt", "firstTaskDoneAt", "firstTaskHiddenAt"];
 
 function register(ctx) {
 	const { ipcMain } = ctx;
@@ -200,4 +200,4 @@ function register(ctx) {
 	return health;
 }
 
-module.exports = { register, createHealth, defaultExec, usualDirs, ONBOARDING_KEYS };
+module.exports = { register, createHealth, defaultExec, usualDirs, withDirs, ONBOARDING_KEYS };

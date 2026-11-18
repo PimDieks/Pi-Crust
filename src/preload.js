@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("crust", {
 		open: (p) => ipcRenderer.invoke("repos:open", p),
 		onChanged: on("repo:changed"),
 		uiReady: () => ipcRenderer.invoke("ui:ready"),
+		initGit: () => ipcRenderer.invoke("repos:initGit"), // `git init` in the open folder (after the welcome view's confirm)
 	},
 	pi: {
 		send: (chatId, record) => ipcRenderer.invoke("pi:send", chatId, record),
