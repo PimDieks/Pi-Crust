@@ -313,3 +313,12 @@ test("S5: the phone selector has no 'trusted' fallback either", () => {
 	assert.ok(!/MODE_IDS\.includes\(c\?\.mode\) \? c\.mode : "trusted"/.test(app), "fallback to trusted");
 	assert.match(app, /not (active|enforced)/i);
 });
+
+// --- S4 / S7: documented limits -------------------------------------------------------------------
+test("S7: the README says the modes are a safety net, not a sandbox, and names the grant limit", () => {
+	const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+	assert.match(readme, /not a sandbox/);
+	assert.match(readme, /Allow for this chat[\s\S]{0,400}what it runs can change after you approved it/);
+	assert.match(readme, /does \*\*not\*\* protect against/);
+	assert.ok(!readme.includes("see `~/.pi/agent/extensions/permission-modes.ts`"), "the old pointer to a missing file");
+});

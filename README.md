@@ -93,10 +93,34 @@ Then open http://localhost:6080/. Logins, full screen, clipboard and reaching se
 
 | Control | What it does |
 |---|---|
-| Permission mode | Plan (read-only), Ask before edits, Ask before commands, Trusted. Shared with Pi in the terminal (`/mode`, see `~/.pi/agent/extensions/permission-modes.ts`). |
+| Permission mode | Plan (read-only), Ask before edits, Ask before commands, Trusted. See **Permission modes** below. |
 | Thinking level | The select next to it (also `/thinking`). |
 | `@` mentions | Type `@` for files and folders; Tab / Enter inserts `` `path` ``. |
 | Voice input | Mic button or ⌘⇧Space records; press again to stop, Esc cancels. Transcribed **locally** with [whisper.cpp](https://github.com/ggerganov/whisper.cpp) and put in the input, never sent by itself. See [SETUP.md](SETUP.md#optional). On Windows it uses `whisper-cli.exe`. |
+
+**Permission modes.** Pi Crust ships its own extension (`src/pi-extension/permission-modes.ts`) that puts a check in front of every tool call. A fresh install starts in **Ask before commands**; a chat resumes in the mode it had, and a new chat starts in the last mode you chose. In a terminal Pi, load the same file with `pi -e <path>` and use `/mode`.
+
+| Mode | Reads and read-only commands | Edits inside the project | Edits outside it, other commands, subagents, MCP and unknown tools |
+|---|---|---|---|
+| **Plan (read-only)** | allowed | blocked | blocked |
+| **Ask before edits** | allowed | asks | asks |
+| **Ask before commands** | allowed | allowed | asks |
+| **Trusted** | allowed | allowed | allowed (nothing is checked) |
+
+- **Always asks** (in both Ask modes; Plan blocks them): anything under `.git/`, `.gitattributes`, `.gitmodules`, a `HEAD` file in the project root, anything under `.pi/`, Pi's own folder (`~/.pi/agent`) and dotfiles directly in your home folder. These files decide what git or Pi runs. They only offer "Allow once" and "Deny".
+- **Read-only commands** are a short list (`git status/diff/log/show`, `ls`, `cat`, `rg`, `find` without `-delete`/`-exec`, and a few more) with no pipes, redirects, chains, wildcards (`*`, `?`, `[`) or network paths. Anything else counts as a command.
+- **Answers:** "Allow once", "Allow for this chat" and "Deny". "Allow for this chat" covers every edit inside the project (never the always-ask files), the exact same command line, or the exact same outside path. A mode change cancels open questions as denied and forgets these grants. No answer, Cancel, Esc or an error means denied. If a command or path is too long to show in full, it is blocked instead of asked.
+- **Project folder = your home folder or a drive root:** nothing counts as "inside the project", so every edit asks.
+- **The selector only shows what is enforced.** If the extension did not load (an old Pi, an error), the selector is disabled and says "Not enforced", also on the phone.
+- **An older copy** of `permission-modes.ts` in `~/.pi/agent/extensions` loads next to the bundled one and asks as well. Pi Crust tells you once; remove or rename the old copy. The app switches modes with `/crust-mode`, so two `/mode` commands cannot confuse it.
+
+What the modes do **not** protect against. They are a safety net in front of tools, **not a sandbox**:
+- A command you approve (or approved "for this chat") can do anything you can, including changing files, other programs it starts, and the network. "Allow for this chat" on `npm test`, `make` or `python x.py` stays valid while edits to the project files that command runs are free in Ask before commands, so what it runs can change after you approved it.
+- Subagents, commands you run yourself in the Terminal tab or through the app, and anything an approved command starts are not checked.
+- MCP servers and unknown tools are asked as a whole; a server's own "read-only" label is not trusted.
+- An extension loaded after this one can still block a call, but it cannot change the input of a call that was already approved (the input is frozen). Tools that read files can still read secrets, also in Plan.
+- Race conditions (a link created between the check and the write) and a Windows junction made by an approved command are not caught.
+- Trusted checks nothing.
 
 **Model & usage.** The pill at the top of the chat shows the model, how full the context is (**Ctx**) and the Copilot premium requests left. Click it (or `/model`) to switch models and see:
 - the context split into messages, system tools, skills, system prompt, memory files (AGENTS.md / CLAUDE.md), autocompact buffer, free space and deferred tools;

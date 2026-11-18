@@ -105,6 +105,8 @@ Using the installer from the [Releases page](https://github.com/PimDieks/Pi-Crus
 npm i -g @earendil-works/pi-coding-agent@1.4.0 --allow-scripts=koffi,protobufjs,@google/genai
 ```
 
+  Pi Crust adds its own permission modes (Plan, Ask before edits, Ask before commands, Trusted) through an extension it loads itself: nothing to install. If you still have an older `permission-modes.ts` in `~/.pi/agent/extensions`, remove or rename it, or you get two sets of questions.
+
   Then start `pi` once and type `/login` inside it. If PowerShell's execution policy blocks `pi.ps1`, start it with `pi.cmd` instead.
 
 ### Install
