@@ -430,7 +430,9 @@ test("H2: hooks folder, include files (active or not) and paths named by config 
 		assert.equal(x.action, "ask", p);
 		assert.deepEqual(x.prompt.options, ["Allow once", "Deny"], p);
 	}
-	for (const p of ["tools/other.js", "scripts/other.sh", "src/a.ts", "conf/readme.md"]) assert.equal(at(p).action, "allow", p);
+	for (const p of ["src/a.ts", "conf/readme.md", "docs/notes.md"]) assert.equal(at(p).action, "allow", p);
+	// the folder of a script that a command key runs is protected as well (round 4: a file the script loads from its own folder)
+	for (const p of ["tools/other.js", "scripts/other.sh", "build/lib.js"]) assert.equal(at(p).action, "ask", p);
 });
 test("H2: git's settings that can't be read fail closed: every edit asks, git is not auto-allowed", () => {
 	const protect = { ok: false, files: [], dirs: [] };
@@ -625,4 +627,360 @@ test("Usability: a long read-only command is never auto-allowed", () => {
 	const r = d("ask-commands", "bash", { command: c });
 	assert.equal(r.action, "ask");
 	assert.deepEqual(r.prompt.options, ["Allow once", "Deny"]);
+});
+
+// =====================================================================================================
+// Round 4 (third review's findings R1-R4, the reader's misses, hidden characters). Each fails on the code before it.
+// =====================================================================================================
+const PS = WIN ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : null;
+const hasPS = !!PS && fs.existsSync(PS);
+const NBSP = "\u00a0";
+
+// --- R1: outside bash, a command is read-only only if it is printable ASCII ---------------------------------------
+const R1_PROOF = "git log -1 --format=%x23%x21/bin/sh%necho%x20pwned%x20%x3e%x20PWNED-precommit.txt" + NBSP + "--output=.git/hooks/pre-commit";
+test("R1: the review's proof input is blocked in Plan under PowerShell (and asks elsewhere), never allowed", () => {
+	assert.equal(L.decide({ mode: "plan", toolName: "powershell", input: { command: R1_PROOF }, cwd: proj }).action, "block");
+	assert.equal(L.decide({ mode: "plan", toolName: "powershell", input: { command: R1_PROOF }, cwd: proj, shell: "bash" }).action, "block", "the powershell tool is never bash");
+	for (const mode of ["ask-edits", "ask-commands"]) assert.equal(L.decide({ mode, toolName: "powershell", input: { command: R1_PROOF }, cwd: proj }).action, "ask", mode);
+	assert.equal(L.isReadOnlyCommand(R1_PROOF, "powershell"), false);
+	assert.equal(L.isReadOnlyCommand(R1_PROOF), false, "unknown shell");
+	assert.equal(L.isReadOnlyCommand(R1_PROOF, "cmd"), false);
+});
+test("R1: Unicode spaces and curly quotes anywhere in a non-bash command make it not read-only", () => {
+	const bad = ["git log --grep=a" + NBSP + "--output=README.md", "git log --grep=a\u2003--output=README.md", "git log --grep=a\u2009--output=README.md", "git log --grep=a\u0085--output=README.md", "git log --grep=a\u2028--output=README.md", 'git log "--grep=a\u201d --output=README.md \u201cx"', "git log '--grep=a\u2019 --output=README.md \u2018x'", "ls caf\u00e9", "cat a\u3000b", "git status" + NBSP, NBSP + "git status", "ls\u0000", "ls\v"];
+	for (const c of bad) {
+		for (const sh of ["powershell", "unknown", undefined, "cmd", "wsl"]) assert.equal(L.isReadOnlyCommand(c, sh), false, JSON.stringify(c) + " " + sh);
+		assert.equal(L.decide({ mode: "plan", toolName: "powershell", input: { command: c }, cwd: proj }).action, "block", JSON.stringify(c));
+	}
+});
+test("R1: plain printable ASCII commands still work in PowerShell and the unknown shell (spaces around are trimmed)", () => {
+	for (const c of ["git status", "git diff HEAD -- src/a.js", "ls src", "  cat package.json  ", "git log -5 --oneline\n", "Get-ChildItem src", "rg TODO src"]) {
+		assert.equal(L.isReadOnlyCommand(c, "powershell"), true, JSON.stringify(c));
+		assert.equal(L.isReadOnlyCommand(c, "unknown"), true, JSON.stringify(c));
+	}
+	assert.equal(L.decide({ mode: "plan", toolName: "powershell", input: { command: "git status" }, cwd: proj }).action, "allow");
+});
+test("R1: real PowerShell: the proof input really splits at the no-break space and truncates a file (why the rule is needed)", { skip: !hasPS }, () => {
+	const r = repo("r1ps");
+	fs.writeFileSync(path.join(r, "README.md"), "hello\n");
+	spawnSync(PS, ["-NoProfile", "-NonInteractive", "-Command", "git log --grep=a" + NBSP + "--output=README.md"], { cwd: r, windowsHide: true });
+	assert.equal(fs.statSync(path.join(r, "README.md")).size, 0, "PowerShell passed --output=README.md as its own argument");
+});
+test("R1: a WSL bash.exe and a Windows with no known Git Bash count as an unknown shell", async () => {
+	assert.equal(typeof L.bashShellKind, "function");
+	const k = (o) => L.bashShellKind({ platform: "win32", env: { ProgramFiles: "C:\\Program Files" }, exists: () => true, ...o });
+	assert.equal(k({ shellPaths: [] }), "bash", "Git Bash from Program Files");
+	assert.equal(k({ shellPaths: [], exists: () => false }), "unknown", "no Git Bash: some bash.exe on PATH, maybe WSL");
+	assert.equal(k({ shellPaths: ["C:\\Windows\\System32\\bash.exe"] }), "unknown");
+	assert.equal(k({ shellPaths: ["c:\\windows\\sysnative\\bash.exe"] }), "unknown");
+	assert.equal(k({ shellPaths: ["C:/Users/x/AppData/Local/Microsoft/WindowsApps/bash.exe"] }), "unknown");
+	assert.equal(k({ shellPaths: ["C:\\Program Files\\Git\\bin\\bash.exe"] }), "bash");
+	assert.equal(k({ shellPaths: ["C:\\msys64\\usr\\bin\\bash.exe"] }), "bash");
+	assert.equal(k({ shellPaths: ["C:\\Windows\\System32\\cmd.exe"] }), "unknown");
+	assert.equal(k({ shellPaths: [undefined, 5] }), "unknown");
+	assert.equal(L.bashShellKind({ platform: "linux", shellPaths: [] }), "bash");
+	assert.equal(L.bashShellKind({ platform: "linux", shellPaths: ["/usr/bin/zsh"] }), "unknown");
+	// wired into the extension: a WSL shellPath in Pi's settings gives the strict rules (a quoted pattern asks)
+	const settings = path.join(agentDir, "settings.json");
+	fs.mkdirSync(agentDir, { recursive: true });
+	try {
+		const { handlers: h, mk } = await load();
+		let asked = 0;
+		const ctx = mk(async () => (asked++, "Deny"));
+		fs.writeFileSync(settings, JSON.stringify({ shellPath: "C:\\Windows\\System32\\bash.exe" }));
+		await h.session_start({}, ctx);
+		const r = await h.tool_call({ toolName: "bash", input: { command: 'find . -name "*.ts"' } }, ctx);
+		assert.equal(asked, 1, "a WSL bash is unknown: asks");
+		assert.ok(r && r.block);
+		const nb = await h.tool_call({ toolName: "bash", input: { command: "git log --grep=a" + NBSP + "--output=README.md" } }, ctx);
+		assert.equal(asked, 2, "and a no-break space asks there too");
+		assert.ok(nb && nb.block);
+	} finally {
+		fs.rmSync(settings, { force: true });
+	}
+});
+
+// --- R2: the hooks override can't be created by a free edit; DOS device names are protected ------------------------
+const isAbsoluteHooks = (p) => /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(p);
+test("R2: core.hooksPath is an absolute path in every shell (a relative NUL is a folder a free edit can create)", () => {
+	assert.ok(isAbsoluteHooks(H.NO_HOOKS), H.NO_HOOKS);
+	assert.ok(H.hardenGitArgs(["status"]).includes("core.hooksPath=" + H.NO_HOOKS));
+	assert.ok(H.hardenGitCommand("git status").includes("core.hooksPath=" + H.NO_HOOKS));
+	if (WIN) assert.equal(H.NO_HOOKS, "//./NUL", "the Windows device namespace: no folder can have that path");
+	assert.match(H.hardenGitCommand("git status"), /^git -c core\.fsmonitor=false -c core\.hooksPath=\S+ /, "no character either shell treats specially");
+	assert.ok(!/[\\'"`$;&|<>()]/.test(H.NO_HOOKS), "safe on a bash and a PowerShell command line");
+});
+test("R2: a write to a DOS device name is protected: asks with Allow once / Deny, blocked in Plan, in any spelling", () => {
+	const names = ["NUL", "nul", "src/NUL/post-index-change", "NUL/reference-transaction", "nul.txt", "NUL.tar.gz", "NUL. ", "NUL.", "con", "PRN", "aux", "COM1", "com9", "LPT1", "lpt9.log", "a/b/com3/x", "NUL:stream", "NUL::$DATA", "conin$", "CONOUT$", "COM\u00b2", "nul .txt"];
+	for (const p of names) {
+		const x = d("ask-commands", "write", { path: p }, undefined, W32);
+		assert.equal(x.action, "ask", p);
+		assert.deepEqual(x.prompt.options, ["Allow once", "Deny"], p);
+		assert.match(x.prompt.title, /Windows device name/, p);
+		assert.equal(x.prompt.risky, true, p);
+		assert.equal(act("plan", "edit", { path: p }, undefined, W32), "block", p);
+		assert.equal(act("ask-edits", "edit", { path: p }, undefined, W32), "ask", p);
+		assert.equal(act("trusted", "write", { path: p }), "allow", "Trusted checks nothing: " + p);
+	}
+	for (const p of ["console.js", "nulled.txt", "com10", "src/common.js", "auxiliary/x.md", "lpt", "a.nul", "prn_cfg.json", "src/connect.ts"]) assert.equal(act("ask-commands", "write", { path: p }, undefined, W32), "allow", p);
+	const g = L.createGrants();
+	L.applyAnswer(d("ask-edits", "write", { path: "src/a.js" }, g), "Allow for this chat", g);
+	assert.equal(act("ask-edits", "write", { path: "NUL/x" }, g), "ask", "an edit grant never covers a device name");
+});
+test("R2: real git: a folder NUL with a reference-transaction hook breaks the old 'NUL' override but not the hardened update-ref", { skip: !WIN }, () => {
+	const r = repo("r2nul");
+	const nul = "\\\\?\\" + path.join(r, "NUL"); // created and removed through a \\?\ path only
+	try {
+		fs.mkdirSync(nul);
+		fs.writeFileSync(nul + "\\reference-transaction", "#!/bin/sh\nexit 1\n");
+		fs.writeFileSync(nul + "\\post-index-change", "#!/bin/sh\necho ran > pwned-nul.txt\n");
+		const run = (args) => spawnSync("git", args, { cwd: r, windowsHide: true, encoding: "utf8" });
+		const old = run(["-c", "core.hooksPath=NUL", "update-ref", "refs/x/old", "HEAD"]);
+		assert.notEqual(old.status, 0, "control: the relative NUL override is defeated by the folder (checkpoints would fail): " + old.stderr);
+		const now = run(H.hardenGitArgs(["update-ref", "refs/x/new", "HEAD"]));
+		assert.equal(now.status, 0, "hardened update-ref ignores the folder: " + now.stderr);
+		fs.appendFileSync(path.join(r, "a.txt"), "more\n");
+		const st = run(H.hardenGitArgs(["status", "--porcelain"]));
+		assert.equal(st.status, 0, st.stderr);
+		assert.deepEqual(pwned(r), []);
+	} finally {
+		fs.rmSync(nul, { recursive: true, force: true });
+		assert.equal(fs.existsSync(nul), false, "the NUL folder is gone");
+	}
+});
+test("R2: the app's checkpoint still works with a NUL folder in the project (a free edit can no longer turn the safety net off)", { skip: !WIN }, async () => {
+	const r = repo("r2cp");
+	const nul = "\\\\?\\" + path.join(r, "NUL");
+	try {
+		fs.mkdirSync(nul);
+		fs.writeFileSync(nul + "\\reference-transaction", "#!/bin/sh\nexit 1\n");
+		const { createStore } = require(path.join(SRC, "checkpoints-main.js"));
+		const store = createStore({ repo: r, dataDir: path.join(tmp, "cp-r2") });
+		await store.create({ text: "with a NUL folder" });
+		assert.equal(store.list().length, 1);
+	} finally {
+		fs.rmSync(nul, { recursive: true, force: true });
+	}
+});
+
+// --- R3: hooks defined in git's config (hook.<name>.command) are switched off by name -------------------------------
+function hookRepo(name, names = ["x"]) {
+	const r = repo(name);
+	for (const n of names) {
+		git(r, "config", `hook.${n}.command`, `echo ran > pwned-cfg-${n.replace(/\W/g, "_")}.txt`);
+		for (const ev of ["post-index-change", "reference-transaction"]) git(r, "config", "--add", `hook.${n}.event`, ev);
+	}
+	fs.appendFileSync(path.join(r, "a.txt"), "more\n");
+	return r;
+}
+test("R3: git runs a config-defined hook even with core.hooksPath overridden (control), and hook.<name>.enabled=false stops it", () => {
+	const r = hookRepo("r3ctl");
+	git(r, "-c", `core.hooksPath=${H.NO_HOOKS}`, "status");
+	const supported = pwned(r).length > 0;
+	if (!supported) return; // this git has no hook.<name>.command (before 2.54): nothing to switch off
+	fs.rmSync(path.join(r, "pwned-cfg-x.txt"));
+	fs.appendFileSync(path.join(r, "a.txt"), "again\n");
+	git(r, "-c", `core.hooksPath=${H.NO_HOOKS}`, "-c", "hook.x.enabled=false", "status");
+	assert.deepEqual(pwned(r), [], "enabled=false is the switch");
+});
+test("R3: the app's automatic git calls and the extension's rewrite switch off every hook name found in git's config", () => {
+	const r = hookRepo("r3app", ["x", "My.Tool", "lint-all"]);
+	const extras = H.readExtras(r, { ttl: 0 });
+	assert.deepEqual(extras.hookNames.sort(), ["My.Tool", "lint-all", "x"]);
+	for (const args of [["status", "--porcelain=v1"], ["diff", "--no-color"], ["update-ref", "refs/x/t", "HEAD"], ["log", "--max-count=1"], ["add", "-A"]]) {
+		fs.appendFileSync(path.join(r, "a.txt"), "m\n");
+		const x = spawnSync("git", H.hardenGitArgs(args, { cwd: r }), { cwd: r, windowsHide: true, encoding: "utf8" });
+		assert.equal(x.status, 0, args.join(" ") + ": " + x.stderr);
+		assert.deepEqual(pwned(r), [], args.join(" "));
+	}
+	// the extension: the protection read carries the names, and the rewritten command has the switches
+	const protect = G.readGitProtection(r);
+	assert.deepEqual(protect.extras.hookNames.sort(), ["My.Tool", "lint-all", "x"]);
+	const x = L.decide({ mode: "plan", toolName: "bash", input: { command: "git status" }, cwd: r, protect, shell: "bash" });
+	assert.equal(x.action, "allow");
+	for (const n of ["x", "My.Tool", "lint-all"]) assert.ok(x.rewrite.includes(`hook.${n}.enabled=false`), n);
+	if (hasBash) {
+		fs.appendFileSync(path.join(r, "a.txt"), "m\n");
+		spawnSync(GIT_BASH, ["-c", x.rewrite], { cwd: r, windowsHide: true });
+		assert.deepEqual(pwned(r), [], "run through real bash");
+	}
+	if (hasPS) {
+		const p = L.decide({ mode: "plan", toolName: "powershell", input: { command: "git status" }, cwd: r, protect });
+		assert.equal(p.action, "allow");
+		fs.appendFileSync(path.join(r, "a.txt"), "m\n");
+		spawnSync(PS, ["-NoProfile", "-NonInteractive", "-Command", p.rewrite], { cwd: r, windowsHide: true });
+		assert.deepEqual(pwned(r), [], "run through real PowerShell");
+	}
+});
+test("R3: a hook name that can't be written safely on a command line is not auto-allowed (asks, blocked in Plan)", () => {
+	const protect = { ok: true, files: [], dirs: [], extras: { hookNames: ["a b", "ok"], filters: [] } };
+	assert.equal(H.hardenGitCommand("git status", { extras: protect.extras }), null);
+	assert.equal(L.decide({ mode: "plan", toolName: "bash", input: { command: "git status" }, cwd: proj, protect, shell: "bash" }).action, "block");
+	assert.equal(L.decide({ mode: "ask-commands", toolName: "bash", input: { command: "git status" }, cwd: proj, protect, shell: "bash" }).action, "ask");
+	assert.ok(H.hardenGitArgs(["status"], { extras: protect.extras }).includes("hook.a b.enabled=false"), "an argv needs no quoting");
+});
+test("R3: the README says exactly what is and is not switched off", () => {
+	const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+	assert.match(readme, /hook\.<name>\.command/);
+	assert.match(readme, /hook\.<name>\.enabled=false/);
+	assert.match(readme, /git 2\.54/);
+});
+
+// --- Item 4: the reader's misses -----------------------------------------------------------------------------------
+test("Reader: script paths that are glued to an option, quoted with spaces or loaded from a script's own folder are protected", () => {
+	const r = repo("rdr4");
+	git(r, "config", "filter.a.clean", "node -r./tools/pre.js tools/clean.js");
+	git(r, "config", "filter.b.smudge", 'node "tools/my tools/smudge.js" --require=./hooks2/req.js');
+	git(r, "config", "diff.c.textconv", "node --import=./conv/loader.mjs conv/c.js");
+	git(r, "config", "core.fsmonitor", "node -rmon/pre.js mon/m.js");
+	const protect = G.readGitProtection(r);
+	assert.equal(protect.ok, true, protect.error);
+	const at = (p) => L.decide({ mode: "ask-commands", toolName: "write", input: { path: p }, cwd: r, protect });
+	for (const p of ["tools/pre.js", "tools/clean.js", "tools/lib.js", "tools/sub/deep.js", "tools/my tools/smudge.js", "tools/my tools/other.js", "hooks2/req.js", "hooks2/helper.js", "conv/loader.mjs", "conv/other.js", "mon/pre.js", "mon/lib/x.js"]) {
+		const x = at(p);
+		assert.equal(x.action, "ask", p);
+		assert.deepEqual(x.prompt.options, ["Allow once", "Deny"], p);
+	}
+	for (const p of ["src/a.ts", "docs/x.md", "tools2/x.js", "README.md"]) assert.equal(at(p).action, "allow", p);
+	assert.deepEqual(G.shellWords('node "a b/c.js" -r./x'), ["node", "a b/c.js", "-r./x"]);
+	assert.ok(G.pathCandidates("-r./x").includes("./x"));
+	assert.ok(G.pathCandidates("--require=./y").includes("./y"));
+});
+test("Reader: a config value does not protect the whole project (the root and its parents stay free)", () => {
+	const r = repo("rdr4b");
+	git(r, "config", "filter.a.clean", "node clean.js . .. ./");
+	const protect = G.readGitProtection(r);
+	const at = (p) => L.decide({ mode: "ask-commands", toolName: "write", input: { path: p }, cwd: r, protect }).action;
+	assert.equal(at("clean.js"), "ask");
+	assert.equal(at("src/a.ts"), "allow");
+	assert.equal(at("other.txt"), "allow", "a script in the project root protects only itself");
+});
+
+// --- R4: filter drivers -------------------------------------------------------------------------------------------
+function filterRepo(name) {
+	const r = repo(name);
+	fs.writeFileSync(path.join(r, "clean.js"), 'require("fs").appendFileSync("pwned-filter.txt", "ran\\n"); process.stdin.pipe(process.stdout);\n');
+	fs.writeFileSync(path.join(r, ".gitattributes"), "*.dat filter=x\n");
+	fs.writeFileSync(path.join(r, "f.dat"), "data\n");
+	git(r, "config", "filter.x.clean", "node clean.js");
+	git(r, "config", "filter.x.required", "true");
+	git(r, "add", "-A");
+	git(r, "commit", "-qm", "filter");
+	for (const f of fs.readdirSync(r)) if (f.startsWith("pwned")) fs.rmSync(path.join(r, f));
+	fs.appendFileSync(path.join(r, "f.dat"), "more\n");
+	return r;
+}
+test("R4: a filter driver that runs project code does not run in the app's automatic calls (checkpoint add -A, status, diff), required or not", async () => {
+	const r = filterRepo("r4app");
+	const ctl = spawnSync("git", ["add", "-A"], { cwd: r, windowsHide: true, encoding: "utf8" });
+	assert.equal(ctl.status, 0, ctl.stderr);
+	assert.ok(pwned(r).length > 0, "control: an unhardened git add runs the filter");
+	for (const f of pwned(r)) fs.rmSync(path.join(r, f));
+	git(r, "reset", "-q"); // (reset refreshes the index through the filter too)
+	for (const f of pwned(r)) fs.rmSync(path.join(r, f));
+	for (const args of [["add", "-A"], ["status", "--porcelain=v1"], ["diff", "--no-color", "HEAD", "--", "f.dat"]]) {
+		fs.appendFileSync(path.join(r, "f.dat"), "m\n");
+		const x = spawnSync("git", H.hardenGitArgs(args, { cwd: r }), { cwd: r, windowsHide: true, encoding: "utf8" });
+		assert.equal(x.status, 0, args.join(" ") + ": " + x.stderr);
+		assert.deepEqual(pwned(r), [], args.join(" "));
+	}
+	const { createStore } = require(path.join(SRC, "checkpoints-main.js"));
+	const store = createStore({ repo: r, dataDir: path.join(tmp, "cp-r4") });
+	await store.create({ text: "filter" });
+	assert.equal(store.list().length, 1, "the checkpoint is made");
+	assert.deepEqual(pwned(r), [], "checkpoint");
+});
+test("R4: the extension's auto-allowed git switches the same drivers off, in every mode but Trusted", { skip: !hasBash }, () => {
+	const r = filterRepo("r4ext");
+	const protect = G.readGitProtection(r);
+	assert.deepEqual(protect.extras.filters, ["x"]);
+	for (const mode of ["plan", "ask-edits", "ask-commands"]) {
+		const x = L.decide({ mode, toolName: "bash", input: { command: "git diff" }, cwd: r, protect, shell: "bash" });
+		assert.equal(x.action, "allow", mode);
+		assert.match(x.rewrite, /filter\.x\.clean= .*filter\.x\.required=false/, mode);
+		fs.appendFileSync(path.join(r, "f.dat"), "m\n");
+		const run = spawnSync(GIT_BASH, ["-c", x.rewrite], { cwd: r, windowsHide: true, encoding: "utf8" });
+		assert.equal(run.status, 0, run.stderr);
+		assert.deepEqual(pwned(r), [], mode);
+	}
+});
+test("R4: Git LFS's drivers stay on: only drivers that do not start with git-lfs are switched off", () => {
+	const rows = [{ key: "filter.lfs.clean", value: "git-lfs clean -- %f" }, { key: "filter.lfs.smudge", value: "git-lfs smudge -- %f" }, { key: "filter.lfs.process", value: "git-lfs filter-process" }, { key: "filter.lfs.required", value: "true" }, { key: "filter.w.clean", value: '"C:\\Program Files\\Git LFS\\git-lfs.exe" clean -- %f' }, { key: "filter.x.clean", value: "node tools/c.js" }, { key: "filter.y.process", value: "sh ./p.sh" }, { key: "filter.lfs2.clean", value: "git lfs clean -- %f" }, { key: "filter.z.clean", value: "" }];
+	const e = H.configExtras(rows);
+	assert.deepEqual(e.filters.sort(), ["w", "x", "y"], "w is not git-lfs at the start of the command line, so it is judged unsafe");
+	assert.ok(!H.hardenGitArgs(["status"], { extras: e }).some((a) => /filter\.lfs/.test(a)));
+	assert.ok(H.hardenGitArgs(["status"], { extras: e }).includes("filter.x.process="));
+});
+const hasLfs = (() => {
+	try {
+		return spawnSync("git", ["lfs", "version"], { windowsHide: true }).status === 0;
+	} catch {
+		return false;
+	}
+})();
+test("R4: real Git LFS (when installed): a hardened git add -A still stores an LFS pointer", { skip: !hasLfs }, () => {
+	const r = repo("r4lfs");
+	git(r, "lfs", "install", "--local");
+	git(r, "lfs", "track", "*.bin");
+	fs.writeFileSync(path.join(r, "big.bin"), "x".repeat(2000));
+	const extras = H.readExtras(r, { ttl: 0 });
+	assert.deepEqual(extras.filters, [], "LFS's own drivers are not switched off");
+	const x = spawnSync("git", H.hardenGitArgs(["add", "-A"], { cwd: r }), { cwd: r, windowsHide: true, encoding: "utf8" });
+	assert.equal(x.status, 0, x.stderr);
+	const blob = git(r, "cat-file", "-p", ":big.bin");
+	assert.match(blob, /^version https:\/\/git-lfs\.github\.com\/spec\/v1/, "an LFS pointer, not the file");
+});
+test("R4: the README says a repository's own filter that runs project code is outside what the modes protect", () => {
+	const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+	assert.match(readme, /filter[^\n]*runs project code[^\n]*outside what the modes can protect/i);
+	assert.match(readme, /every mode/i);
+});
+
+// --- Item 6: hidden characters make a prompt risky ------------------------------------------------------------------
+test("Hidden characters: a command or path with a hidden-character marker or a long whitespace run asks with Allow once / Deny only", () => {
+	const cmds = ["git commit -m a\u202eb", "echo a\tb", "echo a" + " ".repeat(400) + "b", "echo zero\u200bwidth", "echo a" + NBSP + "b", "echo a   b", "echo \u0007bell"];
+	for (const c of cmds) {
+		const x = d("ask-commands", "bash", { command: c });
+		assert.equal(x.action, "ask", JSON.stringify(c));
+		assert.deepEqual(x.prompt.options, ["Allow once", "Deny"], JSON.stringify(c));
+		assert.equal(x.prompt.risky, true, JSON.stringify(c));
+		assert.match(x.prompt.title, /hidden characters or a long run of spaces/, JSON.stringify(c));
+		assert.equal(x.grant, undefined, "no grant to give");
+		const g = L.createGrants();
+		assert.equal(L.applyAnswer(x, "Allow for this chat", g).action, "block", "not offered, so it denies");
+		assert.equal(g.keys.size, 0);
+		assert.equal(L.applyAnswer(x, "Allow once", g).action, "allow");
+		assert.equal(act("plan", "bash", { command: c }), "block");
+	}
+	for (const p of ["src/a\u202e.js", "src/a\tb.js", "src/a" + " ".repeat(10) + "b.js", "src/a" + NBSP + "b.js"]) {
+		const x = d("ask-commands", "write", { path: p });
+		assert.equal(x.action, "ask", JSON.stringify(p));
+		assert.deepEqual(x.prompt.options, ["Allow once", "Deny"], JSON.stringify(p));
+		assert.match(x.prompt.title, /hidden characters or a long run of spaces/, JSON.stringify(p));
+		assert.equal(x.prompt.risky, true);
+	}
+	const t = d("ask-commands", "mcp__x__y", { q: "a\u202eb" });
+	assert.deepEqual(t.prompt.options, ["Allow once", "Deny"]);
+	assert.match(t.prompt.title, /hidden characters/);
+});
+test("Hidden characters: ordinary prompts keep Allow for this chat, and a multi-line command is not hidden", () => {
+	for (const c of ["npm test", "git commit -m 'one\ntwo'", "git commit -m 'a  b'", "git commit -m 'one\r\ntwo'"]) {
+		const x = d("ask-commands", "bash", { command: c });
+		assert.equal(x.action, "ask", c);
+		assert.deepEqual(x.prompt.options, ["Allow once", "Allow for this chat", "Deny"], JSON.stringify(c));
+		assert.equal(x.prompt.risky, false);
+	}
+	assert.deepEqual(d("ask-edits", "write", { path: "src/a.js" }).prompt.options, ["Allow once", "Allow for this chat", "Deny"]);
+});
+test("Hidden characters: both prompt UIs treat the new warning lines as reasons, and the selftest's 'odd' case opens on Deny", () => {
+	for (const f of ["renderer.js", path.join("remote", "app.js")]) {
+		const text = fs.readFileSync(path.join(SRC, f), "utf8");
+		assert.ok(text.includes("This text has hidden characters"), f);
+		assert.ok(text.includes("This name is a Windows device name"), f);
+	}
+	const pal = fs.readFileSync(path.join(SRC, "palette.js"), "utf8");
+	assert.match(pal, /\["odd", [^\n]*hidden characters or a long run of spaces[^\n]*, two\]/, "the odd case offers Allow once / Deny only");
+	assert.match(pal, /name === "odd"[^\n]*startsWith\("long"\)/, "and is expected to open on Deny");
+	assert.equal(L.HIDDEN_WHY.startsWith("This text has hidden characters"), true);
+	assert.equal(L.DEVICE_WHY.startsWith("This name is a Windows device name"), true);
 });
