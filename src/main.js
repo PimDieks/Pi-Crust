@@ -112,6 +112,12 @@ const agents = createRegistry();
 const piAgent = agents.register(require("./agents/pi")); // the only agent in phase 6
 agents.register(require("./agents/claude")); // phase 7: inert until the UI offers it; Pi stays the default
 let claudeSetup = null; // first-use setup of the Claude Agent (claude-setup-main.js): its key and its engine
+// The approval prompt of Claude Agent chats (claude-approval-main.js): the same records and prompt as a Pi chat's permission extension.
+const claudeApprovals = require("./claude-approval-main").createApprovals({
+	send: (channel, payload) => send(channel, payload),
+	hasWindow: () => !!win && !win.isDestroyed(),
+	isCurrent: (chatId, handle) => chats.get(chatId)?.handle === handle,
+});
 const setupWaiting = new Set(); // chats of an agent that is not set up yet: they start by themselves once both steps are done
 const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: structuredClone(a.capabilities) }); // a copy: the renderer's message never aliases the adapter's object // what the renderer is told about a chat's agent
 
@@ -189,6 +195,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 			send("pi:record", { chatId, record });
 		},
 		stderr: (p, data) => send("pi:stderr", { chatId, data }),
+		ask: (p, prompt, meta) => claudeApprovals.ask(chatId, p, prompt, meta), // Claude Agent's gate asks here; no answer is a deny
 		exit: (p, info) => {
 			failMainRequests(p, agent.strings.stopped); // before the current check: killed processes are not current any more
 			if (info.kind === "timeout") {
@@ -254,6 +261,7 @@ function newChatId() {
 function killAllChats() {
 	const old = [...chats.values()];
 	chats.clear();
+	claudeApprovals.closeAll();
 	for (const c of old) {
 		held.clear(c.id);
 		c.agent.stop(c.handle);
@@ -321,7 +329,7 @@ function answerUi(chatId, response, by) {
 	let done = answeredUi.get(chatId);
 	if (!done) answeredUi.set(chatId, (done = new Set()));
 	if (done.has(response.id)) return false;
-	if (!piSend(chatId, response)) return false;
+	if (!(claudeApprovals.owns(response) ? claudeApprovals.answer(chatId, response) : piSend(chatId, response))) return false;
 	done.add(response.id);
 	if (done.size > 200) done.delete(done.values().next().value);
 	send("pi:uiResolved", { chatId, id: response.id, by });
@@ -385,6 +393,7 @@ ipcMain.handle("pi:closeChat", async (_e, chatId) => {
 	saveOpenChats();
 	held.clear(chatId);
 	setupWaiting.delete(chatId);
+	claudeApprovals.closeChat(chatId);
 	const c = chats.get(chatId);
 	chats.delete(chatId);
 	c?.agent.stop(c.handle);
@@ -417,6 +426,7 @@ async function restartChat(chatId, sessionFile) {
 	const cwd = entry?.cwd || null;
 	const agentId = oldChat?.agent.id || entry?.agent; // a restarted chat keeps its own agent
 	chats.delete(chatId);
+	claudeApprovals.closeChat(chatId);
 	oldChat?.agent.stop(old);
 	const file = sessionArg(sessionFile);
 	// Resuming a session file: let the old process release it first.
@@ -1320,6 +1330,7 @@ function createWindow() {
 		}
 	});
 	win.on("closed", () => {
+		claudeApprovals.closeAll(); // nobody can answer any more: every open prompt is a deny
 		win = undefined;
 	});
 }
@@ -1520,6 +1531,7 @@ const ctx = {
 		return SELFTEST;
 	},
 	send,
+	windowIdOfChat: (chatId) => (win && !win.isDestroyed() && openList.some((e) => e.id === chatId) ? win.webContents.id : null), // the one window shows every open chat
 	setupWaitingChats: () => [...setupWaiting], // chats that wait for their agent's setup (the engine download is only accepted for one of them)
 	// Remote (remote-main.js): talk to Pi and own chats from outside the renderer.
 	piSend,

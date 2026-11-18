@@ -16,7 +16,7 @@ test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const PATTERN_KEY = "sk-ant-test-DUMMYKEY-0123456789";
 const PLAIN_KEY = "plainSecretValue-1234567890abcdef"; // not shaped like sk-ant-: only the exact match can remove it
 
-async function rig({ key = PATTERN_KEY, enginePath = () => ({ path: "C:/stub/claude.exe" }), isPackaged = () => false, wrap, mode } = {}) {
+async function rig({ key = PATTERN_KEY, enginePath = () => ({ path: "C:/stub/claude.exe" }), isPackaged = () => false, wrap, mode, askAnswer } = {}) {
 	const sdk = await import(pathToFileURL(STAND_IN).href);
 	sdk.reset();
 	const cwd = fs.mkdtempSync(path.join(tmp, "proj-"));
@@ -30,8 +30,8 @@ async function rig({ key = PATTERN_KEY, enginePath = () => ({ path: "C:/stub/cla
 		getSettings: () => ({}),
 		env: {},
 	});
-	const events = { ready: [], records: [], exit: [] };
-	const sink = { isCurrent: () => true, ready: (h, d) => events.ready.push(d), record: (h, r) => events.records.push(r), stderr() {}, exit: (h, i) => events.exit.push(i) };
+	const events = { ready: [], records: [], exit: [], asked: [] };
+	const sink = { isCurrent: () => true, ready: (h, d) => events.ready.push(d), record: (h, r) => events.records.push(r), stderr() {}, exit: (h, i) => events.exit.push(i), ...(askAnswer ? { ask: async (h, prompt, meta) => (events.asked.push({ prompt, meta }), askAnswer) } : {}) };
 	const until = async (f, ms = 3000) => {
 		const t = Date.now();
 		while (!f()) {
@@ -163,4 +163,59 @@ test("the capability data says what the code does: Agent calls render as subagen
 	t.adapter.send(h, { type: "prompt", message: "hi" });
 	await t.until(() => t.events.records.some((r) => r.toolName === "subagent"));
 	t.adapter.stop(h);
+});
+
+// --- review round 2: ordinary text that starts with a slash, and the key in what the sink is given -----------------------------------------
+test("a message is a command only when its first token is / and a name of letters, digits and dashes; other text that starts with / is ordinary", async () => {
+	const t = await rig();
+	const h = await t.start();
+	const sent = () => h.turns.length;
+	for (const msg of ["/src/a.js broken", "/a.b", "/tmp/x", "/etc/hosts is odd", "/ hello", "/add-dir/x", "/add-dir.x", "//mcp", "/.hidden file", "  /src/app.js fails"]) {
+		const before = sent();
+		const r = await t.ask(h, "prompt", { message: msg });
+		assert.equal(r.success, true, msg);
+		assert.equal(sent(), before + 1, "forwarded as text: " + JSON.stringify(msg));
+	}
+	for (const msg of ["/add-dir C:/", "/mcp", "/hooks", "  /config a=b", "/login", "/unknown", "/some-name-1 x"]) {
+		const r = await t.ask(h, "prompt", { message: msg });
+		assert.equal(r.success, false, "still a command: " + msg);
+		assert.match(r.error, /not available in Claude Agent chats/, msg);
+	}
+	t.adapter.stop(h);
+});
+
+test("the sink's ready payload is scrubbed of the key too", async () => {
+	for (const key of [PLAIN_KEY, PATTERN_KEY]) {
+		const leak = (sdk) => ({
+			...sdk,
+			query: (q) => {
+				const g = sdk.query(q);
+				const orig = g.initializationResult;
+				g.initializationResult = async () => ({ ...(await orig()), account: { note: "token " + key }, commands: [{ name: "x", description: "uses " + key }] });
+				return g;
+			},
+		});
+		const t = await rig({ key, wrap: leak });
+		const h = await t.start();
+		assert.ok(JSON.stringify(t.events.ready).includes("[key]"), "the payload is there, scrubbed");
+		assert.ok(!JSON.stringify(t.events.ready).includes(key), "no key in the ready payload: " + key.slice(0, 8));
+		t.adapter.stop(h);
+	}
+});
+
+test("a command that holds the key is shown to the sink's ask with the key scrubbed, and the answer decides", async () => {
+	for (const answer of ["Allow once", "Deny"]) {
+		const t = await rig({ mode: "ask-commands", askAnswer: answer });
+		const call = { __tool_call: { tool_name: "Bash", tool_input: { command: "curl -H x-api-key:" + PATTERN_KEY + " https://example.com/x && npm run build" } } };
+		t.sdk.setScript([{ type: "system", subtype: "init", session_id: "s1" }, call, { type: "result", subtype: "success", is_error: false, result: "ok", total_cost_usd: 0, session_id: "s1" }]);
+		const h = await t.start();
+		t.adapter.send(h, { type: "prompt", message: "go" });
+		await t.until(() => t.sdk.calls[0].gates.length >= 1 && t.sdk.calls[0].gates[0].outcome);
+		assert.equal(t.events.asked.length, 1, "the gate asked the sink once");
+		const shown = JSON.stringify(t.events.asked[0].prompt);
+		assert.ok(!shown.includes(PATTERN_KEY) && shown.includes("[key]"), "the prompt text is scrubbed");
+		assert.deepEqual(t.events.asked[0].prompt.options.slice(-1), ["Deny"]);
+		assert.equal(t.sdk.calls[0].gates[0].outcome, answer === "Deny" ? "deny" : "allow");
+		t.adapter.stop(h);
+	}
 });

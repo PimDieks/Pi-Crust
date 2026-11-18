@@ -65,6 +65,8 @@ selftestSteps.push(async ({ snap, wait }) => {
 	const OVERLAYS = [
 		askOverlay("ask", { title: "Layers test", message: "Pick one", options: ["One", "Two"] }),
 		askOverlay("perm-ask", { title: 'Allow this command?\ngit commit -m "Fix login"\nMode: Ask before commands', options: PERM_OPTIONS }),
+		// A Claude Agent chat's approval prompt (a subagent start, the sentence the adapter shows): the same dock and the same prompt as a Pi chat's.
+		askOverlay("claude-perm-ask", { title: ["Allow a Agent?", "Task: Look through the tests and list the slow ones", "You approve starting the subagent. What its own tools do is not covered by this answer.", "Mode: Ask before commands"].join(String.fromCharCode(10)), options: PERM_OPTIONS }),
 		// The long command takes part in the explicit cases only (alone, toasts, slash menu, welcome view), not in the pair matrix.
 		askOverlay("perm-ask-long", { title: `Allow this command?\nThis command is ${LONG_COMMAND.length} characters long. Read all of it before you allow it.\n${LONG_COMMAND}\nMode: Ask before commands`, options: PERM_OPTIONS }, { with: [] }),
 		// The Claude Agent's setup card (top of the chat) and pause card (end of the conversation): in the chat's flow, no layer of their own.
@@ -287,8 +289,8 @@ selftestSteps.push(async ({ snap, wait }) => {
 		},
 	];
 	const byName = (n) => OVERLAYS.find((o) => o.name === n);
-	const isAsk = (o) => o.name === "ask" || o.name.startsWith("perm-ask");
-	const ASKS = ["ask", "perm-ask", "perm-ask-long"];
+	const isAsk = (o) => o.name === "ask" || o.name.includes("perm-ask");
+	const ASKS = ["ask", "perm-ask", "perm-ask-long", "claude-perm-ask"];
 	const level = (o) => LAYERS.indexOf(o.layer) * 100 + (o.plus || 0);
 	const mayPair = (a, b) => (!a.with || a.with.includes(b.name)) && (!b.with || b.with.includes(a.name));
 
@@ -447,7 +449,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		for (const lo of OVERLAYS.filter((o) => o.layer === "popover" && !["slash-menu", "mention-menu"].includes(o.name))) for (const q of ASKS) await together(lo, byName(q), theme, false, true);
 		// 4b. The slash and @ menus belong to the message box and may cover the answer buttons while the user types. Esc must close
 		//     them, and then every answer button is reachable again.
-		for (const [menu, qName] of [[byName("slash-menu"), "ask"], [byName("mention-menu"), "ask"], [byName("slash-menu"), "perm-ask"], [byName("slash-menu"), "perm-ask-long"]]) {
+		for (const [menu, qName] of [[byName("slash-menu"), "ask"], [byName("mention-menu"), "ask"], [byName("slash-menu"), "perm-ask"], [byName("slash-menu"), "perm-ask-long"], [byName("slash-menu"), "claude-perm-ask"]]) {
 			const q = byName(qName);
 			await q.open();
 			await settle(q);
@@ -465,7 +467,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		}
 		// 4c. The approval prompt (one command, then a very long one) with two toasts: the toast column is above it and covers none of its
 		//     answers; every answer is reachable, and so is every toast action.
-		for (const qName of ["perm-ask", "perm-ask-long"]) {
+		for (const qName of ["perm-ask", "perm-ask-long", "claude-perm-ask"]) {
 			const q = byName(qName);
 			await q.open();
 			await settle(q);
@@ -485,7 +487,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		await together(byName("first-task"), byName("ask"), theme, true);
 		// 6b. A question from Pi (or an approval prompt) while the welcome view is open closes the view and is reachable; and the view
 		//     does not open over a question.
-		for (const qName of ["ask", "perm-ask", "perm-ask-long"]) {
+		for (const qName of ["ask", "perm-ask", "perm-ask-long", "claude-perm-ask"]) {
 			const view = byName("welcome-view");
 			const q = byName(qName);
 			await view.open();

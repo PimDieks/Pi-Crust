@@ -45,7 +45,7 @@ const REFUSED = {
 	token: "Nothing was confirmed. Look at the question again.",
 };
 
-function createSetup({ keystore, engine, auth, settings, send = () => {}, hold = async () => {}, waitingChats = () => [], now = Date.now, plansPerMinute = PLANS_PER_MINUTE, fetch: fetchApi } = {}) {
+function createSetup({ keystore, engine, auth, settings, send = () => {}, hold = async () => {}, waitingChats = () => [], windowOf = null, now = Date.now, plansPerMinute = PLANS_PER_MINUTE, fetch: fetchApi } = {}) {
 	const checkKey = (key) => onlineCheck(key, fetchApi ? { fetch: fetchApi } : {});
 	if (!keystore || !engine || !auth || !settings) throw new TypeError("createSetup needs keystore, engine, auth and settings");
 	let busy = false; // a key is being checked
@@ -108,7 +108,7 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 	}
 
 	// The check of a key that was stored without a verdict (the network was down when it was saved). Not the engine's: the same one request
-	// as on save (keycheck.js). A wrong key is removed again; still no network keeps it "not checked yet".
+	// as on save (keycheck.js). Only a 401 with Anthropic's authentication_error removes the key; everything else (no network, a 403, a proxy page) keeps it "not checked yet".
 	async function checkStored() {
 		if (busy || !settings.get()[SETTING.unchecked]) return;
 		busy = true;
@@ -116,9 +116,9 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 		try {
 			await hold("keyCheck");
 			const r = await keystore.read();
-			const res = r && r.key ? await checkKey(r.key) : { ok: false, wrong: true, error: "The stored key could not be read." };
+			const res = r && r.key ? await checkKey(r.key) : { ok: false, error: "The stored key could not be read." }; // unreadable: no verdict, nothing is deleted
 			if (res.ok) settings.set({ [SETTING.unchecked]: false });
-			else if (res.wrong) {
+			else if (res.rejected) {
 				keyFail = { reason: keyReason(res.error) };
 				await keystore.clear().catch(() => {});
 				settings.set({ [SETTING.unchecked]: false });
@@ -178,15 +178,17 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 			}
 		},
 		// from: { senderId, chatId } of the window that asks. Refused unless (a) the engine is missing or failed, (b) a Claude Agent chat waits in
-		// setup (the asked one, else the first), (c) no download runs, (d) fewer than plansPerMinute plans came in the last minute.
+		// setup (the named one: no chat id, no plan; the sender must be its window), (c) no download runs, (d) fewer than plansPerMinute plans came in the last minute.
 		async enginePlan(from = {}) {
 			const es = (await engine.status().catch(() => null)) || { state: "missing" };
 			if (es.state === "ready") return { ok: false, error: "The Claude engine is already installed.", installed: true };
 			if (downloading || es.state === "downloading") return { ok: false, error: REFUSED.busy };
 			if (es.state !== "missing" && es.state !== "failed") return { ok: false, error: REFUSED.state };
 			const waiting = [...waitingChats()];
-			const chatId = from.chatId !== undefined && from.chatId !== null ? (waiting.includes(from.chatId) ? from.chatId : null) : waiting[0] === undefined ? null : waiting[0];
+			// The chat must be named (no fallback to "the first waiting chat"), must wait in setup, and the sender must be the window that shows it.
+			const chatId = typeof from.chatId === "string" && waiting.includes(from.chatId) ? from.chatId : null;
 			if (chatId === null) return { ok: false, error: REFUSED.chat };
+			if (typeof windowOf === "function" && (from.senderId === undefined || from.senderId === null || from.senderId !== windowOf(chatId))) return { ok: false, error: REFUSED.chat };
 			const t = now();
 			while (planTimes.length && t - planTimes[0] >= 60000) planTimes.shift();
 			if (planTimes.length >= plansPerMinute) return { ok: false, error: REFUSED.rate };
@@ -203,7 +205,7 @@ function createSetup({ keystore, engine, auth, settings, send = () => {}, hold =
 			if (es.state === "ready") return { ok: false, error: "The Claude engine is already installed.", installed: true, code: "installed" };
 			if (downloading || es.state === "downloading") return { ok: false, error: REFUSED.busy, code: "busy" };
 			if (es.state !== "missing" && es.state !== "failed") return { ok: false, error: REFUSED.state, code: "state" };
-			const ok = spent && typeof o.token === "string" && o.token === spent.token && o.senderId === spent.senderId && waitingChats().includes(spent.chatId) && (o.chatId === undefined || o.chatId === null || o.chatId === spent.chatId);
+			const ok = spent && typeof o.token === "string" && o.token === spent.token && o.senderId === spent.senderId && waitingChats().includes(spent.chatId) && o.chatId === spent.chatId && (typeof windowOf !== "function" || o.senderId === windowOf(spent.chatId));
 			if (!ok) return { ok: false, error: REFUSED.token, code: "no-confirm" };
 			downloading = true;
 			try {

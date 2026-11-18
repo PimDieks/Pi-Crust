@@ -198,7 +198,7 @@ A new Claude Agent chat opens with a setup card: step 1 is the key, step 2 is th
 
 **Safety.**
 - The four **permission modes** and the same **approval prompt** apply to Claude Agent chats too (see Permission modes in the Chat section). The mode selector, the prompt and its answers work as in a Pi chat.
-- Every mode runs the engine in its ordinary permission mode and Pi Crust decides each call, so even in Trusted the protected list (and reading a process environment, `/proc/.../environ`) still asks.
+- Every mode runs the engine in its ordinary permission mode and Pi Crust decides each call, and Trusted runs everything, as for Pi: the protected list and the `/proc/.../environ` question apply in the other three modes only.
 - They are a **safety net, not a sandbox**. A command you approve can do anything you can. On Windows the engine has no sandbox of its own, so the modes and the prompt are the only guard.
 - A Claude Agent chat reads the project's `CLAUDE.md` as instructions (a file over 32 KB, a link, or one that leads out of the project folder is ignored). The project's own Claude settings and your own Claude settings are **not** loaded, so nothing in them can approve an action around the mode selector. Pi Crust gives the engine its own config folder, so a Claude sign-in you have on this computer is never used.
 - The API key is kept in the operating system's protected store. It is kept out of the commands the agent runs. A key in the `ANTHROPIC_API_KEY` environment variable is used only when you have not saved one in the app.

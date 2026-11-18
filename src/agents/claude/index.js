@@ -30,7 +30,8 @@ const NO_ENGINE = "The Claude Agent engine is not installed yet.";
 // or sign in). Only these harmless, read-only ones are forwarded; every other command is answered locally as not available. Decided from the
 // engine's own command list (capture-info.jsonl): they show the context, the usage and the recap, or the unused skills.
 const SLASH_ALLOW = Object.freeze(["context", "usage", "recap", "skill-doctor"]);
-const SLASH_START = /^[\s\u200b\ufeff]*\/([^\s]*)/;
+// A command is a first token of "/" plus a name of letters, digits and dashes, and nothing else ("/src/a.js broken" is ordinary text).
+const SLASH_START = /^[\s\u200b\ufeff]*\/([A-Za-z0-9-]+)(?=\s|$)/;
 const MODE_FILE = "crust-permission-mode.json"; // the last chosen mode, in the app's own config folder (Pi keeps the same in its own folder)
 const MODE_COMMAND = /^\s*\/crust-mode(?:\s+(\S+))?\s*$/i; // what the mode selector sends; handled here, never given to the model
 
@@ -343,7 +344,11 @@ function createClaudeAdapter(deps = {}) {
 				if (handle.closed) return finish({ kind: "exit", code: null, signal: "SIGTERM" });
 				const canUseTool = makeCanUseTool({
 					getMode: () => handle.mode,
-					ask: (prompt, meta) => (typeof opts.ask === "function" ? opts.ask(prompt, meta) : sink.ask ? sink.ask(handle, prompt, meta) : undefined),
+					// The prompt shows what the agent wants to run, and that text can hold the key: it is scrubbed before anyone sees it.
+					ask: (prompt, meta) => {
+						const shown = prompt ? scrubDeep(prompt, handle.key) : prompt;
+						return typeof opts.ask === "function" ? opts.ask(shown, meta) : sink.ask ? sink.ask(handle, shown, meta) : undefined;
+					},
 					cwd: opts.cwd,
 				});
 				handle.canUseTool = canUseTool;
@@ -433,7 +438,7 @@ function createClaudeAdapter(deps = {}) {
 					});
 				const first = fk ? { resume: handle.pendingFork.from, fork: !!handle.pendingFork.from, at: handle.pendingFork.at } : {};
 				const how = await runQuery(first, (init) => {
-					if (!sink.isCurrent || sink.isCurrent(handle)) sink.ready(handle, init);
+					if (!sink.isCurrent || sink.isCurrent(handle)) sink.ready(handle, scrubDeep(init, handle.key));
 				});
 				if (how === "closed") return finish({ kind: "exit", code: null, signal: "SIGTERM" });
 				if (how === "ended") finish({ kind: "exit", code: 0, signal: null });

@@ -124,7 +124,8 @@ function createFakes() {
 	const fetch = async (url, init) => {
 		if (net.down) throw new TypeError("fetch failed (no connection in the test)");
 		const key = init && init.headers && init.headers["x-api-key"];
-		return { status: key === REJECTED ? 401 : 200 };
+		if (key !== REJECTED) return { status: 200 };
+		return { status: 401, text: async () => JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }) }; // as the API answers
 	};
 
 	return { keystore, engine, control, fakeSet, fetch, net };

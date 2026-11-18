@@ -38,6 +38,7 @@ function register(ctx) {
 		send: (channel, payload) => ctx.send(channel, payload),
 		fetch: fake ? fake.fetch : ctx.selftest === true ? async () => { throw new Error("no network in a self-test"); } : undefined, // a self-test never reaches Anthropic
 		waitingChats: () => (typeof ctx.setupWaitingChats === "function" ? ctx.setupWaitingChats() : []),
+		windowOf: (chatId) => (typeof ctx.windowIdOfChat === "function" ? ctx.windowIdOfChat(chatId) : null),
 		hold: (name) => (fake ? fake.control.hold(name) : Promise.resolve()),
 	});
 	adapter.configure({ keystore, configDir, getSettings: () => ctx.readSettings(), isPackaged: () => app.isPackaged, enginePath: () => setup.enginePath() });

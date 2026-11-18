@@ -2384,7 +2384,8 @@ crust.pi.onStderr(({ chatId, data }) => {
 crust.pi.onUiResolved(({ chatId, id, by }) => {
 	if (by === "desktop") return;
 	const ask = chats.get(chatId)?.asks.find((a) => a.spec.id === id);
-	if (ask && ask.dismiss()) toast("Answered from your phone");
+	// Closed, timed out or cancelled by the app itself (a Claude Agent chat's approval prompt, answered "deny" there): it only leaves the screen.
+	if (ask && ask.dismiss() && by !== "closed" && by !== "timeout" && by !== "cancelled") toast("Answered from your phone");
 });
 crust.pi.onExit((e) => {
 	const c = chats.get(e.chatId);

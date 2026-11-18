@@ -141,6 +141,8 @@ const SDK_AUTO = (options, name, input) => {
 	const cwd = options && options.cwd;
 	return name === "Read" && !!p && !!cwd && path.resolve(cwd, p).toLowerCase().startsWith(path.resolve(cwd).toLowerCase() + path.sep);
 };
+// "<cwd>" in a scripted tool call's strings is the chat's project folder (a fixture cannot know it).
+const withCwd = (v, cwd) => (typeof v === "string" ? v.split("<cwd>").join(cwd || "") : Array.isArray(v) ? v.map((x) => withCwd(x, cwd)) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, withCwd(x, cwd)])) : v);
 export async function runGate(options, call) {
 	const name = call.tool_name;
 	const hookInput = { session_id: "stand-in-session", transcript_path: "", cwd: options && options.cwd, hook_event_name: "PreToolUse", tool_name: name, tool_input: call.tool_input, tool_use_id: call.tool_use_id || "toolu_stand_in", permission_mode: call.permission_mode || (options && options.permissionMode) || "default", ...(call.agent_id ? { agent_id: call.agent_id, agent_type: call.agent_type || "general-purpose" } : {}) };
@@ -211,7 +213,10 @@ export function query({ prompt, options }) {
 				continue;
 			}
 			if (m && m.__tool_call) {
-				entry.gates.push(await runGate(options, m.__tool_call));
+				const g = await runGate(options, withCwd(m.__tool_call, options && options.cwd));
+				entry.gates.push(g);
+				const ti = m.__tool_call.tool_input || {};
+				logFile({ gate: { tool_name: m.__tool_call.tool_name, command: ti.command, file_path: ti.file_path, agent_id: m.__tool_call.agent_id, hooks: g.hooks, viaCanUseTool: g.viaCanUseTool, outcome: g.outcome } }); // for the offscreen self-test runner
 				continue;
 			}
 			yield m;

@@ -18,17 +18,22 @@ function make({ waiting = ["c1"], plansPerMinute } = {}) {
 	const fetches = [];
 	const net = { mode: "ok" };
 	const chats = [...waiting];
+	const windows = { c1: 7, c2: 8 }; // chat -> the window (sender id) that shows it
 	let clock = 1000000;
 	const fetch = async (url, init) => {
 		fetches.push({ url, init });
 		const key = init && init.headers && init.headers["x-api-key"];
 		if (net.mode === "down") throw new TypeError("fetch failed ENOTFOUND api.anthropic.com " + key);
 		if (net.mode === "limit") return { status: 429 };
-		return { status: net.mode === "wrong" || key === BAD ? 401 : 200 };
+		if (net.mode === "403") return { status: 403, text: async () => JSON.stringify({ type: "error", error: { type: "permission_error", message: "x" } }) };
+		if (net.mode === "proxy") return { status: 401, text: async () => "<html><body>Sign in to the company network</body></html>" };
+		if (net.mode === "401other") return { status: 401, text: async () => JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "x" } }) };
+		if (net.mode === "wrong" || key === BAD) return { status: 401, text: async () => JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }) };
+		return { status: 200 };
 	};
 	const auth = { check: async () => ({ ok: true }), login: async () => ({ ok: true }) }; // the engine's check is no longer used by saving
-	const setup = createSetup({ keystore: f.keystore, engine: f.engine, auth, settings: { get: () => store, set: (p) => Object.assign(store, p) }, send: (c, p) => sent.push([c, p]), hold: (n) => f.control.hold(n), waitingChats: () => chats, fetch, now: () => clock, plansPerMinute });
-	return { f, setup, store, sent, fetches, net, chats, tick: (ms) => (clock += ms) };
+	const setup = createSetup({ keystore: f.keystore, engine: f.engine, auth, settings: { get: () => store, set: (p) => Object.assign(store, p) }, send: (c, p) => sent.push([c, p]), hold: (n) => f.control.hold(n), waitingChats: () => chats, windowOf: (id) => windows[id], fetch, now: () => clock, plansPerMinute });
+	return { f, setup, store, sent, fetches, net, chats, windows, tick: (ms) => (clock += ms) };
 }
 const FROM = { senderId: 7, chatId: "c1" };
 const settle = () => new Promise((r) => setTimeout(r, 20));
@@ -292,4 +297,69 @@ test("no second plan or download while our own download runs, even when the engi
 	assert.equal(plans, 1, "the engine was not asked for another plan");
 	release();
 	assert.equal((await run).ok, true);
+});
+
+// --- review round 2: the plan needs the named chat and its own window; only a real 401 is a wrong key ---------------------------------------
+test("a plan with no chat id is refused (no fallback to the first waiting chat), and so is a sender that is not the chat's window", async () => {
+	const t = make({ waiting: ["c1", "c2"] });
+	for (const chatId of [null, undefined, "", 5]) wrong(await t.setup.enginePlan({ senderId: 7, chatId }), /Start a Claude Agent chat/);
+	wrong(await t.setup.enginePlan({ senderId: 8, chatId: "c1" }), /Start a Claude Agent chat/); // c1 is shown by window 7
+	wrong(await t.setup.enginePlan({ chatId: "c1" }), /Start a Claude Agent chat/); // no sender
+	assert.equal((await t.setup.enginePlan({ senderId: 7, chatId: "c1" })).ok, true);
+	// the download must name the same chat from the same window
+	let plan = await t.setup.enginePlan(FROM);
+	wrong(await t.setup.engineDownload({ token: plan.token, senderId: 7 }), /Nothing was confirmed/);
+});
+
+test("only a 401 with Anthropic's authentication_error is a wrong key; a 403, a proxy page and another 401 are 'could not be checked' and delete nothing", async () => {
+	const { checkKey } = require("../src/agents/claude/keycheck");
+	const answer = (status, text) => ({ fetch: async () => ({ status, text: async () => text }) });
+	const authErr = JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
+	const r401 = await checkKey(GOOD, answer(401, authErr));
+	assert.equal(r401.rejected, true);
+	assert.equal(r401.wrong, true);
+	for (const [status, body] of [[403, authErr], [403, "<html>blocked</html>"], [401, "<html>login</html>"], [401, "not json"], [401, ""], [401, JSON.stringify({ type: "error", error: { type: "permission_error" } })], [401, JSON.stringify({ error: { type: "authentication_error" } })], [407, authErr], [401, "x".repeat(20000)]]) {
+		const r = await checkKey(GOOD, answer(status, body));
+		assert.equal(r.ok, false, status + body.slice(0, 20));
+		assert.equal(r.unreachable, true, "no verdict: " + status + " " + body.slice(0, 20));
+		assert.equal(r.rejected, undefined);
+		assert.equal(r.wrong, undefined);
+	}
+	const noBody = await checkKey(GOOD, { fetch: async () => ({ status: 401 }) });
+	assert.equal(noBody.unreachable, true, "a 401 whose body cannot be read is no verdict");
+	assert.ok(!JSON.stringify(r401).includes(GOOD));
+});
+
+test("a stored key that is checked later is deleted only on that exact 401; a 403, a proxy page, another 401 and an unreadable key keep it", async () => {
+	for (const mode of ["403", "proxy", "401other", "limit", "down"]) {
+		const t = make();
+		t.net.mode = "down";
+		await t.setup.saveKey(GOOD);
+		t.net.mode = mode;
+		await t.setup.checkStored();
+		assert.equal((await t.f.keystore.status()).source, "stored", mode + ": the key is kept");
+		assert.equal(t.store.claudeKeyUnchecked, true, mode + ": still not checked");
+		const s = await t.setup.state();
+		assert.notEqual(s.key.state, "failed", mode);
+	}
+	// saving with a 403 or a proxy page: stored, marked not checked yet
+	for (const mode of ["403", "proxy"]) {
+		const t = make();
+		t.net.mode = mode;
+		assert.deepEqual(await t.setup.saveKey(GOOD), { ok: true, unchecked: true }, mode);
+		assert.equal((await t.f.keystore.status()).source, "stored");
+	}
+	// an unreadable stored key: no verdict, nothing is deleted
+	const u = make();
+	u.net.mode = "down";
+	await u.setup.saveKey(GOOD);
+	const real = u.f.keystore.read;
+	u.f.keystore.read = async () => ({ key: null, reason: "unreadable" });
+	u.net.mode = "wrong";
+	let cleared = 0;
+	const clear = u.f.keystore.clear;
+	u.f.keystore.clear = async () => (cleared++, clear.call(u.f.keystore));
+	await u.setup.checkStored();
+	assert.equal(cleared, 0, "an unreadable key is not deleted");
+	u.f.keystore.read = real;
 });

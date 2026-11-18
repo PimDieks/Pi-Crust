@@ -373,29 +373,6 @@ test("a grant for a Bash command does not cover the same text in PowerShell, nor
 	await b.can("PowerShell", { command: "npm run x" });
 	assert.equal(b.asked.length, 3, "clearing the grants clears PowerShell's too");
 });
-test("reading /proc/<anything>/environ asks (once only) and is denied in Plan, through the shell and the read tools", async () => {
-	const cases = [["Bash", { command: "cat /proc/self/environ" }], ["Bash", { command: "cat /proc/1234/environ" }], ["Bash", { command: "rg X /proc/self/environ" }], ["Read", { file_path: "/proc/self/environ" }], ["Read", { file_path: "\\proc\\self\\environ" }], ["Grep", { pattern: "KEY", path: "/proc/12/environ" }], ["Bash", { command: "cat /proc/self/../self/environ" }]];
-	for (const [tool, input] of cases) {
-		for (const mode of ["ask-edits", "ask-commands"]) {
-			const a = rig(mode, "Allow once");
-			assert.equal((await a.can(tool, input)).behavior, "allow", `${mode} ${tool} ${JSON.stringify(input)} after Allow`);
-			assert.equal(a.asked.length, 1, `${mode} ${JSON.stringify(input)} asks`);
-			assert.deepEqual(a.asked[0].prompt.options, ["Allow once", "Deny"], "no 'for this chat'");
-			await a.can(tool, input);
-			assert.equal(a.asked.length, 2, "asks every time");
-			const n = rig(mode, "undefined");
-			assert.equal((await n.can(tool, input)).behavior, "deny");
-			assert.equal((await rig(mode, "Allow for this chat").can(tool, input)).behavior, "deny", "not offered, so it does not allow");
-		}
-		const p = rig("plan", "Allow once");
-		const r = await p.can(tool, input);
-		assert.equal(r.behavior, "deny", `plan ${JSON.stringify(input)}`);
-		assert.equal(p.asked.length, 0);
-	}
-	const ok = rig("ask-commands", "undefined");
-	assert.equal((await ok.can("Bash", { command: "cat /etc/hostname" })).behavior, "allow");
-	assert.equal((await ok.can("Read", { file_path: inP("src/environment.js") })).behavior, "allow");
-});
 
 // --- second review round ---------------------------------------------------------------------------------
 test("ExitPlanMode: allowedPrompts is removed from updatedInput on every allow path (asked and trusted)", async () => {
@@ -409,29 +386,6 @@ test("ExitPlanMode: allowedPrompts is removed from updatedInput on every allow p
 	assert.ok(input.allowedPrompts, "the caller's input is not changed");
 });
 
-test("anything that touches /proc asks, and Plan denies it, however the text is split or quoted", async () => {
-	const cases = [
-		["Grep", { pattern: "sk-ant", path: "/proc/self" }],
-		["Grep", { path: "/proc/self", glob: "environ" }],
-		["Grep", { pattern: "x", path: "\\proc\\self" }],
-		["Read", { file_path: "\\proc\\self\\cmdline" }],
-		["Bash", { command: "grep -r ANTHROPIC /proc/self/" }],
-		["Bash", { command: 'cat /proc/self/e""nviron' }],
-		["Bash", { command: "cat /pr'oc'/self/environ" }],
-		["Bash", { command: "cat //proc//self/environ" }],
-	];
-	for (const [tool, input] of cases) {
-		const a = rig("ask-commands", "Deny");
-		assert.equal((await a.can(tool, input)).behavior, "deny", JSON.stringify(input));
-		assert.equal(a.asked.length, 1, "asks: " + JSON.stringify(input));
-		const p = rig("plan", "Allow once");
-		assert.equal((await p.can(tool, input)).behavior, "deny", "plan " + JSON.stringify(input));
-		assert.equal(p.asked.length, 0);
-	}
-	const ok = rig("ask-commands", "undefined");
-	assert.equal((await ok.can("Read", { file_path: inP("src/process.js") })).behavior, "allow");
-	assert.equal((await ok.can("Grep", { pattern: "proc", path: inP("src") })).behavior, "allow");
-});
 
 test("every part of EXTRA_PATH_KEY is judged: path, file, dir, in any case", async () => {
 	for (const key of ["notebook_path", "other_file", "target_dir", "TARGET_DIR", "Notebook_Path", "OtherFile"]) {
@@ -465,40 +419,100 @@ test("ask prompts show the plain tool name and make no claim about the subagent'
 	}
 });
 
-// Review round: the failing inputs of the security review, and the same rule in Trusted.
-const PROC_ROUND = [
+// The /proc rule (review round 2): one precise rule for the file tools, one plain check for the shell, none in Trusted. The real defence for
+// the key is the engine's subprocess environment scrub; this only asks.
+const BS = String.fromCharCode(92);
+const PROC_ASKS = [
+	["Read", { file_path: "/proc/self/environ" }],
+	["Read", { file_path: "/proc/1234/cmdline" }],
+	["Read", { file_path: "//proc//self/environ" }],
+	["Read", { file_path: "/tmp/../proc/self/environ" }],
+	["Read", { file_path: "~/../../proc/self/environ" }],
+	["Read", { file_path: "/PROC/self/environ" }],
+	["Grep", { pattern: "KEY", path: "/proc/12/environ" }],
+	["Grep", { pattern: "x", path: "/proc/self" }],
+	["Grep", { pattern: "sk-ant", path: "/" }],
+	["Grep", { pattern: "sk-ant", path: "/." }],
+	["Grep", { pattern: "sk-ant", path: "/tmp/.." }],
+	["Grep", { pattern: "sk-ant", path: "~/../.." }],
+	["Grep", { pattern: "sk-ant", path: "//" }],
 	["Grep", { pattern: "sk-ant", path: "/", glob: "proc/*/environ" }],
-	["Grep", { pattern: "x", path: "/pro?/x" }],
-	["Grep", { pattern: "x", path: "/p[r]oc/self" }],
-	["Grep", { pattern: "x", path: "/{proc,tmp}/self" }],
-	["Grep", { pattern: "ANTHROPIC", path: "/" }],
+	["Glob", { pattern: "/proc/*/environ" }],
 	["Glob", { pattern: "/pr*/self/environ" }],
+	["Glob", { pattern: "/p?oc/self/environ" }],
 	["Glob", { pattern: "proc/*/environ", path: "/" }],
-	["Bash", { command: "cat /pr\\oc/self/environ" }],
-	["Bash", { command: "cat /pro?/self/environ" }],
-	["Bash", { command: "cat /p*/self/environ" }],
+	["Glob", { pattern: "../proc/*/environ", path: "/tmp" }],
+	["Bash", { command: "cat /proc/self/environ" }],
+	["Bash", { command: "cat /proc/1234/environ" }],
+	["Bash", { command: "rg X /proc/self/environ" }],
+	["Bash", { command: 'cat /proc/self/e""nviron' }],
+	["Bash", { command: "cat /pr'oc'/self/environ" }],
+	["Bash", { command: "cat /pr" + BS + "oc/self/environ" }],
+	["Bash", { command: "cat //proc//self/environ" }],
+	["PowerShell", { command: "Get-Content /proc/self/environ" }],
 ];
-test("a search rooted at / or with a wildcard in the first part, and a backslash inside a POSIX path, ask like /proc itself (Plan denies)", async () => {
-	for (const [tool, input] of PROC_ROUND) {
-		const a = rig("ask-commands", "Deny");
-		assert.equal((await a.can(tool, input)).behavior, "deny", JSON.stringify(input));
-		assert.equal(a.asked.length, 1, "asks: " + tool + " " + JSON.stringify(input));
+test("reading a process environment asks in the ask modes (once only, risky) and is denied in Plan: file tools by path, shell by text", async () => {
+	for (const [tool, input] of PROC_ASKS) {
+		for (const mode of ["ask-edits", "ask-commands"]) {
+			const d = rig(mode, "Deny");
+			assert.equal((await d.can(tool, input)).behavior, "deny", `${mode} ${tool} ${JSON.stringify(input)}`);
+			assert.equal(d.asked.length, 1, `${mode} asks: ${tool} ${JSON.stringify(input)}`);
+			assert.deepEqual(d.asked[0].prompt.options, ["Allow once", "Deny"], "no 'for this chat'");
+			assert.equal(d.asked[0].prompt.risky, true);
+			const a = rig(mode, "Allow once");
+			assert.equal((await a.can(tool, input)).behavior, "allow");
+			await a.can(tool, input);
+			assert.equal(a.asked.length, 2, "asks every time");
+			assert.equal((await rig(mode, "Allow for this chat").can(tool, input)).behavior, "deny", "not offered, so it does not allow");
+		}
 		const p = rig("plan", "Allow once");
-		assert.equal((await p.can(tool, input)).behavior, "deny", "plan " + JSON.stringify(input));
+		assert.equal((await p.can(tool, input)).behavior, "deny", `plan ${JSON.stringify(input)}`);
 		assert.equal(p.asked.length, 0);
 	}
 });
 
-test("the /proc rule applies in Trusted too: it asks, and Allow once lets the call through", async () => {
-	for (const [tool, input] of [...PROC_ROUND, ["Read", { file_path: "/proc/self/environ" }], ["Bash", { command: "cat /proc/self/environ" }]]) {
-		const d = rig("trusted", "Deny");
-		assert.equal((await d.can(tool, input)).behavior, "deny", JSON.stringify(input));
-		assert.equal(d.asked.length, 1, "Trusted asks: " + tool + " " + JSON.stringify(input));
-		assert.match(d.asked[0].prompt.title, /process environment/);
-		const ok = rig("trusted", "Allow once");
-		assert.equal((await ok.can(tool, input)).behavior, "allow");
+test("there is no /proc rule in Trusted: nothing asks, as for Pi", async () => {
+	for (const [tool, input] of [...PROC_ASKS, ["Bash", { command: 'echo "/*"' }], ["Bash", { command: "npm test --grep=/ab*c/" }]]) {
+		const t = rig("trusted", "Deny");
+		assert.equal((await t.can(tool, input)).behavior, "allow", `${tool} ${JSON.stringify(input)}`);
+		assert.equal(t.asked.length, 0, `Trusted asks nothing: ${tool} ${JSON.stringify(input)}`);
 	}
 });
+
+test("these no longer ask: names that only contain 'proc', a search for the word /proc, and ordinary globs and slashes", async () => {
+	const QUIET = [
+		["Read", { file_path: inP("src/proc.js") }],
+		["Read", { file_path: "src/proc.js" }],
+		["Read", { file_path: "proj/proc/readme.md" }],
+		["Read", { file_path: inP("src/process.js") }],
+		["Read", { file_path: "C:" + BS + "proc" + BS + "x.txt" }],
+		["Grep", { pattern: "/proc", path: inP("src") }],
+		["Grep", { pattern: "/proc" }],
+		["Grep", { pattern: "proc", path: inP("src") }],
+		["Grep", { pattern: "/", path: inP("src") }],
+		["Grep", { pattern: "a|b", path: inP("src"), glob: "*.js" }],
+		["Grep", { pattern: "x", path: inP("src"), glob: "proc/**" }],
+		["Glob", { pattern: "**/*.js", path: inP("src") }],
+		["Glob", { pattern: "src/proc/*.js" }],
+		["Bash", { command: "node ./proc.js" }],
+		["Bash", { command: "git log -- src/proc/x.js" }],
+		["Bash", { command: "ls proj/proc/" }],
+		["Bash", { command: 'echo "/*"' }],
+		["Bash", { command: "npm test --grep=/ab*c/" }],
+		["Bash", { command: "cat /proc/cpuinfo" }],
+	];
+	for (const [tool, input] of QUIET) {
+		for (const mode of ["ask-edits", "ask-commands"]) {
+			const a = rig(mode, "Deny");
+			const r = await a.can(tool, input);
+			const prompts = a.asked.map((x) => x.prompt.title);
+			// a read-only command may still be one an ask mode asks about; only the /proc prompt is the subject here
+			assert.ok(!prompts.some((t) => /process environment/.test(t)), `${mode} ${tool} ${JSON.stringify(input)} asked about a process environment`);
+			if (tool !== "Bash") assert.equal(r.behavior, "allow", `${mode} ${tool} ${JSON.stringify(input)}`);
+		}
+	}
+});
+
 
 test("the broader /proc rule does not ask for ordinary searches", async () => {
 	for (const [tool, input] of [
