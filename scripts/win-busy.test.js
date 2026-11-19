@@ -32,14 +32,21 @@ test("parse: one object, an array, nothing", () => {
 	assert.deepStrictEqual(parse(""), []);
 });
 
-test("checkAll on Windows: a pid without children is idle, a cmd.exe running ping is busy", { skip: process.platform !== "win32" }, async () => {
+test("checkAll on Windows: a pid without children is idle, a cmd.exe running ping is busy", { skip: process.platform !== "win32", timeout: 30000 }, async () => {
 	const { spawn } = require("node:child_process");
 	const sh = spawn(process.env.ComSpec || "cmd.exe", ["/c", "ping -n 20 127.0.0.1 >nul"], { windowsHide: true, stdio: "ignore" });
-	await new Promise((r) => setTimeout(r, 800));
-	const m = await new Promise((r) => checkAll([{ pid: 999999, exe: "cmd.exe" }, { pid: sh.pid, exe: "cmd.exe" }], r));
-	sh.kill();
-	assert.strictEqual(m.get(999999), null);
-	assert.match(String(m.get(sh.pid)), /ping/i);
+	try {
+		await new Promise((r) => setTimeout(r, 800));
+		const m = await new Promise((r) => checkAll([{ pid: 999999, exe: "cmd.exe" }, { pid: sh.pid, exe: "cmd.exe" }], r, { limitMs: 20000 }));
+		assert.ok(m, "the check answered");
+		assert.strictEqual(m.get(999999), null);
+		assert.match(String(m.get(sh.pid)), /ping/i);
+	} finally {
+		try {
+			spawn("taskkill", ["/pid", String(sh.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+		} catch {}
+		sh.kill();
+	}
 });
 
 test("checkAll: the time limit gives undefined", { skip: process.platform !== "win32" }, async () => {
