@@ -1613,6 +1613,7 @@ const ctx = {
 	// A pi-project address belongs to the OPEN project (snap-main.js: captureLive and its offscreen window accept no other).
 	isProjectAddress: (address) => projectProtocol.belongsToProject((SELFTEST && projectRootOverride) || REPO, address),
 	browserViewOf: (id) => viewerTabs.viewOf(id),
+	relayout: () => applyBrowserBounds(),
 	onTabLeave: (fn) => viewerTabs.onLeave(fn),
 	onTabEnter: (fn) => viewerTabs.onEnter(fn),
 	// The dev browser's last load failed (Chromium's error page, hidden behind #browser-error): nothing to screenshot.

@@ -103,30 +103,10 @@ function register(ctx) {
 		return entry;
 	}
 
-	// Shows a never-drawn hidden native view with only its bottom-right pixel inside the window (a view wholly outside it is never drawn): that
-	// one pixel sits at the window's top-left corner (0,0), for 150 ms to 1.5 s (8 tries 150 ms apart). Chromium then produces a frame, we
-	// capture it, restore the bounds and hide the view again. The view keeps its size, so the capture has the real size.
-	// Tried instead, here: the DevTools protocol Page.captureScreenshot on the hidden view never answers (also not after Page.bringToFront
-	// and focus emulation); a cover view over the page area is itself a visible rectangle.
-	async function captureViaOffscreenDraw(view, wc, rect) {
-		const b = view.getBounds();
-		let img = nativeImage.createEmpty();
-		try {
-			view.setBounds({ x: 1 - b.width, y: 1 - b.height, width: b.width, height: b.height });
-			view.setVisible(true);
-			for (let attempt = 0; attempt < 8 && img.isEmpty(); attempt++) {
-				await new Promise((r) => setTimeout(r, 150));
-				try {
-					wc.invalidate();
-					img = await wc.capturePage(rect && rect.width > 0 ? rect : undefined);
-				} catch {}
-			}
-		} finally {
-			view.setVisible(false);
-			view.setBounds(b);
-		}
-		return img;
-	}
+	// A never-drawn hidden native view is drawn once, off to the window's corner, by src/offscreen-draw.js (one at a time; it leaves the
+	// bounds and visibility to the layout code, ctx.relayout).
+	const offscreen = require("./offscreen-draw").create({ relayout: () => ctx.relayout?.() });
+	const captureViaOffscreenDraw = (view, wc, rect) => offscreen.draw(view, wc, rect, () => nativeImage.createEmpty());
 
 	// --- live capture of the dev browser -------------------------------------------------------
 	// skipEmpty (turn shots): nothing is stored for a page that failed to load or is blank. unlessSameAs: the id of an
