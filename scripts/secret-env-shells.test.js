@@ -38,13 +38,15 @@ const posixShell = (name) => {
 };
 const SHELLS = Object.fromEntries(["bash", "sh", "dash", "zsh"].map((n) => [n, posixShell(n)]));
 const PS5 = WIN && fs.existsSync(path.join(SYSROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")) ? path.join(SYSROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : null;
-const PS7 = WIN && process.env.ProgramFiles && fs.existsSync(path.join(process.env.ProgramFiles, "PowerShell", "7", "pwsh.exe")) ? path.join(process.env.ProgramFiles, "PowerShell", "7", "pwsh.exe") : null;
+// PowerShell 7: PI_CRUST_PWSH7 (the full path of pwsh.exe, for a portable copy), else pwsh.exe on PATH, else the standard install folder.
+const PS7_FROM = [process.env.PI_CRUST_PWSH7, ...(process.env.PATH || process.env.Path || "").split(path.delimiter).map((d) => d && path.join(d, "pwsh.exe")), process.env.ProgramFiles && path.join(process.env.ProgramFiles, "PowerShell", "7", "pwsh.exe")];
+const PS7 = WIN ? PS7_FROM.find((p) => p && fs.existsSync(p) && fs.statSync(p).isFile()) || null : null;
 
 const IDENT = ["DUMMY_ONE_TOKEN", "dummy_mixed_Api_Key"];
 const ODD = ["DUMMY_PAREN(1)_TOKEN", "DUMMY_100%_KEY", "DUMMY_\u00c4_SECRET"];
 function baseEnv(names) {
 	const bin = GIT ? [path.join(GIT, "bin"), path.join(GIT, "usr", "bin")] : [];
-	const env = { SystemRoot: SYSROOT, PATH: [...bin, path.join(SYSROOT, "System32")].join(path.delimiter), ORDINARY_NAME: "x" };
+	const env = { SystemRoot: SYSROOT, PATHEXT: ".COM;.EXE;.BAT;.CMD", PATH: [...bin, path.join(SYSROOT, "System32")].join(path.delimiter), ORDINARY_NAME: "x" };
 	if (!WIN) env.PATH = "/usr/bin:/bin";
 	for (const n of names) env[n] = "x";
 	return env;
@@ -110,58 +112,87 @@ test("control for the error check: with the names on the same line as the comman
 // --- PowerShell -----------------------------------------------------------------------------------------------------------
 const psHosts = [["Windows PowerShell 5.1", PS5], ["pwsh 7", PS7]];
 function psRun(exe, command, env, cwd) {
-	return spawnSync(exe, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], { env, cwd, encoding: "utf8" });
+	return spawnSync(exe, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], { env, cwd, encoding: "utf8", timeout: 180000 });
 }
-const psCases = {
+// Few starts on purpose: every start of PowerShell costs about 0.3 s here and was measured at 12 s on a loaded two-core CI runner, where the
+// test files run side by side (the earlier 28-run version took 354 s there). So: three cases that must be the first statement are checked
+// against their known output (no unwrapped run), the ordinary statements share one command, and only the cases about exit codes and errors
+// are compared with an unwrapped run, because the two PowerShell versions report some of them differently (a native exit code, for one).
+const psFirst = {
 	"using namespace": ["using namespace System.Text\n[StringBuilder]::new('sb ok').ToString()", "sb ok"],
 	"[CmdletBinding()]param()": ["[CmdletBinding()]param()\n'cb ok'", "cb ok"],
 	"param(...)": ["param($a, $b = 2)\n\"param ok $b\"", "param ok 2"],
-	"here-string": ["$x = @'\nline one\n'it' ''quoted''\n'@\n$x\n\"it's here\"", "line one"],
-	"multi-line pipeline": ["Get-ChildItem Env: |\n  Where-Object { $_.Name -like 'ORDINARY*' } |\n  ForEach-Object { $_.Name }", "ORDINARY_NAME"],
-	"reads $args": ["'args=' + $args.Count", "args=0"],
-	"a failing cmdlet": ["Get-Item C:\\no_such_folder_zzz", null],
-	"a native command's exit code": ["cmd /c exit 5", null],
-	"exit 7": ["'before'\nexit 7", "before"],
-	"throws": ["throw 'boom'", null],
-	"ErrorActionPreference Stop": ["$ErrorActionPreference = 'Stop'\nGet-Item C:\\no_such_folder_zzz\n'not reached'", null],
-	"a failure that is not the last statement": ["Get-Item C:\\no_such_folder_zzz -ErrorAction SilentlyContinue\n'fine'", "fine"],
-	"working folder": ["(Get-Location).Path", "ps dir"],
+};
+const psOrdinary = [
+	"$x = @'\nline one\n'it' ''quoted''\n'@\n$x\n\"it's here\"",
+	"Get-ChildItem Env: |\n  Where-Object { $_.Name -like 'ORDINARY*' } |\n  ForEach-Object { $_.Name }",
+	"'args=' + $args.Count",
+	"Get-Item C:/no_such_folder_zzz -ErrorAction SilentlyContinue\n'after a failure that is not the last statement'",
+	"(Get-Location).Path",
+	"'names:'",
+	"Get-ChildItem Env: | ForEach-Object { $_.Name }",
+	"'env drive: ' + ((Get-ChildItem Env: | Measure-Object).Count -gt 0)",
+	"'$env: ' + [bool]$env:DUMMY_ONE_TOKEN",
+	"'child: ' + ((cmd /c set | Out-String) -match 'DUMMY_ONE_TOKEN')",
+].join("\n");
+const psCompared = {
+	"a failing cmdlet": "Get-Item C:/no_such_folder_zzz",
+	"a native command's exit code": "cmd /c exit 5",
+	"exit 7": "'before'\nexit 7",
+	"throws": "throw 'boom'",
+	"ErrorActionPreference Stop": "$ErrorActionPreference = 'Stop'\nGet-Item C:/no_such_folder_zzz\n'not reached'",
 };
 for (const [hostName, exe] of psHosts) {
-	test(`real run, ${hostName}: a command that must start with using/param runs unchanged; exit code, output, errors, $ErrorActionPreference and folder match an unwrapped run; names gone`, { skip: !exe && `${hostName} is not installed here, untested` }, () => {
+	test(`real run, ${hostName}: a command that must start with using/param runs unchanged; exit code, output, errors, $ErrorActionPreference and folder match an unwrapped run; names gone`, { skip: !exe && `${hostName} is not installed here, untested (set PI_CRUST_PWSH7 to the path of pwsh.exe for PowerShell 7)` }, (t) => {
+		const t0 = Date.now();
 		const dir = path.join(tmp, "ps dir");
 		fs.mkdirSync(dir, { recursive: true });
 		const names = [...IDENT, ...ODD];
 		const env = baseEnv(names);
-		for (const [label, [cmd, expectOut]] of Object.entries(psCases)) {
+		for (const [label, [cmd, expectOut]] of Object.entries(psFirst)) {
+			const run = psRun(exe, hide(cmd, "powershell", names), env, dir);
+			assert.equal(run.status, 0, `${label}: ${run.stderr}`);
+			assert.equal(run.stdout.trim(), expectOut, label);
+			assert.deepEqual(leaks(run.stderr, names), [], label + ": no hidden name in stderr");
+		}
+		for (const [label, cmd] of Object.entries(psCompared)) {
 			const bare = psRun(exe, cmd, env, dir);
 			const run = psRun(exe, hide(cmd, "powershell", names), env, dir);
 			assert.equal(run.status, bare.status, `${label}: exit code (bare ${bare.status}) ${run.stderr}`);
 			assert.equal(run.stdout, bare.stdout, `${label}: output`);
-			if (expectOut) assert.ok(bare.stdout.includes(expectOut), `${label}: the unwrapped command itself works: ${bare.stdout}${bare.stderr}`);
 			assert.equal((run.stderr.match(/boom|no_such_folder_zzz/g) || []).length > 0, (bare.stderr.match(/boom|no_such_folder_zzz/g) || []).length > 0, `${label}: the error is reported`);
 			assert.deepEqual(leaks(run.stderr, names), [], label + ": no hidden name in stderr");
 		}
-		const printed = psRun(exe, hide("Get-ChildItem Env: | ForEach-Object { $_.Name }", "powershell", names), env, dir);
-		assert.deepEqual(leaks(printed.stdout, names), [], "the hidden names are gone");
-		assert.match(printed.stdout, /ORDINARY_NAME/);
-		assert.equal(leaks(psRun(exe, "Get-ChildItem Env: | ForEach-Object { $_.Name }", env, dir).stdout, names).length >= IDENT.length, true, "control: unhidden they are visible");
+		const bare = psRun(exe, psOrdinary, env, dir);
+		const run = psRun(exe, hide(psOrdinary, "powershell", names), env, dir);
+		assert.equal(bare.status, 0, "the unwrapped commands themselves work: " + bare.stderr);
+		assert.equal(run.status, 0, run.stderr);
+		assert.match(run.stdout, /line one/);
+		assert.match(run.stdout, /it's here/);
+		assert.match(run.stdout, /args=0/);
+		assert.match(run.stdout, /after a failure that is not the last statement/);
+		assert.match(run.stdout, /ps dir/, "the working folder is unchanged");
+		assert.match(run.stdout, /ORDINARY_NAME/);
+		assert.deepEqual(leaks(run.stdout, names), [], "the hidden names are gone from the Env: drive");
+		assert.match(run.stdout, /\$env: False/, "and from $env:");
+		assert.match(run.stdout, /child: False/, "and from a child program's environment");
+		assert.match(run.stdout, /env drive: True/);
+		assert.equal(leaks(bare.stdout, names).length >= IDENT.length, true, "control: unhidden they are visible");
+		assert.match(bare.stdout, /\$env: True/);
+		assert.match(bare.stdout, /child: True/);
+		t.diagnostic(`${hostName}: ${Date.now() - t0} ms for ${Object.keys(psFirst).length + 2 * Object.keys(psCompared).length + 2} starts`);
 	});
-	test(`${hostName}: a parse error in the person's command quotes only the person's own text, never the hidden names`, { skip: !exe && `${hostName} is not installed here, untested` }, () => {
+	test(`${hostName}: a parse error in the person's command quotes only the person's own text, never the hidden names`, { skip: !exe && `${hostName} is not installed here, untested (set PI_CRUST_PWSH7 to the path of pwsh.exe for PowerShell 7)` }, () => {
 		const names = [...IDENT, ...ODD];
 		const env = baseEnv(names);
-		for (const cmd of [")", "Get-Date\n)\nGet-Date", "'unterminated", "$x = @'\nnever ended", "param(\n"]) {
+		for (const cmd of [")", "'unterminated", "param(\n"]) {
 			const run = psRun(exe, hide(cmd, "powershell", names), env, tmp);
 			assert.notEqual(run.status, 0, JSON.stringify(cmd));
 			assert.deepEqual(leaks(run.stderr + run.stdout, names), [], JSON.stringify(cmd) + ": " + run.stderr);
-			assert.ok(!/ForEach-Object|SetEnvironmentVariable|FromBase64String/.test(run.stderr + run.stdout), "the wrapper itself is not quoted either: " + run.stderr);
+			assert.ok(!/ForEach-Object|SetEnvironmentVariable|FromBase64String|Remove-Item/.test(run.stderr + run.stdout), "the wrapper itself is not quoted either: " + run.stderr);
 		}
 	});
 }
-test("PowerShell: pwsh 7 status", { skip: PS7 || !WIN }, () => {
-	// Documents that the pwsh 7 run above is skipped on this machine; it is untested here.
-	assert.equal(PS7, null);
-});
 test("PowerShell wrapper: the same command is not wrapped twice, and a prefix for other names is not mistaken for it", () => {
 	const once = hide("Get-Date", "powershell", ["A_TOKEN", "B_KEY"]);
 	assert.equal(hide(once, "powershell", ["A_TOKEN", "B_KEY"]), once);

@@ -84,10 +84,12 @@ const psName = (n) => (/^[A-Za-z0-9_]+$/.test(n) ? `'${n}'` : `(-join [char[]]($
 //   posix       "unset -v A B\n<command>" (a name that is not a shell identifier, such as "ProgramFiles(x86)" or one with a non-ASCII letter, cannot
 //               be unset and bash still hands it on: then the whole command runs through
 //               `exec env -u NAME ... "${BASH:-${0#-}}" -c '<command>' "$0"`, which is one line whose quoted text is only the person's command)
-//   powershell  "'A','B' | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }\n<wrapper>": the line that clears the
+//   powershell  "'A','B' | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process'); Remove-Item -LiteralPath ('Env:' + $_) -ErrorAction SilentlyContinue }\n<wrapper>": the line that clears the
 //               names, then the person's command, unchanged, as a script block built from its Base64 text and dot-sourced. A command may have to
 //               start with `using namespace`, `[CmdletBinding()]param()` or `param(...)`, which only work as the first statement of the text
 //               they belong to, so nothing may come before them in it. A last line copies the command's own success flag into the exit code.
+//   Both calls matter: SetEnvironmentVariable clears the process block child programs inherit (all that Windows PowerShell 5.1 needs), but
+//   PowerShell 7 keeps its own copy for `Get-ChildItem Env:` and `$env:NAME`, which only Remove-Item on the Env: drive clears (found with pwsh 7.7).
 // Idempotent: a command that already starts with exactly this prefix (or this wrapper) is returned as it is. No names: the command is returned
 // unchanged. Returns { ok: true, command, hidden } or { ok: false, reason } for a shell this cannot write for (fail closed) or a command too
 // long for the Windows command line once wrapped.
@@ -110,7 +112,7 @@ function hideCommand(command, family, names, { platform = process.platform } = {
 	if (!list.length) return { ok: true, command, hidden: 0 };
 	const win = platform === "win32";
 	if (family === "powershell") {
-		const first = `${list.map(psName).join(",")} | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }\n`;
+		const first = `${list.map(psName).join(",")} | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process'); Remove-Item -LiteralPath ('Env:\' + $_) -ErrorAction SilentlyContinue }\n`;
 		if (command.startsWith(first + PS_MARK)) return { ok: true, command, hidden: list.length };
 		// The footer line makes the script block's last statement store its own success flag; the exit code then follows it as in an unwrapped command.
 		const b64 = Buffer.from(command + "\n\n$__crustOk = $?", "utf8").toString("base64");

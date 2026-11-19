@@ -17,7 +17,7 @@ const WIN = process.platform === "win32";
 const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "secret-env-")));
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-const PS_TAIL = " | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }";
+const PS_TAIL = " | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process'); Remove-Item -LiteralPath ('Env:' + $_) -ErrorAction SilentlyContinue }";
 // The hidden names are on the first line, alone; what follows is the person's command (posix) or the wrapper of it (PowerShell).
 const firstLine = (cmd) => cmd.split("\n")[0];
 const posixNames = (cmd) => firstLine(cmd).replace(/^unset -v /, "").split(" ").sort();
@@ -155,7 +155,7 @@ const DUMMIES = ["DUMMY_ONE_TOKEN", "dummy_mixed_Api_Key", "DUMMY_PAREN(1)_TOKEN
 const KEEP = ["DUMMY_KEEPME_TOKEN"];
 function dummyEnv(extra = {}) {
 	const dir = BASH ? path.dirname(BASH) : "";
-	const env = { SystemRoot: SYSROOT, PATH: [dir, path.join(dir, "..", "usr", "bin"), path.join(SYSROOT, "System32")].join(path.delimiter), ORDINARY_NAME: "x", ...extra };
+	const env = { SystemRoot: SYSROOT, PATHEXT: ".COM;.EXE;.BAT;.CMD", PATH: [dir, path.join(dir, "..", "usr", "bin"), path.join(SYSROOT, "System32")].join(path.delimiter), ORDINARY_NAME: "x", ...extra };
 	for (const n of DUMMIES) env[n] = "x";
 	return env;
 }
