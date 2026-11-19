@@ -54,6 +54,23 @@
 		}
 	}
 
+	// A page the APP could not open (a story, the Mendix app or a chat link with no tab free: "8 pages is the most. Close one first."): main says
+	// it in this same line. It goes away by itself, or when the address bar's own refusal takes the line.
+	let noticeTimer = 0;
+	crust.browser.onNotice?.((n) => {
+		if (!n || !n.message) return;
+		clearTimeout(noticeTimer);
+		reasonEl.textContent = n.message;
+		reasonEl.dataset.for = "notice";
+		reasonEl.classList.add("show");
+		noticeTimer = setTimeout(() => {
+			if (reasonEl.dataset.for !== "notice") return;
+			reasonEl.classList.remove("show");
+			reasonEl.textContent = "";
+			reasonEl.dataset.for = "";
+		}, 6000);
+	});
+
 	// Enter: close the list, ask main. Main decides (a project file, a web address, or a refusal with its reason).
 	async function go(text) {
 		close();

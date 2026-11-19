@@ -806,6 +806,8 @@ ipcMain.handle("browser:theme", (_e, setting, bg) => {
 	}
 });
 ipcMain.handle("browser:navigate", (_e, url) => viewerTabs.navigate(url));
+// A page the app opens for the person (a story, the Mendix app): a tab on that site, else a new one (viewer-tabs-main.js openSite).
+ipcMain.handle("browser:openSite", (_e, url) => viewerTabs.openSite(String(url || "")));
 ipcMain.handle("browser:action", (_e, action) => viewerTabs.action(action));
 
 ipcMain.handle("browser:pick", async (_e, opts) => {
@@ -1315,7 +1317,7 @@ function createWindow() {
 		} catch {
 			return;
 		}
-		if (isLocal(url)) viewerTabs.navigate(url).catch(() => {});
+		if (isLocal(url)) viewerTabs.openSite(url).catch(() => {}); // a tab on that site, else a new one; the limit is said in the Viewer's reason line
 		else shell.openExternal(url);
 	};
 	win.webContents.setWindowOpenHandler(({ url }) => {
@@ -1608,8 +1610,9 @@ app.whenReady().then(() => {
 	}
 	app.setName("Pi Crust");
 	// pi-project:// on its own session only (never persist:devbrowser): the handler, the request guard, no permissions, no downloads, no popups.
-	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
+	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "", onRequest: (d) => viewerTabs.requestSeen(d) });
 	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, getWin: () => win, devUrl: DEV_URL, userData: () => app.getPath("userData") });
+	if (SELFTEST) require("./viewer-reload-selftest-main").register({ ipcMain, viewerTabs, setRoot: (r) => (projectRootOverride = r), getWin: () => win, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
 	if (SELFTEST) require("./viewer-open-selftest-main").register({ ipcMain, viewerTabs, setRoot: (r) => (projectRootOverride = r), getWin: () => win, ctxView: () => ctx.browserView, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
 	if (SELFTEST) require("./viewer-files-selftest-main").register({ ipcMain, BrowserWindow, session: electronSession, setRoot: (r) => (projectRootOverride = r) });
 	buildMenu();

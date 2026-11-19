@@ -221,3 +221,18 @@ test("store: at most 8 tabs, titles are cleaned and cut", () => {
 	assert.ok(r.tabs.every((t) => t.title.length <= S.TITLE_MAX && !/[\u0000-\u001f]/.test(t.title)));
 	fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("sameSite: same scheme, host and port, web tabs only; the active tab wins", () => {
+	const l = L.create();
+	const a = L.add(l, web("http://localhost:6006/iframe.html?id=a")).tab;
+	const b = L.add(l, web("https://localhost:6006/")).tab;
+	const p = L.add(l, proj("pi-project://p-abc/x.html")).tab;
+	assert.equal(L.sameSite(l, "http://localhost:6006/other").id, a.id);
+	assert.equal(L.sameSite(l, "https://localhost:6006/other").id, b.id, "another scheme is another site");
+	assert.equal(L.sameSite(l, "http://localhost:6007/"), null, "another port is another site");
+	assert.equal(L.sameSite(l, "http://LOCALHOST:6006/").id, a.id, "the host is case-blind");
+	assert.equal(L.sameSite(l, "pi-project://p-abc/y.html"), null, "a project address is never a site for the apps' pages");
+	assert.equal(L.sameSite(l, "nonsense"), null);
+	L.activate(l, p.id);
+	assert.equal(L.sameSite(l, "http://localhost:6006/").id, a.id);
+});

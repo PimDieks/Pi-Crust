@@ -67,4 +67,22 @@ function reusable(list, address) {
 	return (a && same(a) && a) || list.tabs.find(same) || null;
 }
 
-module.exports = { MAX_TABS, sessionOf, isProjectSession, siteOf, create, find, active, add, activate, close, reusable };
+// The tab that already shows this SITE: same scheme, host and port (task 14: stories, Mendix and chat links). Only a web tab counts. The
+// active tab wins, then the first in order. null when none.
+function originOf(address) {
+	try {
+		const u = new URL(String(address));
+		return u.protocol === "http:" || u.protocol === "https:" ? u.origin.toLowerCase() : "";
+	} catch {
+		return "";
+	}
+}
+function sameSite(list, address) {
+	const origin = originOf(address);
+	if (!origin) return null;
+	const same = (t) => t.session === "web" && originOf(t.address) === origin;
+	const a = active(list);
+	return (a && same(a) && a) || list.tabs.find(same) || null;
+}
+
+module.exports = { MAX_TABS, sessionOf, isProjectSession, siteOf, originOf, create, find, active, add, activate, close, reusable, sameSite };

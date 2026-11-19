@@ -18,7 +18,7 @@
 	let pollTimer = 0;
 	let filter = "";
 	let work = null; // { story, base, files } while a story is open in the Viewer tab
-	let browserUrl = ""; // the Viewer tab's URL (browser:state)
+	let browserUrl = ""; // the ACTIVE Viewer tab's URL (browser:state); the story bar shows while that tab shows the open story
 	let fsTimer = 0;
 	const thumbs = new Map(); // `${url}|${id}` -> data URL
 	const filesCache = new Map(); // same key -> Promise of storybook:resolve
@@ -465,7 +465,7 @@
 		browserUrl = isolatedUrl(base, story);
 		pendingNav = browserUrl;
 		renderBar();
-		crust.browser.navigate(browserUrl);
+		crust.browser.openSite(browserUrl); // a tab on the Storybook site, else a new one (the bar follows the tab that shows the story)
 		switchTab("browser");
 		const mine = work;
 		const files = await filesOf(story, base);
@@ -529,7 +529,7 @@
 		kids.push(btn("Component", files.componentFile || "The component's file wasn't found", () => openFile(files.componentFile), !files.componentFile));
 		kids.push(btn("Stories file", files.storyFile || "The stories file wasn't found", () => openFile(files.storyFile), !files.storyFile));
 		if (/^https:\/\//i.test(files.figmaUrl)) kids.push(btn("Figma", files.figmaUrl, () => window.open(files.figmaUrl, "_blank", "noopener")));
-		kids.push(btn("Storybook UI", "Open the story in Storybook's own UI", () => crust.browser.navigate(uiUrl(base, story))));
+		kids.push(btn("Storybook UI", "Open the story in Storybook's own UI", () => crust.browser.openSite(uiUrl(base, story))));
 		const pi = btn(`Work on with ${agentLabel()}`, "Add the story's thumbnail and details to the chat input", () => askPi(story, base));
 		pi.classList.add("primary");
 		kids.push(pi);

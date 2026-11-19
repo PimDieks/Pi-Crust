@@ -22,6 +22,9 @@ const pf = require("./project-files");
 const K = require("./viewer-kind");
 const S = require("./viewer-tabs-store");
 const VO = require("./viewer-open-logic");
+const RL = require("./viewer-reload");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
 
 const WEB_PARTITION = "persist:devbrowser";
 
@@ -32,7 +35,10 @@ function create(deps) {
 	const files = deps.files || pf;
 	const protocol = deps.protocol || pp;
 	const list = L.create();
-	const logic = VO.create({ files, protocol, breakMode: deps.selftest ? deps.breakMode : "" });
+	const brk = deps.selftest ? deps.breakMode || "" : ""; // selftest only: the deliberate breaks (reload-*, site-*) of the step viewer-reload
+	const logic = VO.create({ files, protocol, breakMode: brk });
+	// Live reload (spec task 12): which real files each project tab uses, watched by viewer-reload.js; a change arrives in changed().
+	const reload = RL.create({ breakMode: brk, debounceMs: brk === "reload-storm" ? 0 : undefined, onChange: (id) => changed(id) });
 	const views = new Map(); // tab id -> WebContentsView
 	let webSessionReady = false;
 	let bg = deps.nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0";
@@ -161,6 +167,7 @@ function create(deps) {
 			upd();
 		});
 		wc.on("did-start-navigation", (details) => {
+			if (details.isMainFrame && !details.isSameDocument && mine()) watchPage(tab, details.url);
 			if (!details.isMainFrame || details.isSameDocument || !tab.error) return;
 			tab.error = null;
 			if (isActive(tab)) deps.setErrorHidden(false);
@@ -271,6 +278,83 @@ function create(deps) {
 		return r;
 	}
 
+	// --- live reload (project files) -----------------------------------------------------------------------------------------------
+	// A project tab watches the file it shows and the files that page loaded through the project address (the address handler reports each
+	// request; requestSeen below), at most RL.MAX_FILES per tab, the list starting again at every navigation. A change, after a 250 ms quiet
+	// pause, reloads the tab when it is the active one; a tab in the background is marked stale and reloads once when it is shown. A web tab
+	// is never watched. A deleted or renamed page shows "This file no longer exists" and loads again when the file is back. The reload is
+	// wc.reload(): no focus change, Chromium keeps the scroll position, and the tab's loading state shows for a moment. A running pick is
+	// not cut off: the tab waits (stale) and reloads when the pick ends.
+	const MAX_SEEN = 128; // distinct request paths looked at per page: the bound on resolve calls
+	// The page's own file as a path under the real project folder, without the file having to exist (a deleted file is still watched, in
+	// its folder, until it returns). null for anything that is not a plain project path.
+	function pageCandidate(address) {
+		const root = deps.getRoot();
+		const p = protocol.fromAddress(root, address);
+		if (p == null) return null;
+		const segs = p.split("/").filter(Boolean);
+		if (!segs.length || segs.some((x) => x === "." || x === ".." || x.startsWith(".") || /[\\:\0]/.test(x))) return null;
+		let base;
+		try { base = (nodeFs.realpathSync.native || nodeFs.realpathSync)(root); } catch { return null; }
+		return nodePath.join(base, ...segs);
+	}
+	function watchPage(tab, address) {
+		reload.reset(tab.id);
+		tab.reqSeen = new Set();
+		if (!L.isProjectSession(tab.session)) return;
+		const c = pageCandidate(address);
+		if (c) reload.add(tab.id, c);
+	}
+	// From the address handler (project-protocol.js onRequest): a project page asked for a file.
+	function requestSeen(d) {
+		if (!d || d.resourceType === "mainFrame" || typeof d.webContentsId !== "number" || brk === "reload-deps") return;
+		const tab = list.tabs.find((t) => {
+			const v = views.get(t.id);
+			return v && !v.webContents.isDestroyed() && v.webContents.id === d.webContentsId;
+		});
+		if (!tab || !L.isProjectSession(tab.session)) return;
+		let u;
+		try { u = new URL(d.url); } catch { return; }
+		const root = deps.getRoot();
+		if (!protocol.belongsToProject(root, d.url)) return;
+		const seen = tab.reqSeen || (tab.reqSeen = new Set());
+		if (seen.has(u.pathname) || seen.size >= MAX_SEEN) return;
+		seen.add(u.pathname);
+		const r = files.resolve(root, u.pathname, "GET");
+		if (r.ok) reload.add(tab.id, r.file);
+	}
+	function changed(id) {
+		const tab = tabOf(id);
+		if (!tab) return;
+		if (brk === "reload-web") {
+			for (const t of list.tabs) if (t.session === "web" && wcOf(t)) { t.reloads = (t.reloads || 0) + 1; wcOf(t).reload(); }
+		}
+		if (!L.isProjectSession(tab.session)) return;
+		if ((!isActive(tab) && brk !== "reload-bg") || pickTab === tab) {
+			tab.stale = true;
+			return;
+		}
+		reloadTab(tab);
+	}
+	function reloadTab(tab) {
+		tab.stale = false;
+		if (fileGone(tab)) return showMissing(tab);
+		if (tab.lazy) return; // no page yet: it loads when shown
+		tab.reloads = (tab.reloads || 0) + 1;
+		if (tab.missing) return recheckMissing(tab);
+		const wc = wcOf(tab);
+		if (wc && !wc.isDestroyed()) wc.reload();
+	}
+	function showMissing(tab) {
+		if (brk === "reload-delete") return;
+		markMissing(tab);
+		if (isActive(tab)) {
+			deps.setErrorHidden(true);
+			deps.send("browser:error", tab.error);
+		}
+		report(tab);
+	}
+
 	// --- a restored tab ----------------------------------------------------------------------------------------------------------
 	const MISSING = "This file no longer exists";
 	function markMissing(tab) {
@@ -290,8 +374,10 @@ function create(deps) {
 		if (!tab.lazy) return;
 		tab.lazy = false;
 		buildView(tab);
-		if (fileGone(tab)) markMissing(tab);
-		else {
+		if (fileGone(tab)) {
+			markMissing(tab);
+			watchPage(tab, tab.address); // so the tab loads when the file comes back
+		} else {
 			tab.error = null;
 			tab.missing = false;
 			load(tab, tab.address);
@@ -307,6 +393,7 @@ function create(deps) {
 
 	function becameActive(tab) {
 		materialize(tab);
+		if (tab.stale) reloadTab(tab); // a page that changed while it was in the background loads once, now
 		deps.setErrorHidden(!!tab.error);
 		deps.relayout();
 		if (tab.error) deps.send("browser:error", tab.error);
@@ -357,6 +444,7 @@ function create(deps) {
 		if (pickTab && (pickTab === t || isActive(t))) await cancelPick();
 		if (isActive(t)) await leaveActive();
 		const view = views.get(id);
+		reload.drop(id);
 		const r = L.close(list, id);
 		views.delete(id);
 		if (view) {
@@ -428,6 +516,32 @@ function create(deps) {
 		return r.ok ? r : { ok: false, reason: r.reason, message: r.reason === "limit" ? VO.R.limit : VO.R.invalid };
 	}
 
+	// Pages the APP opens (a story in Design, the Mendix bar, a localhost link clicked in a chat; spec section B "Where pages go", task 14):
+	// one rule. A tab that already shows the site (same scheme, host and port) loads the address and becomes the active tab; else a new
+	// tab opens; at the limit with no tab on the site nothing is replaced and the reason shows in the Viewer's reason line (a notice to the
+	// UI, for callers that have no place to show it). The address bar keeps its own rule (navigate: the active tab).
+	async function openSite(address) {
+		const a = accept(address);
+		if (!a.ok || a.session !== "web") return { ok: false, reason: "refused", message: VO.R.unknown };
+		const same = brk === "site-new" ? null : L.sameSite(list, a.url);
+		if (same) {
+			load(same, a.url); // before the switch, so the tab reports the new address at once
+			await setActive(same.id);
+			return { ok: true, tabId: same.id, reused: true };
+		}
+		if (list.tabs.length >= L.MAX_TABS && brk === "site-limit") {
+			// selftest only: the deliberate break (the active tab is replaced at the limit)
+			const t = activeTab();
+			load(t, a.url);
+			return { ok: true, tabId: t.id, reused: true };
+		}
+		const r = await createTab(a.url);
+		if (r.ok) return { ok: true, tabId: r.tabId, reused: false };
+		const message = r.reason === "limit" ? VO.R.limit : VO.R.invalid;
+		deps.send("browser:notice", { message });
+		return { ok: false, reason: r.reason, message };
+	}
+
 	function action(name) {
 		const wc = wcOf(activeTab());
 		if (!wc) return;
@@ -477,6 +591,7 @@ function create(deps) {
 			return r;
 		} finally {
 			if (!toggled && pickTab === t) pickTab = null;
+			if (!pickTab && t.stale && isActive(t) && list.tabs.includes(t)) reloadTab(t); // a change that came in during the pick
 		}
 	}
 
@@ -583,6 +698,7 @@ function create(deps) {
 		return r.tab;
 	}
 	function destroyAll() {
+		reload.dropAll();
 		for (const [id, view] of [...views]) {
 			views.delete(id);
 			try { deps.getWin()?.contentView.removeChildView(view); } catch { /* gone */ }
@@ -613,6 +729,10 @@ function create(deps) {
 		close: closeTab,
 		navigate,
 		openFile,
+		openSite,
+		requestSeen,
+		// For the selftest and the tests: how many folders are watched, per tab the files it watches and how often it was reloaded by a change.
+		reloadStats: () => ({ watchers: reload.count(), tabs: list.tabs.map((t) => ({ id: t.id, address: t.address, session: t.session, stale: !!t.stale, missing: !!t.missing, reloads: t.reloads || 0, files: reload.filesOf(t.id) })) }),
 		action,
 		pick,
 		cancelPick,

@@ -143,11 +143,12 @@ function serve(request, root, files = pf, hostCheck = true) {
 }
 
 // --- the sessions -------------------------------------------------------------------------------------------------------------
-// opts: { session, app, getRoot, selftest, breakMode }. `breakMode` ("guard" | "host") only counts when `selftest` is true: the
+// opts: { session, app, getRoot, selftest, breakMode, onRequest(details) }. `onRequest` hears every request the guard let through
+// (details.webContentsId says which page asked; the Viewer's live reload uses it to know which files a page loaded). `breakMode` ("guard" | "host") only counts when `selftest` is true: the
 // deliberate breaks of the selftest step `viewer-files` (the step must then fail).
 // Returns the registry; `ensure(root)` sets up the project's session on first use and returns it. Nothing is put on any other session.
 let current = null;
-function register({ session, app, getRoot, selftest = false, breakMode = "" }) {
+function register({ session, app, getRoot, selftest = false, breakMode = "", onRequest = null }) {
 	const brk = selftest ? breakMode : "";
 	const sessions = new Map(); // host label -> session
 	const known = new Set();
@@ -176,6 +177,7 @@ function register({ session, app, getRoot, selftest = false, breakMode = "" }) {
 			let ok = false;
 			try { ok = brk === "guard" || guardAllows(details, getRoot()); } catch { /* cancel */ }
 			cb({ cancel: !ok });
+			if (ok && onRequest) { try { onRequest(details); } catch { /* a listener must not break a load */ } }
 		});
 		// No permission of any kind (camera, microphone, location, notifications, midi, clipboard...), no device, no download.
 		ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));

@@ -84,7 +84,7 @@
 	function openApp() {
 		if (!status.url) return;
 		switchTab("browser");
-		crust.browser.navigate(status.url);
+		crust.browser.openSite(status.url); // a tab on the app's site, else a new one
 	}
 	async function copyAdmin() {
 		const r = await crust.mendix.copyPassword();
