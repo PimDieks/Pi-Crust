@@ -14,6 +14,7 @@ const PDF = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Typ
 function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl }) {
 	let server = null;
 	let tmp = null;
+	let curRoot = null;
 	const stop = () => {
 		if (server) { try { server.close(); } catch { /* closed */ } server = null; }
 		setRoot(null);
@@ -29,6 +30,7 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl }) {
 			fs.writeFileSync(path.join(root, "pic.png"), PNG);
 			fs.writeFileSync(path.join(root, "doc.pdf"), PDF);
 			setRoot(root);
+			curRoot = root;
 			await new Promise((resolve) => {
 				server = http.createServer((_req, res) => {
 					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -49,7 +51,7 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl }) {
 		}
 		if (op === "probe") {
 			const web = session.fromPartition("persist:devbrowser");
-			const project = session.fromPartition(pp.PARTITION);
+			const project = session.fromPartition(pp.partitionFor(curRoot));
 			const { tabs, activeId } = viewerTabs.list();
 			const cv = ctxView();
 			const activeView = viewerTabs.viewOf(activeId);

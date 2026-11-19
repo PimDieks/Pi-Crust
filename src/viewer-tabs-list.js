@@ -4,14 +4,17 @@
 const MAX_TABS = 8;
 const PROJECT_SCHEME = "pi-project:";
 
-// "web" (persist:devbrowser) or "project" (persist:viewer-project): by the address, never by what a tab used to show.
+// "web" (persist:devbrowser) or "project:<host label>" (persist:viewer-project-<host label>, one session per project): by the address,
+// never by what a tab used to show.
 function sessionOf(address) {
 	try {
-		return new URL(String(address)).protocol === PROJECT_SCHEME ? "project" : "web";
+		const u = new URL(String(address));
+		return u.protocol === PROJECT_SCHEME ? "project:" + u.host.toLowerCase() : "web";
 	} catch {
 		return "web";
 	}
 }
+const isProjectSession = (session) => typeof session === "string" && session.startsWith("project:");
 // The site of an address: its host with the port (the project label for a project address). "" when it is not an address.
 function siteOf(address) {
 	try {
@@ -64,4 +67,4 @@ function reusable(list, address) {
 	return (a && same(a) && a) || list.tabs.find(same) || null;
 }
 
-module.exports = { MAX_TABS, sessionOf, siteOf, create, find, active, add, activate, close, reusable };
+module.exports = { MAX_TABS, sessionOf, isProjectSession, siteOf, create, find, active, add, activate, close, reusable };

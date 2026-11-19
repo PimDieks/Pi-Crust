@@ -20,10 +20,12 @@ function register({ ipcMain, BrowserWindow, session, setRoot }) {
 		const wins = [];
 		let server;
 		let tmp;
+		let root;
+		let other;
 		try {
 			tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pi-crust-vf-")));
-			const root = path.join(tmp, "project");
-			const other = path.join(tmp, "other");
+			root = path.join(tmp, "project");
+			other = path.join(tmp, "other");
 			const outside = path.join(tmp, "outside");
 			for (const d of [root, other, outside, path.join(root, "site"), path.join(root, ".hidden"), path.join(root, ".git"), path.join(other, "site")]) fs.mkdirSync(d, { recursive: true });
 			const put = (rel, data) => fs.writeFileSync(path.join(root, rel), data);
@@ -52,6 +54,7 @@ function register({ ipcMain, BrowserWindow, session, setRoot }) {
 			const otherHost = pf.hostFor(other);
 			const base = `${pp.SCHEME}://${host}`;
 			setRoot(root);
+			pp.ensureSession(root);
 
 			// --- the loopback server: a web site ---------------------------------------------------------------------------
 			const reports = [];
@@ -62,6 +65,13 @@ function register({ ipcMain, BrowserWindow, session, setRoot }) {
 				if (req.headers.cookie) seenCookies.push(u.pathname + " " + req.headers.cookie);
 				const send = (type, body) => (res.writeHead(200, { "Content-Type": type, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" }), res.end(body));
 				if (u.pathname === "/report") { reports.push(Object.fromEntries(u.searchParams)); return send("text/plain", "ok"); }
+				if (u.pathname === "/cset.html") { res.writeHead(200, { "Content-Type": "text/html", "Set-Cookie": "wc=" + (u.searchParams.get("v") || "x") + "; SameSite=None; Secure; Path=/", "Cache-Control": "no-store" }); return res.end("<p>set</p>"); }
+				if (u.pathname === "/cget.html") return send("text/html", `<script>fetch('/report?cget=1&cookie='+encodeURIComponent(document.cookie))</script>`);
+				if (u.pathname === "/sub.html") {
+					// A web page that makes a srcdoc frame which asks for a project image.
+					const inner = `<img src="${base}/site/pic.png" onload="fetch('http://127.0.0.1:${port}/report?sub=loaded')" onerror="fetch('http://127.0.0.1:${port}/report?sub=blocked')">`;
+					return send("text/html", `<!doctype html><iframe srcdoc="${inner.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe>`);
+				}
 				if (u.pathname === "/ext.js") return send("text/javascript", "window.__ext=1");
 				if (u.pathname === "/ext.json") return send("application/json", '{"ext":1}');
 				if (u.pathname === "/ls-set.html") return send("text/html", "<script>localStorage.setItem('dev','devbrowser-value');document.title='set'</script>");
@@ -88,11 +98,23 @@ const f=document.createElement('iframe');f.src=B+'/site/inner.html';document.doc
 			put("site/inner.html", `<!doctype html><script>fetch(${JSON.stringify(WEB)}+'/report?inner=1')</script>`);
 			put("site/embed.html", `<!doctype html><title>embed</title><script src="secret.js"></script><script src="${WEB}/ext.js"></script>` +
 				`<iframe id="web" src="${WEB}/frame.html"></iframe><iframe id="web2" src="${WEB}/probe.html"></iframe>`);
+			put("site/webwrap.html", `<!doctype html><title>wrap</title><iframe src="${WEB}/sub.html"></iframe>`);
+			put("site/cookie-a.html", `<!doctype html><title>a</title><iframe src="${WEB}/cset.html?v=fromA"></iframe>`);
+			put("site/cookie-get.html", `<!doctype html><title>g</title><iframe src="${WEB}/cget.html"></iframe>`);
+			// Frames the project page makes itself: srcdoc, about:blank, blob:, and a sandboxed srcdoc (scripts allowed, own origin none).
+			const img = (tag) => `<img src="${base}/site/pic.png" onload="parent.postMessage('${tag}:loaded','*')" onerror="parent.postMessage('${tag}:blocked','*')">`;
+			const esc = (x) => x.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+			put("site/selfframes.html", `<!doctype html><title>self</title><script>window.__out={};addEventListener('message',e=>{const[k,v]=String(e.data).split(':');window.__out[k]=v});</script>` +
+				`<iframe id="sd" srcdoc="${esc(img("srcdoc"))}"></iframe>` +
+				`<iframe id="sb" sandbox="allow-scripts" srcdoc="${esc(img("sandboxed"))}"></iframe>` +
+				`<iframe id="bl"></iframe><iframe id="blob"></iframe>` +
+				`<script>const f=document.getElementById('bl');f.contentDocument.open();f.contentDocument.write(${JSON.stringify(img("blank"))});f.contentDocument.close();` +
+				`document.getElementById('blob').src=URL.createObjectURL(new Blob([${JSON.stringify(img("blob"))}],{type:'text/html'}));</script>`);
 			put("site/ownframe.html", '<!doctype html><title>own</title><iframe id="f" src="inner.html"></iframe>');
 
 			// --- windows ---------------------------------------------------------------------------------------------------
 			const mk = (partition) => {
-				const w = new BrowserWindow({ show: false, width: 500, height: 400, webPreferences: partition ? { partition, sandbox: true, contextIsolation: true } : pp.viewerWebPreferences() });
+				const w = new BrowserWindow({ show: false, width: 500, height: 400, webPreferences: partition ? { partition, sandbox: true, contextIsolation: true } : pp.viewerWebPreferences(root) });
 				wins.push(w);
 				return w;
 			};
@@ -179,7 +201,7 @@ const f=document.createElement('iframe');f.src=B+'/site/inner.html';document.doc
 				const stale = await open(mk(), `${pp.SCHEME}://p-0000000000000000/site/secret.js`, 300);
 				check("an unknown host label: 404", stale.code === 404, stale.code);
 				const dev = session.fromPartition("persist:devbrowser");
-				check("handler only on persist:viewer-project", session.fromPartition(pp.PARTITION).protocol.isProtocolHandled(pp.SCHEME) && !dev.protocol.isProtocolHandled(pp.SCHEME) && !session.defaultSession.protocol.isProtocolHandled(pp.SCHEME), "");
+				check("handler only on the project's own session (persist:viewer-project-<label>)", session.fromPartition(pp.partitionFor(root)).protocol.isProtocolHandled(pp.SCHEME) && !dev.protocol.isProtocolHandled(pp.SCHEME) && !session.defaultSession.protocol.isProtocolHandled(pp.SCHEME) && !session.fromPartition("persist:viewer-project").protocol.isProtocolHandled(pp.SCHEME) && !session.fromPartition(pp.partitionFor(other)).protocol.isProtocolHandled(pp.SCHEME), "");
 				const devWin = await open(mk("persist:devbrowser"), `${base}/site/secret.js`, 300);
 				check("persist:devbrowser cannot load a project file", devWin.code !== 200, devWin.code);
 			}
@@ -217,6 +239,53 @@ const f=document.createElement('iframe');f.src=B+'/site/inner.html';document.doc
 				void own; void lw;
 			}
 
+			// 4b. frames a project page makes itself (srcdoc, about:blank, blob:, sandboxed srcdoc) may load project files; under a web frame or a web page they may not
+			{
+				const { wc } = await open(mk(), `${base}/site/selfframes.html`, 2500);
+				const out = await js(wc, "window.__out");
+				check("frames of the project page itself: srcdoc loads a project image", out.srcdoc === "loaded", JSON.stringify(out));
+				check("... about:blank", out.blank === "loaded", JSON.stringify(out));
+				check("... blob:", out.blob === "loaded", JSON.stringify(out));
+				check("... a sandboxed srcdoc frame (decided: allowed, it has no more power than the page)", out.sandboxed === "loaded", JSON.stringify(out));
+				reports.length = 0;
+				await open(mk(), `${base}/site/webwrap.html`, 2500);
+				const under = reports.find((x) => x.sub);
+				check("a srcdoc frame under a web frame in a project page may not load project files", under && under.sub === "blocked", JSON.stringify(reports));
+				reports.length = 0;
+				await open(mk(), `${WEB}/sub.html`, 2500);
+				const top = reports.find((x) => x.sub);
+				check("a srcdoc frame of a web page (top-level) may not load project files", top && top.sub === "blocked", JSON.stringify(reports));
+			}
+
+			// 4c. one session per project: a cookie a web site set through project A's page is not there in project B's page
+			{
+				const sesA = session.fromPartition(pp.partitionFor(root));
+				const sesB = session.fromPartition(pp.partitionFor(other));
+				fs.writeFileSync(path.join(other, "site", "cookie-get.html"), `<!doctype html><title>g</title><iframe src="${WEB}/cget.html"></iframe>`);
+				reports.length = 0;
+				seenCookies.length = 0;
+				await open(mk(), `${base}/site/cookie-a.html`, 1500);
+				const setA = await sesA.cookies.get({ name: "wc" });
+				check("two projects: control, the web site's cookie is stored in project A's session", setA.length === 1 && setA[0].value === "fromA", JSON.stringify(setA));
+				await open(mk(), `${base}/site/cookie-get.html`, 1500);
+				const readA = reports.find((x) => x.cget === "1");
+				check("two projects: control, project A's page (another visit) sees it", readA && readA.cookie === "wc=fromA" && seenCookies.some((c) => c.includes("wc=fromA")), JSON.stringify({ reports, seenCookies }));
+				// switch to project B (a second throwaway project) with its own session
+				setRoot(other);
+				pp.ensureSession(other);
+				const hostB = pf.hostFor(other);
+				check("two projects: each has its own session", sesA !== sesB && pp.partitionFor(root) !== pp.partitionFor(other) && sesB.protocol.isProtocolHandled(pp.SCHEME), "");
+				reports.length = 0;
+				seenCookies.length = 0;
+				const bw = new BrowserWindow({ show: false, width: 500, height: 400, webPreferences: pp.viewerWebPreferences(other) });
+				wins.push(bw);
+				await open(bw, `${pp.SCHEME}://${hostB}/site/cookie-get.html`, 1800);
+				const readB = reports.find((x) => x.cget === "1");
+				const cookiesB = await sesB.cookies.get({ name: "wc" });
+				check("two projects: project B's page does not see project A's cookie", readB && readB.cookie === "" && cookiesB.length === 0 && !seenCookies.some((c) => c.includes("wc=")), JSON.stringify({ readB, cookiesB, seenCookies }));
+				setRoot(root);
+			}
+
 			// 5. the address helpers
 			{
 				const a = pp.toAddress(root, "docs\\my file é.html");
@@ -230,7 +299,7 @@ const f=document.createElement('iframe');f.src=B+'/site/inner.html';document.doc
 			for (const w of wins) { try { w.destroy(); } catch { /* gone */ } }
 			if (server) server.close();
 			try { await session.fromPartition("persist:devbrowser").clearStorageData(); } catch { /* ignore */ }
-			try { await session.fromPartition(pp.PARTITION).clearStorageData(); } catch { /* ignore */ }
+			for (const r of [root, other]) { try { if (r) await session.fromPartition(pp.partitionFor(r)).clearStorageData(); } catch { /* ignore */ } }
 			if (tmp) try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
 		}
 		return { checks };

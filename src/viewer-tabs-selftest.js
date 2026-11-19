@@ -44,13 +44,13 @@ selftestSteps.push(async () => {
 		r = await B.createTab(S.page);
 		const p1 = r.tabId;
 		l = await list();
-		check("create: a project tab, active, right of the active one", r.ok && l.activeId === p1 && JSON.stringify(ids(l)) === JSON.stringify([first, w1, p1]) && byId(l, p1).session === "project", JSON.stringify(l));
+		check("create: a project tab, active, right of the active one", r.ok && l.activeId === p1 && JSON.stringify(ids(l)) === JSON.stringify([first, w1, p1]) && byId(l, p1).session.startsWith("project:"), JSON.stringify(l));
 		await settled(w1);
 		await settled(p1);
 		let pr = await T("probe");
 		const pw = pr.tabs.find((t) => t.id === w1);
 		const pp1 = pr.tabs.find((t) => t.id === p1);
-		check("sessions: web tab on persist:devbrowser, project tab on persist:viewer-project", pw.isWebSession && !pw.isProjectSession && pp1.isProjectSession && !pp1.isWebSession, JSON.stringify(pr.tabs));
+		check("sessions: web tab on persist:devbrowser, project tab on persist:viewer-project-<label>", pw.isWebSession && !pw.isProjectSession && pp1.isProjectSession && !pp1.isWebSession, JSON.stringify(pr.tabs));
 		check("a project tab has the kind of its file (page)", byId(await list(), p1).kind === "page");
 		check("a web tab shows its page title", byId(await list(), w1).title === "web page", byId(await list(), w1).title);
 
@@ -101,7 +101,7 @@ selftestSteps.push(async () => {
 		l = await list();
 		const nw = byId(l, r.tabId);
 		check("project to web address, no tab on that site: a new web tab, active", r.ok && nw && nw.session === "web" && l.activeId === nw.id && l.tabs.length === nBefore + 1, JSON.stringify(r));
-		check("the project tab keeps its project page and session", byId(l, p1).session === "project" && byId(l, p1).address === S.page, JSON.stringify(byId(l, p1)));
+		check("the project tab keeps its project page and session", byId(l, p1).session.startsWith("project:") && byId(l, p1).address === S.page, JSON.stringify(byId(l, p1)));
 		await settled(nw.id);
 		pr = await T("probe");
 		check("the new tab for the web address is on the web session", pr.tabs.find((t) => t.id === nw.id).isWebSession, JSON.stringify(pr.tabs));
@@ -111,16 +111,16 @@ selftestSteps.push(async () => {
 		check("project to web address, a tab on that site: it is reused", r.ok && r.tabId === w1 && l.activeId === w1 && l.tabs.length === nBefore + 1, JSON.stringify(r));
 		r = await B.navigate(S.image); // web tab -> project address: reuse the project tab on that project (the first in order)
 		l = await list();
-		check("web to project address, a project tab exists: it is reused and shows the file", r.ok && byId(l, r.tabId).session === "project" && l.activeId === r.tabId && l.tabs.length === nBefore + 1, JSON.stringify(r));
+		check("web to project address, a project tab exists: it is reused and shows the file", r.ok && byId(l, r.tabId).session.startsWith("project:") && l.activeId === r.tabId && l.tabs.length === nBefore + 1, JSON.stringify(r));
 		await settled(r.tabId);
 		// close every project tab, then move from a web tab to a project address: a new project tab
-		for (const t of (await list()).tabs.filter((x) => x.session === "project")) await B.closeTab(t.id);
+		for (const t of (await list()).tabs.filter((x) => x.session.startsWith("project:"))) await B.closeTab(t.id);
 		await B.activateTab(w1);
 		const n2 = (await list()).tabs.length;
 		r = await B.navigate(S.page);
 		l = await list();
 		const np = byId(l, r.tabId);
-		check("web to project address, no project tab: a new project tab", r.ok && np && np.session === "project" && l.activeId === np.id && l.tabs.length === n2 + 1, JSON.stringify(r));
+		check("web to project address, no project tab: a new project tab", r.ok && np && np.session.startsWith("project:") && l.activeId === np.id && l.tabs.length === n2 + 1, JSON.stringify(r));
 		await settled(np.id);
 		pr = await T("probe");
 		check("that project tab is on the project session", pr.tabs.find((t) => t.id === np.id).isProjectSession && !pr.tabs.find((t) => t.id === np.id).isWebSession, JSON.stringify(pr.tabs));

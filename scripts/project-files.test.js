@@ -106,7 +106,7 @@ test("dot dot in every spelling is refused", () => {
 
 test("encoded slashes and backslashes, and anything encoded twice, are refused", () => {
 	const { root } = sandbox();
-	for (const s of ["/docs%2fa.html", "/docs%2Fa.html", "/docs%5ca.html", "/docs%5Ca.html", "/docs%252fa.html", "/docs%255ca.html", "/index%252ehtml", "/%2569ndex.html", "/%25"
+	for (const s of ["/docs%2fa.html", "/docs%2Fa.html", "/docs%5ca.html", "/docs%5Ca.html", "/docs%252fa.html", "/docs%255ca.html", "/index%252ehtml", "/%25"
 		+ "2e", "/a%2500b", "/index.html%00", "/%00", "/%00index.html"]) refused(root, s);
 	assert.equal(get(root, "/docs/a.html").ok, true);
 });
@@ -438,4 +438,146 @@ test("each rule gives its own reason", () => {
 test("the module has no Electron import", () => {
 	const src = fs.readFileSync(path.join(__dirname, "..", "src", "project-files.js"), "utf8");
 	assert.doesNotMatch(src, /require\(\s*["']electron["']\s*\)/);
+});
+
+// ---- decoding exactly once (review fix 5) ----
+
+test("a real file named like 100%ab or 100%25ab is served: the path is decoded once, never twice", () => {
+	const { root } = sandbox();
+	// "100%ab" is asked for as 100%25ab; a file really named "100%25ab" as 100%2525ab. (Windows allows % in names.)
+	for (const [name, asked] of [["100%ab", "/100%25ab"], ["100%25ab", "/100%2525ab"], ["%69ndex.html", "/%2569ndex.html"], ["50%.png", "/50%25.png"]]) {
+		fs.writeFileSync(path.join(root, name), "1");
+		const r = get(root, asked);
+		assert.equal(r.ok, true, `${asked}: ${JSON.stringify(r)}`);
+		assert.equal(path.basename(r.file), name);
+	}
+	// the file named 100%ab is not reachable under the other spelling
+	fs.rmSync(path.join(root, "100%25ab"));
+	assert.equal(get(root, "/100%2525ab").ok, false);
+});
+test("double-encoded traversal, slashes, NULs and colons are still refused", () => {
+	const { root } = sandbox();
+	for (const s of ["/%252e%252e/x", "/%252E%252e/outside/secret.txt", "/docs/%252e%252e/index.html", "/docs%252fa.html", "/docs%255ca.html", "/a%2500b", "/C%253a/x", "/index%252ehtml",
+		"/100%252e", "/x%2522y", "/x%253cy", "/x%257cy", "/x%2501y"]) refused(root, s);
+});
+
+// ---- open: the file is opened once and the handle is checked (review fix 1) ----
+
+// An injected file system: `before(name)` runs just before a call of that name reaches the real one.
+function spyFs(hooks) {
+	const wrap = { ...fs };
+	for (const name of ["openSync", "fstatSync", "statSync", "realpathSync"]) {
+		const real = fs[name];
+		wrap[name] = (...a) => { if (hooks[name]) a = hooks[name](...a) || a; return real(...a); };
+	}
+	wrap.realpathSync.native = (...a) => fs.realpathSync.native(...a);
+	return wrap;
+}
+const closeIf = (r) => { if (r.ok) fs.closeSync(r.fd); };
+
+test("open: a plain file gives a handle on the file, its size and type", () => {
+	const { root } = sandbox();
+	const r = pf.open(root, "/docs/a.html", "GET");
+	assert.equal(r.ok, true);
+	assert.equal(fs.readFileSync(r.fd, "utf8"), "<p>a</p>");
+	assert.equal(r.size, 8);
+	assert.equal(r.contentType, "text/html; charset=utf-8");
+	fs.closeSync(r.fd);
+	for (const [p, status] of [["/nope.html", 404], ["/.env", 403], ["/docs/", 404], ["/index.html%00", 400]]) assert.equal(pf.open(root, p, "GET").status, status, p);
+	assert.equal(pf.open(root, "/index.html", "POST").status, 405);
+});
+test("open: a file swapped for a link to a file outside, between the check and the open, is a 403 and nothing stays open", (t) => {
+	const { root, outside } = sandbox();
+	const target = path.join(outside, "secret.txt");
+	const probe = path.join(root, "probe-link");
+	const why = tryLink(target, probe, "file");
+	if (why) { t.skip(why); return; }
+	fs.rmSync(probe);
+	let opened = null;
+	let closed = 0;
+	let swapped = false;
+	const fake = spyFs({
+		openSync: (p, ...rest) => {
+			if (!swapped && path.basename(p) === "index.html") {
+				swapped = true;
+				fs.rmSync(p);
+				fs.symlinkSync(target, p, "file");
+			}
+			return [p, ...rest];
+		},
+	});
+	const realClose = fake.closeSync;
+	fake.closeSync = (fd) => { closed++; return realClose(fd); };
+	const o = fake.openSync;
+	fake.openSync = (...a) => (opened = o(...a));
+	const files = pf.create({ fs: fake });
+	assert.equal(files.resolve(root, "/index.html", "GET").ok, true, "the check alone passes");
+	const r = files.open(root, "/index.html", "GET");
+	assert.equal(swapped, true);
+	assert.equal(r.ok, false);
+	assert.equal(r.status, 403, r.reason);
+	assert.equal(opened !== null && closed, 1, "the handle that was opened is closed again");
+});
+test("open: a directory junction or link swapped in for a parent folder, between the check and the open, is a 403", (t) => {
+	const { root, outside } = sandbox();
+	fs.mkdirSync(path.join(root, "swap"));
+	fs.writeFileSync(path.join(root, "swap", "inner.html"), "inner");
+	fs.writeFileSync(path.join(outside, "inner.html"), "OUTSIDE");
+	const probe = path.join(root, "probe-dir");
+	const why = tryLink(outside, probe, WIN ? "junction" : "dir");
+	if (why) { t.skip(why); return; }
+	fs.rmSync(probe, { recursive: true });
+	let swapped = false;
+	const fake = spyFs({
+		openSync: (p, ...rest) => {
+			if (!swapped && path.basename(p) === "inner.html") {
+				swapped = true;
+				fs.rmSync(path.join(root, "swap"), { recursive: true });
+				fs.symlinkSync(outside, path.join(root, "swap"), WIN ? "junction" : "dir");
+			}
+			return [p, ...rest];
+		},
+	});
+	const r = pf.create({ fs: fake }).open(root, "/swap/inner.html", "GET");
+	assert.equal(swapped, true);
+	assert.equal(r.ok, false);
+	assert.equal(r.status, 403, r.reason);
+});
+test("open: a handle that is not the file the path resolves to now (device or file id) is a 403", () => {
+	const { root } = sandbox();
+	for (const field of ["ino", "dev"]) {
+		const fake = spyFs({});
+		fake.fstatSync = (fd, o) => { const st = fs.fstatSync(fd, o); return Object.assign(Object.create(Object.getPrototypeOf(st)), st, { [field]: st[field] + (o && o.bigint ? 1n : 1) }); };
+		const r = pf.create({ fs: fake }).open(root, "/index.html", "GET");
+		assert.equal(r.ok, false, field);
+		assert.equal(r.status, 403, field);
+	}
+});
+test("open: the file removed between the check and the re-check is refused, and the handle is closed", () => {
+	const { root } = sandbox();
+	let gone = false;
+	const fake = spyFs({ fstatSync: (fd) => { if (!gone) { gone = true; fs.rmSync(path.join(root, "index.html")); } } });
+	const r = pf.create({ fs: fake }).open(root, "/index.html", "GET");
+	assert.equal(r.ok, false);
+	assert.equal(gone, true);
+	assert.ok(r.status === 403 || r.status === 404, String(r.status));
+});
+
+// ---- hard links (review fix 6) ----
+
+test("a hard link is accepted on purpose: package managers make them, and whoever can make one can already read the target", (t) => {
+	const { root, outside } = sandbox();
+	try { fs.linkSync(path.join(outside, "secret.txt"), path.join(root, "linked.txt")); } catch (e) { t.skip(`cannot create a hard link here (${e.code})`); return; }
+	fs.linkSync(path.join(root, "index.html"), path.join(root, "alias2.html"));
+	const out = get(root, "/linked.txt");
+	assert.equal(out.ok, true, "a hard link to a file outside the project is served: it is indistinguishable from a file of the project");
+	assert.equal(path.dirname(out.file), root);
+	assert.equal(out.size, 10);
+	assert.equal(get(root, "/alias2.html").ok, true);
+	const o = pf.open(root, "/linked.txt", "GET");
+	assert.equal(o.ok, true);
+	closeIf(o);
+	// ...whereas a symbolic link to the same outside file is not
+	const why = tryLink(path.join(outside, "secret.txt"), path.join(root, "sym.txt"), "file");
+	if (!why) assert.equal(get(root, "/sym.txt").status, 403);
 });

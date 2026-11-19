@@ -4,7 +4,8 @@
 //
 // Two kinds of tab, by session, and a tab never changes its session:
 //   web      persist:devbrowser, exactly as the single Viewer page was (http and https).
-//   project  persist:viewer-project with viewerWebPreferences() (pi-project:// addresses of the open project, pi-project.js rules).
+//   project:<label>  persist:viewer-project-<label>, one session per project, with viewerWebPreferences(root) (pi-project:// addresses of
+//            the open project, project-protocol.js rules).
 // A top-level move that would cross sessions (a project page to a web address, a web page to a project address) is cancelled and opens
 // in a tab of the other session instead: a tab on the same site if there is one, else a new tab.
 //
@@ -64,7 +65,7 @@ function create(deps) {
 		tab.loading = wc.isLoading();
 		tab.canGoBack = wc.navigationHistory.canGoBack();
 		tab.canGoForward = wc.navigationHistory.canGoForward();
-		if (tab.session === "project") {
+		if (L.isProjectSession(tab.session)) {
 			const p = protocol.fromAddress(deps.getRoot(), tab.address);
 			tab.kind = p == null ? "page" : files.kindOf(p);
 		} else {
@@ -82,7 +83,7 @@ function create(deps) {
 			const p = protocol.fromAddress(deps.getRoot(), address);
 			if (p == null) return { ok: false, reason: "not this project" };
 			if (files.kindOf(p) === "other") return { ok: false, reason: "not a file the Viewer shows" };
-			return { ok: true, url: u.href, session: "project" };
+			return { ok: true, url: u.href, session: L.sessionOf(u.href) };
 		}
 		return { ok: false, reason: "bad address" };
 	}
@@ -99,7 +100,8 @@ function create(deps) {
 
 	function buildView(tab) {
 		const web = tab.session === "web";
-		const view = new deps.WebContentsView({ webPreferences: web ? { partition: WEB_PARTITION, contextIsolation: true, sandbox: true } : protocol.viewerWebPreferences() });
+		if (!web) protocol.ensureSession(deps.getRoot()); // this project's session, with its handler and guard, before the first page
+		const view = new deps.WebContentsView({ webPreferences: web ? { partition: WEB_PARTITION, contextIsolation: true, sandbox: true } : protocol.viewerWebPreferences(deps.getRoot()) });
 		views.set(tab.id, view);
 		// Until a page paints (and for pages without their own background) show the app background, not white.
 		view.setBackgroundColor(bg);
@@ -160,7 +162,8 @@ function create(deps) {
 		// ever loads addresses of the open project; a web tab keeps today's behaviour for everything that does not cross into a project.
 		const guardMove = (event, url) => {
 			const a = accept(url);
-			if (web ? !(a.ok && a.session === "project") : a.ok && a.session === "project") return;
+			const toProject = a.ok && L.isProjectSession(a.session);
+			if (web ? !toProject : toProject && a.session === tab.session) return;
 			event.preventDefault();
 			if (a.ok) moveTo(a.url).catch(() => {});
 		};

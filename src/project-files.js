@@ -3,7 +3,7 @@
 // Pure: no Electron import. The file system, the platform and the path module can be injected for tests.
 // `resolve` only decides; the caller opens `file`. Rules, in order: method (405), path syntax (400),
 // dot segments (403), a folder or the root (404), then the real path of the file and of every parent
-// must stay inside the real project root (403).
+// must stay inside the real project root (403). `open` is `resolve` plus one open handle that is checked again after it is opened.
 const nodeFs = require("node:fs");
 const nodePath = require("node:path");
 const crypto = require("node:crypto");
@@ -40,6 +40,9 @@ const RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|clock\$|com[1-9¹²³]|lpt[
 // A control character, or one Windows reserves in names; this includes the colon (no alternate data streams).
 // eslint-disable-next-line no-control-regex
 const BAD_CHARS = /[\u0000-\u001f\u007f<>"|?*\\:]/;
+
+// "%" and two hex digits that spell: a control character, " * . / : < > ? \ |   (matched on the text after the one decode)
+const TWICE = /%(?:[01][0-9a-f]|7f|22|2[aef]|3[acef]|5c|7c)/i;
 
 const refuse = (status, reason) => ({ ok: false, status, reason });
 
@@ -81,7 +84,10 @@ function create(opts = {}) {
 		if (/%2e/i.test(requestPath)) return refuse(400, "An encoded dot is not allowed.");
 		let decoded;
 		try { decoded = decodeURIComponent(requestPath); } catch { return refuse(400, "The path is not valid text."); }
-		if (/%[0-9a-f]{2}/i.test(decoded)) return refuse(400, "A path encoded twice is not allowed.");
+		// Decoded exactly once; the result is a literal name and is never decoded again. A file really named "100%ab" is asked for as
+		// "100%25ab" and a file named "100%25ab" as "100%2525ab": both are served. What is refused is a second layer of encoding that
+		// hides a character the rules below look for (a dot, a slash, a backslash, a colon, a control or Windows-reserved character).
+		if (TWICE.test(decoded)) return refuse(400, "A path encoded twice is not allowed.");
 		if (decoded.includes("\0")) return refuse(400, "A NUL character is not allowed.");
 		if (!decoded.startsWith("/")) return refuse(400, "The path must start with a slash.");
 		if (decoded.startsWith("//")) return refuse(400, "A network (UNC) path is not allowed.");
@@ -120,8 +126,35 @@ function create(opts = {}) {
 		if (rel.split(/[\\/]/).some((x) => x.startsWith("."))) return refuse(403, "A segment starting with a dot is not served.");
 		let st;
 		try { st = fs.statSync(cur); } catch { return refuse(404, "No such file."); }
+		// Hard links are accepted on purpose: a hard link is a second name for the same file, so a regular file inside the project
+		// that is also linked from outside it cannot be told apart. Package managers create them for most files in node_modules, and
+		// whoever can create such a link can already read its target. (Pinned by a test.) Symbolic links and junctions are different:
+		// they are followed above and the real path must stay inside the project.
 		if (!st.isFile()) return refuse(404, st.isDirectory() ? "A folder is never listed." : "Not a regular file.");
 		return { ok: true, file: cur, contentType: contentTypeOf(p.segs[p.segs.length - 1]), size: st.size };
+	}
+
+	// `resolve`, then open the file ONCE and check the open handle: the name was checked before it was opened, and a link swapped in
+	// between would make the open follow it. After the open: fstat the handle, resolve the same path again (inside-the-project test,
+	// dot rule, regular file) and require that the handle is the very file (device and file id) the path resolves to now. Anything
+	// else is a 403. The caller streams from `fd` and closes it; `size` is the handle's size at this moment.
+	function open(root, requestPath, method) {
+		const r = resolve(root, requestPath, method);
+		if (!r.ok) return r;
+		let fd;
+		try { fd = fs.openSync(r.file, "r"); } catch (e) { return refuse(e && (e.code === "EACCES" || e.code === "EPERM") ? 403 : 404, "No such file."); }
+		const fail = (status, reason) => { try { fs.closeSync(fd); } catch { /* closed */ } return refuse(status, reason); };
+		try {
+			const mine = fs.fstatSync(fd, { bigint: true });
+			if (!mine.isFile()) return fail(404, "Not a regular file.");
+			const again = resolve(root, requestPath, method);
+			if (!again.ok) return fail(again.status === 404 ? 403 : again.status, "The file changed while it was opened.");
+			const now = fs.statSync(again.file, { bigint: true });
+			if (now.dev !== mine.dev || now.ino !== mine.ino) return fail(403, "The file changed while it was opened.");
+			return { ok: true, file: again.file, fd, contentType: r.contentType, size: Number(mine.size) };
+		} catch {
+			return fail(403, "The file could not be checked.");
+		}
 	}
 
 	// True only for a file that `resolve` would serve (dropped files, the agent tool).
@@ -154,7 +187,7 @@ function create(opts = {}) {
 		return host.toLowerCase() === hostFor(root);
 	}
 
-	return { resolve, isProjectPath, hostFor, hostMatches, kindOf, contentTypeOf };
+	return { resolve, open, isProjectPath, hostFor, hostMatches, kindOf, contentTypeOf };
 }
 
 const defaults = create();

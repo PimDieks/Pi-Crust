@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const L = require("../src/viewer-tabs-list");
 
 const web = (address) => ({ session: "web", address });
-const proj = (address) => ({ session: "project", address });
+const proj = (address) => ({ session: L.sessionOf(address), address });
 const ids = (l) => l.tabs.map((t) => t.id);
 
 test("the first tab becomes active; new tabs open right of the active one", () => {
@@ -91,8 +91,11 @@ test("unknown ids are refused", () => {
 	assert.equal(l.tabs.length, 1);
 });
 
-test("session of an address: project scheme is project, everything else web", () => {
-	assert.equal(L.sessionOf("pi-project://p-abc/docs/a.html"), "project");
+test("session of an address: a project address is that project's own session, everything else web", () => {
+	assert.equal(L.sessionOf("pi-project://p-abc/docs/a.html"), "project:p-abc");
+	assert.notEqual(L.sessionOf("pi-project://p-abc/x"), L.sessionOf("pi-project://p-def/x"));
+	assert.equal(L.isProjectSession("project:p-abc"), true);
+	assert.equal(L.isProjectSession("web"), false);
 	assert.equal(L.sessionOf("https://example.com/"), "web");
 	assert.equal(L.sessionOf("http://localhost:3000/"), "web");
 	assert.equal(L.sessionOf("garbage"), "web");
