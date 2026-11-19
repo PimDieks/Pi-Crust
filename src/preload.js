@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld("crust", {
 		delete: (id) => ipcRenderer.invoke("snap:delete", id),
 		same: (a, b) => ipcRenderer.invoke("snap:same", a, b),
 		selftestLoad: (html) => ipcRenderer.invoke("snap:selftestLoad", html),
+		selftestDraws: () => ipcRenderer.invoke("snap:selftestDraws"),
 	},
 	voice: {
 		status: () => ipcRenderer.invoke("voice:status"),

@@ -157,9 +157,12 @@
 		// First: the Viewer has never been shown (in a run of this step alone), the case of a person who never opened the Viewer tab.
 		await crust.snap.selftestLoad(page("#36c", "Live"));
 		const stNever = await crust.selftest.bounds();
+		const drawsBefore = await crust.snap.selftestDraws();
 		const never = await crust.snap.live({});
 		const stAfter = await crust.selftest.bounds();
-		console.error(`SELFTEST snap:live never shown: view visible=${stNever.visible}->${stAfter.visible} ${never.ok ? `${never.entry.w}x${never.entry.h}` : never.error} -> ${!stNever.visible && !stAfter.visible && never.ok && never.entry.w > 100 ? "OK" : "MISMATCH"}`);
+		const drawn = (await crust.snap.selftestDraws()) - drawsBefore;
+		const sameBounds = JSON.stringify(stNever.view) === JSON.stringify(stAfter.view);
+		console.error(`SELFTEST snap:live never shown: view visible=${stNever.visible}->${stAfter.visible} bounds same=${sameBounds} offscreen draws=${drawn} ${never.ok ? `${never.entry.w}x${never.entry.h}` : never.error} -> ${!stNever.visible && !stAfter.visible && sameBounds && drawn === 1 && never.ok && never.entry.w > 100 ? "OK" : "MISMATCH"}`);
 		switchTab("browser");
 		await wait(800);
 		await crust.snap.selftestLoad(page("#36c", "Live"));

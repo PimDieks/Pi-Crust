@@ -8,6 +8,7 @@
 function create({ relayout, delay = (ms) => new Promise((r) => setTimeout(r, ms)), tries = 8, stepMs = 150 } = {}) {
 	let chain = Promise.resolve();
 	let pending = 0;
+	let count = 0;
 	const alive = (o) => {
 		try {
 			return !!o && !(typeof o.isDestroyed === "function" && o.isDestroyed());
@@ -41,12 +42,14 @@ function create({ relayout, delay = (ms) => new Promise((r) => setTimeout(r, ms)
 	return {
 		draw(view, wc, rect, empty) {
 			pending++;
+			count++;
 			const p = chain.then(() => run(view, wc, rect, empty));
 			const done = () => pending--;
 			chain = p.then(done, done);
 			return p;
 		},
 		busy: () => pending > 0,
+		count: () => count, // how many draws were started (selftest: proves a capture went this way)
 		idle: () => chain,
 	};
 }

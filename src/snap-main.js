@@ -341,6 +341,7 @@ function register(ctx) {
 	});
 	if (ctx.selftest) {
 		// Loads a page into the dev browser view so the hidden-view capture can be checked without a dev server.
+		ipcMain.handle("snap:selftestDraws", () => offscreen.count());
 		ipcMain.handle("snap:selftestLoad", async (_e, html) => {
 			const wc = ctx.browserView.webContents;
 			await wc.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
