@@ -103,8 +103,11 @@ function register(ctx) {
 		return entry;
 	}
 
-	// Shows a never-drawn hidden native view for a moment with only its bottom-right pixel inside the window (a view wholly outside it is never drawn), so Chromium produces a frame, captures it,
-	// then restores the bounds and hides it again. The view keeps its size, so the capture has the real size.
+	// Shows a never-drawn hidden native view with only its bottom-right pixel inside the window (a view wholly outside it is never drawn): that
+	// one pixel sits at the window's top-left corner (0,0), for 150 ms to 1.5 s (8 tries 150 ms apart). Chromium then produces a frame, we
+	// capture it, restore the bounds and hide the view again. The view keeps its size, so the capture has the real size.
+	// Tried instead, here: the DevTools protocol Page.captureScreenshot on the hidden view never answers (also not after Page.bringToFront
+	// and focus emulation); a cover view over the page area is itself a visible rectangle.
 	async function captureViaOffscreenDraw(view, wc, rect) {
 		const b = view.getBounds();
 		let img = nativeImage.createEmpty();
