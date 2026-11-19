@@ -91,6 +91,8 @@ const INPUTS = {
 	PowerShell: [{ command: "Remove-Item x" }, ASK_ALL],
 	Task: [{ description: "d", prompt: "do it", subagent_type: "general-purpose" }, ASK_ALL],
 	Agent: [{ description: "d", prompt: "do it", subagent_type: "general-purpose" }, ASK_ALL],
+	// The app's one host-defined tool (agents/claude/viewer-tool.js): what reading a project file needs, which is nothing; it never asks the person.
+	"mcp__pi-crust__show_in_viewer": [{ target: "docs/pricing.html" }, SAFE_IN_ALL],
 };
 // Every other tool of the table asks in every mode and is blocked in Plan.
 for (const name of Object.keys(perms.TOOL_TABLE)) if (!INPUTS[name]) INPUTS[name] = [{ x: 1 }, ASK_ALL];

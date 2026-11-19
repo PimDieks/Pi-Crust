@@ -216,6 +216,9 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 		},
 		record: (p, record) => {
 			if (record.type === "agent_end") prLookup.invalidatePrefix(); // the agent may have pushed or opened a PR
+			if (record.type === "agent_start") viewerAgent.turnStarted(chatId); // the count of new Viewer tabs per turn starts again
+			// Pi's tool show_in_viewer (src/pi-viewer-tool.js): the question never reaches the UI, main answers it. Only Pi's own records count.
+			if (isDefaultAgent && record.type === "extension_ui_request" && record.method === "input" && record.title === VIEWER_REQUEST_TITLE && typeof record.id === "string") return answerViewerRequest(chatId, p, record);
 			if (record.type === "claude_pending") return chatPendingRecord(chatId, record.pending); // a fork or rewound chat before its next message: kept so a restart restores it
 			if (record.type === "claude_session" && typeof record.sessionId === "string") chatSessionRecord(chatId, record.sessionId); // the session of a Claude Agent chat is only known once it runs (a fork, a rewound chat: its new one)
 			if (record.type === "response" && settleMainRequest(record)) return; // answers to requests main itself sent
@@ -785,6 +788,32 @@ require("./viewer-open-main").register({
 	selftest: SELFTEST,
 	breakMode: SELFTEST ? process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" : "", // the deliberate breaks of the step viewer-open (open-tree, open-drop)
 });
+
+// The agent's tool show_in_viewer, for both agents (viewer-agent-main.js): a project file or a localhost address opens in a background tab.
+// Pi asks through its extension (see the sink below), the Claude Agent through its host-defined tool (configured here).
+const viewerAgent = require("./viewer-agent-main").create({
+	getRoot: () => (SELFTEST && projectRootOverride) || REPO,
+	viewerTabs,
+	chatInfo: (chatId) => {
+		const c = chats.get(chatId);
+		return c ? { cwd: c.cwd } : null;
+	},
+	send: (ch, p) => send(ch, p),
+	protocol: projectProtocol,
+	selftest: SELFTEST,
+	breakMode: SELFTEST ? process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" : "",
+});
+agents.get("claude").configure({ showInViewer: (chatId, target) => viewerAgent.show(chatId, target) });
+ipcMain.handle("browser:focusShown", (_e, target) => viewerAgent.focus(String(target || "")));
+// Pi's extension asks the app with one dialog of the RPC extension protocol (an "input" with this title); the answer is the tool's result.
+const VIEWER_REQUEST_TITLE = "crust:show_in_viewer";
+function answerViewerRequest(chatId, handle, record) {
+	const reply = (r) => {
+		const c = chats.get(chatId);
+		if (c && c.handle === handle) c.agent.send(handle, { type: "extension_ui_response", id: record.id, value: JSON.stringify({ ok: !!r.ok, text: String(r.text || "") }) });
+	};
+	viewerAgent.show(chatId, typeof record.placeholder === "string" ? record.placeholder.slice(0, 2000) : "").then(reply, () => reply({ ok: false, text: "The Viewer could not show that." }));
+}
 
 ipcMain.handle("browser:bounds", (_e, b) => {
 	browserBounds = b;
@@ -1613,6 +1642,7 @@ app.whenReady().then(() => {
 	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "", onRequest: (d) => viewerTabs.requestSeen(d) });
 	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, getWin: () => win, devUrl: DEV_URL, userData: () => app.getPath("userData") });
 	if (SELFTEST) require("./viewer-reload-selftest-main").register({ ipcMain, viewerTabs, setRoot: (r) => (projectRootOverride = r), getWin: () => win, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
+	if (SELFTEST) require("./viewer-agent-selftest-main").register({ ipcMain, viewerTabs, getWin: () => win, getRoot: () => (SELFTEST && projectRootOverride) || REPO, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
 	if (SELFTEST) require("./viewer-open-selftest-main").register({ ipcMain, viewerTabs, setRoot: (r) => (projectRootOverride = r), getWin: () => win, ctxView: () => ctx.browserView, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
 	if (SELFTEST) require("./viewer-files-selftest-main").register({ ipcMain, BrowserWindow, session: electronSession, setRoot: (r) => (projectRootOverride = r) });
 	buildMenu();

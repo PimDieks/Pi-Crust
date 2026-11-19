@@ -125,6 +125,8 @@ contextBridge.exposeInMainWorld("crust", {
 		hide: (hidden, reason) => ipcRenderer.invoke("browser:hide", hidden, reason),
 		navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
 		openSite: (url) => ipcRenderer.invoke("browser:openSite", url), // a page the app opens (story, Mendix): a tab on that site, else a new one -> { ok, tabId, reused } | { ok: false, message }
+		onAgentShown: on("browser:agentShown"), // { chatId, tabId, label, kind, reused, active }: the agent showed a page in a background tab (show_in_viewer)
+		focusShown: (target) => ipcRenderer.invoke("browser:focusShown", target), // the chat's tool card was clicked: the tab that shows `target` becomes the active tab -> { ok } | { ok: false, message }
 		onNotice: on("browser:notice"), // { message }: a reason for the Viewer's reason line (a page the app could not open, no tab free)
 		suggest: (text) => ipcRenderer.invoke("browser:suggest", text), // { items: [{ path, kind }] }: project files that match the typed text, at most 8
 		openFile: (arg) => ipcRenderer.invoke("browser:openFile", arg), // { rel } (tree, Editor) or { abs } (a dropped file) -> { ok, tabId, path, kind, reused } | { ok: false, message }; main re-checks the path
@@ -263,6 +265,7 @@ contextBridge.exposeInMainWorld("crust", {
 		focusEmulation: (on) => ipcRenderer.invoke("selftest:focusEmulation", on),
 		viewerTabs: (op) => ipcRenderer.invoke("viewertabs:selftest", op), // selftest only: the main side answers only in a selftest run
 		viewerReload: (op) => ipcRenderer.invoke("viewerreload:selftest", op), // selftest only
+		viewerAgent: (op) => ipcRenderer.invoke("vieweragent:selftest", op), // selftest only: the main side answers only in a selftest run
 		viewerOpen: (op) => ipcRenderer.invoke("vieweropen:selftest", op), // selftest only: the main side answers only in a selftest run
 		viewerFiles: () => ipcRenderer.invoke("viewerfiles:selftest"), // selftest only: the main side answers only in a selftest run
 	},

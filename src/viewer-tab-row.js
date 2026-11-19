@@ -69,6 +69,7 @@
 	const nameOf = (t) => {
 		const parts = [titleOf(t)];
 		if (isProject(t)) parts.push(KIND_NAME[t.kind] || "page");
+		if (t.updated) parts.push("updated by the agent");
 		if (t.loading) parts.push("loading");
 		if (t.error) parts.push("could not load");
 		return parts.join(", ");
@@ -85,7 +86,9 @@
 		const mark = el("span", "vt-mark");
 		mark.setAttribute("aria-hidden", "true");
 		const label = el("span", "vt-label");
-		tabBtn.append(mark, label);
+		const fresh = el("span", "vt-new"); // a dot on a page the agent showed (or showed again) that the person has not looked at yet
+		fresh.setAttribute("aria-hidden", "true");
+		tabBtn.append(mark, label, fresh);
 		const close = el("button", "vt-close", "×");
 		close.type = "button";
 		close.tabIndex = -1; // reached with Delete from the tab; a click still works
@@ -125,6 +128,7 @@
 			e.item.classList.toggle("active", active);
 			e.item.classList.toggle("loading", !!t.loading);
 			e.item.classList.toggle("failed", !!t.error);
+			e.item.classList.toggle("updated", !!t.updated);
 			e.tabBtn.setAttribute("aria-selected", String(active));
 			e.tabBtn.tabIndex = active ? 0 : -1; // roving focus: one stop in the row
 			e.tabBtn.setAttribute("aria-label", nameOf(t));

@@ -216,6 +216,12 @@ select option { background: var(--panel-2); color: var(--text); }
 .vt-mark svg { display: block; }
 .vt-label { overflow: hidden; text-overflow: ellipsis; flex: 1; text-align: left; }
 .vt-item.failed .vt-label { color: var(--err); }
+.vt-new { display: none; flex: none; width: 7px; height: 7px; border-radius: var(--radius-full); background: var(--fills-action); }
+.vt-item.updated .vt-new { display: inline-block; }
+/* The agent's file name on its tool card: a link to the Viewer tab that shows it. */
+.tool .targ.tview { cursor: pointer; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 2px; }
+.tool .targ.tview:hover { color: var(--text); text-decoration-color: currentColor; }
+.tool .targ.tview:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-xs); }
 .vt-close { flex: none; width: 16px; height: 16px; margin: 0 4px 0 2px; padding: 0; border: 0; border-radius: var(--radius-full); background: none; color: var(--muted); font-size: var(--fs-md); line-height: 1; cursor: pointer; visibility: hidden; }
 .vt-item.active .vt-close, .vt-item:hover .vt-close, .vt-item:focus-within .vt-close { visibility: visible; }
 .vt-close:hover { background: var(--selected); color: var(--text); }

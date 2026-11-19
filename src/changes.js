@@ -27,7 +27,10 @@ function switchTab(name) {
 	for (const b of document.querySelectorAll(".tabs [data-tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
 	for (const p of document.querySelectorAll(".tab-panel")) p.hidden = p.dataset.panel !== name;
 	crust.browser.hide(name !== "browser", "tab");
-	if (name === "browser") requestAnimationFrame(syncBrowserBounds);
+	if (name === "browser") {
+		requestAnimationFrame(syncBrowserBounds);
+		window.viewerAgent?.seen(); // the person looks at the Viewer: the badge of pages the agent showed goes away
+	}
 	if (name === "changes") loadChanges();
 	if (name === "terminal") showTerminal();
 	if (name === "editor") showEditor();

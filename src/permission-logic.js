@@ -73,7 +73,8 @@ function clearGrants(g) {
 const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const EDIT_TOOLS = new Set(["edit", "write"]);
 const SHELL_TOOLS = new Set(["bash", "powershell"]);
-const HARMLESS_TOOLS = new Set(["todo", "question", "tool_search", "advisor"]);
+const HARMLESS_TOOLS = new Set(["todo", "question", "tool_search", "advisor", "show_in_viewer"]);
+const SHOW_TOOL = "show_in_viewer"; // the agent shows a project file or a localhost address in the Viewer (viewer-agent-main.js)
 function classify(toolName) {
 	const n = String(toolName);
 	if (READ_TOOLS.has(n) || HARMLESS_TOOLS.has(n)) return "safe";
@@ -553,6 +554,7 @@ function askEdit(mode, toolName, shown, resolved, flags) {
 // ---------------------------------------------------------------------------
 const allow = () => ({ action: "allow" });
 const block = (reason) => ({ action: "block", reason });
+const { parse: parseTarget } = require("./viewer-agent-target");
 // prompt.risky: the prompt offers only "Allow once" and "Deny" and opens on "Deny" (protected files, network paths, text that is
 // not fully shown, hidden characters). The UIs (renderer.js, remote/app.js) read it from the prompt itself: no "Allow for this
 // chat" among the options, or one of the warning lines (PERM_REASON). Both are always set together here.
@@ -569,6 +571,7 @@ function decide(args) {
 		if (!isMode(mode)) return block("Permission mode is unreadable, so the call was blocked. Ask the user to pick a mode again.");
 		if (typeof toolName !== "string" || toolName === "") return block("The tool call has no readable tool name, so it was blocked.");
 		const kind = classify(toolName);
+		if (toolName === SHOW_TOOL) return decideShow(args);
 		const pathOpts = { ...(args.pathOptions || {}) };
 		if (args.protect !== undefined) pathOpts.protect = args.protect;
 		// git's settings could not be read: nothing it might run can be ruled out (fail closed, H2).
@@ -662,6 +665,22 @@ function decide(args) {
 	}
 }
 
+// show_in_viewer: showing a project file needs exactly what READING that file needs in this mode: where a read runs without a question the
+// tool runs, where a read would ask or is blocked the tool is refused with a reason (it never opens a question of its own). A localhost
+// address only shows a page the person could click, so it is allowed in every mode. Any other text is judged as a path to read (a scheme, another host and unreadable text too); the main
+// process then decides what may really be shown (viewer-agent-logic.js) and never trusts this check alone.
+function decideShow(args) {
+	const { input } = args;
+	const target = input && typeof input === "object" ? input.target : undefined;
+	if (typeof target !== "string" || target.trim() === "") return block("show_in_viewer needs one argument, target: a file path of the project or a localhost address. Nothing was shown.");
+	const t = parseTarget(target);
+	if (t.kind === "address" && t.local) return allow();
+	const read = decide({ ...args, toolName: "read", input: { path: target.trim() } });
+	if (read.action === "allow") return allow();
+	const why = read.action === "block" ? read.reason : "Reading it would need the person's approval here.";
+	return block(`Showing a file in the Viewer needs the same permission as reading it. ${why} Nothing was shown. Ask the person to open it themselves.`);
+}
+
 function stable(v) {
 	if (v === undefined) return "undefined";
 	if (v === null || typeof v !== "object") return JSON.stringify(v);
@@ -695,6 +714,7 @@ function pinKeys(toolName) {
 	if (kind === "shell") return ["command"];
 	if (kind === "edit") return PATH_KEYS.slice();
 	if (READ_TOOLS.has(String(toolName))) return READ_PATH_KEYS.slice();
+	if (String(toolName) === SHOW_TOOL) return ["target"];
 	if (kind === "safe") return [];
 	return "all";
 }

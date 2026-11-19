@@ -89,12 +89,22 @@ const DEFAULT_CONTEXT = {
 };
 const DEFAULT_SESSIONS = [{ sessionId: "stand-in-session", summary: "Notes summary", customTitle: "Notes summary", firstPrompt: "Read the file notes.txt.", lastModified: 1795009024441, fileSize: 34669, gitBranch: "HEAD", cwd: "C:\\work\\proj", createdAt: 1795009022268 }];
 
+// The SDK's way to define a host tool: tool() makes a definition, createSdkMcpServer() an in-process server (type "sdk"). The stand-in keeps the
+// definitions so that a scripted call of mcp__<server>__<tool> that the gate allows runs the handler, as the real SDK would (result in `toolResult`).
+export function tool(name, description, inputSchema, handler, extras = {}) {
+	return { name, description, inputSchema, handler, ...extras };
+}
+export function createSdkMcpServer(options = {}) {
+	return { type: "sdk", name: options.name, instance: { name: options.name, version: options.version, tools: options.tools || [] } };
+}
+
 // The options as logged: functions by name, the env reduced to names and "key present".
 export function describeOptions(o = {}) {
 	const out = {};
 	for (const [k, v] of Object.entries(o)) {
 		if (k === "env") out.env = { ANTHROPIC_API_KEY: v && v.ANTHROPIC_API_KEY ? "key present" : "key absent", names: Object.keys(v || {}).sort(), CLAUDE_CONFIG_DIR: v && v.CLAUDE_CONFIG_DIR, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: v && v.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, switches: Object.fromEntries(Object.keys(v || {}).filter((n) => /^(DISABLE_|CLAUDE_CODE_DISABLE_)/.test(n)).map((n) => [n, v[n]])) };
 		else if (typeof v === "function") out[k] = "[function]";
+		else if (k === "mcpServers" && v && typeof v === "object") out.mcpServers = Object.fromEntries(Object.entries(v).map(([n, sv]) => [n, { type: sv && sv.type, tools: ((sv && sv.instance && sv.instance.tools) || []).map((t) => t.name) }]));
 		else if (k === "hooks" && v && typeof v === "object") out.hooks = Object.fromEntries(Object.entries(v).map(([ev, ms]) => [ev, (ms || []).map((m) => ({ matcher: m.matcher || null, hooks: (m.hooks || []).length, onFailure: m.onFailure || null }))]));
 		else out[k] = v;
 	}
@@ -143,6 +153,7 @@ const SDK_AUTO = (options, name, input) => {
 };
 // "<cwd>" in a scripted tool call's strings is the chat's project folder (a fixture cannot know it).
 const withCwd = (v, cwd) => (typeof v === "string" ? v.split("<cwd>").join(cwd || "") : Array.isArray(v) ? v.map((x) => withCwd(x, cwd)) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, withCwd(x, cwd)])) : v);
+const ti0 = (m) => (m.__tool_call && m.__tool_call.tool_input) || {};
 export async function runGate(options, call) {
 	const name = call.tool_name;
 	const hookInput = { session_id: "stand-in-session", transcript_path: "", cwd: options && options.cwd, hook_event_name: "PreToolUse", tool_name: name, tool_input: call.tool_input, tool_use_id: call.tool_use_id || "toolu_stand_in", permission_mode: call.permission_mode || (options && options.permissionMode) || "default", ...(call.agent_id ? { agent_id: call.agent_id, agent_type: call.agent_type || "general-purpose" } : {}) };
@@ -213,9 +224,40 @@ export function query({ prompt, options }) {
 				continue;
 			}
 			if (m && m.__tool_call) {
+				// "emit": true also yields the assistant's tool_use message before the gate and the tool_result after it (the result of the real
+				// handler, or the reason of a denial), so the chat shows a tool card for the call.
+				const toolUseId = (m.__tool_call.tool_use_id || "toolu_stand_in") + "_" + entry.gates.length;
+				if (m.__tool_call.emit) {
+					const input = withCwd(m.__tool_call.tool_input || {}, options && options.cwd);
+					const base = { session_id: "stand-in-session", parent_tool_use_id: null };
+					const ev = (event) => ({ type: "stream_event", event, ...base, uuid: "ev-" + toolUseId });
+					yield ev({ type: "message_start", message: { id: "msg-" + toolUseId, type: "message", role: "assistant", model: "stand-in", content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } });
+					yield ev({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: toolUseId, name: m.__tool_call.tool_name, input: {} } });
+					yield ev({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(input) } });
+					yield { type: "assistant", ...base, uuid: "tu-" + toolUseId, message: { id: "msg-" + toolUseId, role: "assistant", model: "stand-in", content: [{ type: "tool_use", id: toolUseId, name: m.__tool_call.tool_name, input }], stop_reason: "tool_use" } };
+					yield ev({ type: "content_block_stop", index: 0 });
+					yield ev({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 1 } });
+					yield ev({ type: "message_stop" });
+				}
 				const g = await runGate(options, withCwd(m.__tool_call, options && options.cwd));
 				entry.gates.push(g);
+				// An allowed call of an in-process server's tool runs its handler (the real SDK does, on the input canUseTool returned).
+				const mm = /^mcp__([^_](?:[^_]|_(?!_))*)__(.+)$/.exec(m.__tool_call.tool_name);
+				const srv = mm && options && options.mcpServers && options.mcpServers[mm[1]];
+				const def = srv && srv.instance && srv.instance.tools.find((t) => t.name === mm[2]);
+				if (g.outcome === "allow" && def) {
+					try {
+						g.toolResult = await def.handler(withCwd((g.result && g.result.updatedInput) || ti0(m), options && options.cwd), {});
+					} catch (e) {
+						g.toolResult = { threw: String(e && e.message) };
+					}
+				}
 				const ti = m.__tool_call.tool_input || {};
+				if (m.__tool_call.emit) {
+					const tr = g.toolResult;
+					const content = g.outcome === "allow" ? (tr && tr.content) || "" : (g.reason || (g.result && g.result.message) || "denied");
+					yield { type: "user", parent_tool_use_id: null, session_id: "stand-in-session", uuid: "tr-" + toolUseId, message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content, ...(g.outcome !== "allow" || (tr && tr.isError) ? { is_error: true } : {}) }] } };
+				}
 				logFile({ gate: { tool_name: m.__tool_call.tool_name, command: ti.command, file_path: ti.file_path, agent_id: m.__tool_call.agent_id, hooks: g.hooks, viaCanUseTool: g.viaCanUseTool, outcome: g.outcome } }); // for the offscreen self-test runner
 				continue;
 			}

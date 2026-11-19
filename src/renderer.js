@@ -933,7 +933,7 @@ function toolSummary(name, args = {}) {
 	return first || "";
 }
 
-const TOOL_LABEL = { read: "Read", bash: "Bash", edit: "Edit", write: "Write", subagent: "Subagent", codemode: "Code", todo: "Todo", question: "Question" };
+const TOOL_LABEL = { read: "Read", bash: "Bash", edit: "Edit", write: "Write", subagent: "Subagent", codemode: "Code", todo: "Todo", question: "Question", show_in_viewer: "Viewer", "mcp__pi-crust__show_in_viewer": "Viewer" };
 
 // --- tool groups ---------------------------------------------------------------
 // A run of tool calls (and the thinking between them) with no answer text in between
@@ -1026,6 +1026,7 @@ function toolCard(id, name, args) {
 		const summary = toolSummary(name, args);
 		t.argEl.textContent = summary;
 		t.argEl.title = summary;
+		if (window.viewerAgent?.isTool(name)) window.viewerAgent.decorate(t, args); // the agent's show_in_viewer: the file name opens its Viewer tab
 	}
 	scroll();
 	return t;

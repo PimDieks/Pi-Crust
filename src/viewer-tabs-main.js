@@ -68,7 +68,7 @@ function create(deps) {
 	const wcOf = (tab) => (tab && views.get(tab.id) ? views.get(tab.id).webContents : null);
 	const isActive = (tab) => !!tab && list.activeId === tab.id;
 
-	const publicTab = (t) => ({ id: t.id, session: t.session, kind: t.kind, zoom: t.zoom || "fit", address: t.address, title: t.title, loading: t.loading, canGoBack: t.canGoBack, canGoForward: t.canGoForward, error: t.error });
+	const publicTab = (t) => ({ id: t.id, session: t.session, kind: t.kind, zoom: t.zoom || "fit", address: t.address, title: t.title, loading: t.loading, canGoBack: t.canGoBack, canGoForward: t.canGoForward, error: t.error, updated: !!t.updated });
 	const snapshot = (changedId) => {
 		const a = activeTab() || {};
 		// The top-level fields are the ACTIVE tab's, as the single-page event had them (the UI keeps working); tabId says which tab changed.
@@ -392,6 +392,7 @@ function create(deps) {
 	}
 
 	function becameActive(tab) {
+		tab.updated = false; // the person is looking at it now: the "updated" mark of a page the agent showed goes away
 		materialize(tab);
 		if (tab.stale) reloadTab(tab); // a page that changed while it was in the background loads once, now
 		deps.setErrorHidden(!!tab.error);
@@ -540,6 +541,52 @@ function create(deps) {
 		const message = r.reason === "limit" ? VO.R.limit : VO.R.invalid;
 		deps.send("browser:notice", { message });
 		return { ok: false, reason: r.reason, message };
+	}
+
+	// The agent's tool show_in_viewer (viewer-agent-main.js has checked the address): the page opens in a NEW tab in the BACKGROUND, or the tab
+	// that already shows it is marked as updated. The active tab does not change, nothing takes focus, nothing is saved as the active tab.
+	// allowNew false: only an existing tab may be used (the per-turn rate limit). At the limit nothing opens: `message` is the reason.
+	//   break agent-focus (selftest): the page becomes the active tab. agent-reuse: an existing tab is not reused. agent-limit: at the limit
+	//   the active tab is replaced.
+	async function openBackground(address, { allowNew = true } = {}) {
+		const a = accept(address);
+		if (!a.ok) return { ok: false, reason: "refused", message: VO.R.invalid };
+		const same = brk === "agent-reuse" ? null : showing(a.url);
+		if (same) {
+			const active = isActive(same);
+			if (!active) {
+				same.updated = true;
+				report(same);
+			}
+			return { ok: true, tabId: same.id, reused: true, active };
+		}
+		if (!allowNew) return { ok: false, reason: "rate" };
+		if (list.tabs.length >= L.MAX_TABS) {
+			if (brk === "agent-limit") {
+				const t = activeTab();
+				load(t, a.url);
+				return { ok: true, tabId: t.id, reused: true, active: true };
+			}
+			return { ok: false, reason: "limit", message: VO.R.limit };
+		}
+		const r = makeTab(a.session, a.url, { activate: false });
+		if (!r.ok) return { ok: false, reason: r.reason, message: r.reason === "limit" ? VO.R.limit : VO.R.invalid };
+		r.tab.updated = true;
+		deps.relayout(); // the new view starts hidden: only the active tab is ever visible
+		if (brk === "agent-focus") {
+			await setActive(r.tab.id);
+			return { ok: true, tabId: r.tab.id, reused: false, active: true };
+		}
+		report(r.tab);
+		return { ok: true, tabId: r.tab.id, reused: false, active: false };
+	}
+	// The tab that shows this address (the chat's tool card): made the active tab. false when it is gone.
+	async function activateShowing(address) {
+		const a = accept(address);
+		const t = a.ok ? showing(a.url) : null;
+		if (!t) return { ok: false };
+		await setActive(t.id);
+		return { ok: true, tabId: t.id };
 	}
 
 	function action(name) {
@@ -730,6 +777,8 @@ function create(deps) {
 		navigate,
 		openFile,
 		openSite,
+		openBackground,
+		activateShowing,
 		requestSeen,
 		// For the selftest and the tests: how many folders are watched, per tab the files it watches and how often it was reloaded by a change.
 		reloadStats: () => ({ watchers: reload.count(), tabs: list.tabs.map((t) => ({ id: t.id, address: t.address, session: t.session, stale: !!t.stale, missing: !!t.missing, reloads: t.reloads || 0, files: reload.filesOf(t.id) })) }),

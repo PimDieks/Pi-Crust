@@ -19,6 +19,7 @@ const { createTranslator } = require("./translate");
 const requests = require("./requests");
 const { createHistory } = require("./history");
 const status = require("./status");
+const viewerTool = require("./viewer-tool");
 const turnsLib = require("./turns");
 
 const DEFAULT_MAX_BUDGET_USD = 5;
@@ -135,6 +136,8 @@ function createClaudeAdapter(deps = {}) {
 		keystore: deps.keystore || null, // { read(), status(), set(), clear() } from keystore.js; the app sets it with configure()
 		configDir: deps.configDir || null, // app-owned CLAUDE_CONFIG_DIR: the user's own Claude sign-in is never used
 		getSettings: deps.getSettings || (() => ({})),
+		showInViewer: deps.showInViewer || null, // (chatId, target) -> { ok, text }: the app's side of the tool show_in_viewer (viewer-agent-main.js)
+		zod: deps.zod || null, // tests only; the app uses the installed zod
 		isPackaged: deps.isPackaged || defaultIsPackaged,
 		loadSdk: deps.loadSdk || null,
 		killTree: deps.killTree || killTree,
@@ -205,6 +208,17 @@ function createClaudeAdapter(deps = {}) {
 		// The only traffic left is the model request with the person's own key. Set after the strip, so nothing inherited can turn one back on.
 		for (const n of PRIVACY_SWITCHES) env[n] = "1";
 		return env;
+	}
+
+	// The tool show_in_viewer as an in-process server, or null (no app side, no SDK support, no zod): then the chat has no such tool.
+	function loadViewerTool(sdk, opts, handle) {
+		try {
+			if (typeof cfg.showInViewer !== "function") return null;
+			const zod = cfg.zod || require("zod");
+			return viewerTool.build({ sdk, zod, show: (chatId, target) => cfg.showInViewer(chatId, target), chatId: opts.chatId, getMode: () => handle.mode, getCwd: () => opts.cwd });
+		} catch {
+			return null;
+		}
 	}
 
 	// The SDK options. The key appears only inside options.env.
@@ -441,6 +455,9 @@ function createClaudeAdapter(deps = {}) {
 								return child;
 							},
 						};
+						// The one host-defined tool (viewer-tool.js): an in-process server with show_in_viewer and nothing else.
+						const viewer = loadViewerTool(sdk, opts, handle);
+						if (viewer) extra.mcpServers = { [viewerTool.SERVER]: viewer };
 						if (qx.fork) {
 							extra.forkSession = true;
 							if (qx.at) extra.resumeSessionAt = qx.at;
@@ -817,7 +834,7 @@ function createClaudeAdapter(deps = {}) {
 		onAppStart: () => {},
 		// The app hands over its pieces once it has them (userData folder, safeStorage, settings).
 		configure(next = {}) {
-			for (const k of ["keystore", "configDir", "getSettings", "isPackaged", "loadSdk", "killTree", "enginePath", "trial"]) if (next[k] !== undefined) cfg[k] = next[k];
+			for (const k of ["keystore", "configDir", "getSettings", "isPackaged", "loadSdk", "killTree", "enginePath", "trial", "showInViewer", "zod"]) if (next[k] !== undefined) cfg[k] = next[k];
 			sdkPromise = null;
 			return adapter;
 		},

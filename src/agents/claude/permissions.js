@@ -65,6 +65,9 @@ const TOOL_TABLE = Object.freeze({
 	PowerShell: "powershell",
 	Task: "subagent",
 	Agent: "subagent",
+	// The one host-defined tool (agents/claude/viewer-tool.js): shows a project file or a localhost address in the Viewer. Named in full, so no
+	// other server's tool can take this name, and judged by the shared logic's show_in_viewer rule: what reading the file needs, never a question.
+	"mcp__pi-crust__show_in_viewer": "show_in_viewer",
 });
 
 // Pi Crust mode -> SDK options. EVERY chat mode runs the SDK in "default" and the decision is ours (the PreToolUse hook and canUseTool), so
