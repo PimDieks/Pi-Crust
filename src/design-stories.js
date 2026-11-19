@@ -718,6 +718,12 @@
 			{ name: ".Hidden", setName: ".Hidden", nodeId: "1:4", key: "k4", description: "", type: "componentSet" },
 			{ name: "Switch </figma-component>", setName: "", nodeId: "1:5", key: "k5", description: "", type: "component" },
 		];
+		// The story "Card" has no name in common with the Figma component "Acme Card": they belong together only through the Figma node link in
+		// the story file (src/Card.stories.tsx in a real project; storybook:resolve returns it as figmaUrl). This step runs against the app's own
+		// folder, which has no such file, so the resolved files of the two Card stories are put in the cache as storybook:resolve would give them.
+		for (const st of info.stories.filter((x) => x.title === "Card")) {
+			filesCache.set(`${info.url}|${st.id}`, Promise.resolve({ storyFile: "src/Card.stories.tsx", componentFile: "src/Card.tsx", figmaUrl: "https://www.figma.com/design/FILEKEY/Acme?node-id=1-2", exportName: st.name === "Default" ? "Default" : "WithImage" }));
+		}
 		figmaFn = async () => ({ ok: true, file: { name: "Acme", key: "FILEKEY" }, components: fakeComps });
 		setFigmaOn(true);
 		await wait(800);
