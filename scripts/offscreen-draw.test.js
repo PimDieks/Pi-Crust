@@ -10,6 +10,7 @@ function fakes() {
 		getBounds: () => state.bounds,
 		setBounds: (b) => (state.bounds = b),
 		setVisible: (v) => (state.visible = v),
+		getVisible: () => !!state.shown, // what the layout wants shown (the draw's own setVisible is undone by relayout)
 		isDestroyed: () => state.destroyed,
 	};
 	const wc = { invalidate() {}, capturePage: async () => img(++state.frames < 2), isDestroyed: () => false };
@@ -69,4 +70,23 @@ test("idle() resolves only after a running draw has finished and the layout was 
 	await d.idle();
 	assert.strictEqual(relaid, true);
 	assert.strictEqual(d.busy(), false);
+});
+
+test("a draw queued behind another does not start on a view that became visible meanwhile: normal capture instead", async () => {
+	const { state, view, wc } = fakes();
+	const calls = [];
+	const setB = view.setBounds;
+	view.setBounds = (b) => (calls.push("bounds"), setB(b));
+	const sv = view.setVisible;
+	view.setVisible = (v) => (calls.push("visible"), sv(v));
+	const cap = wc.capturePage;
+	wc.capturePage = async (r) => (calls.push("capture"), cap(r));
+	const other = fakes();
+	const d = create({ relayout: () => {}, delay: async () => {} });
+	const a = d.draw(other.view, other.wc, undefined, () => img(true));
+	const b = d.draw(view, wc, undefined, () => img(true));
+	state.shown = true; // the user opened the Viewer while A was drawing
+	await Promise.all([a, b]);
+	assert.deepStrictEqual(calls, ["capture"]); // no bounds change, no visibility change
+	assert.deepStrictEqual(state.bounds, { x: 0, y: 0, width: 100, height: 80 });
 });

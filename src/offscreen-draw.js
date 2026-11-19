@@ -19,6 +19,12 @@ function create({ relayout, delay = (ms) => new Promise((r) => setTimeout(r, ms)
 	async function run(view, wc, rect, empty) {
 		let img = empty();
 		if (!alive(view) || !alive(wc)) return img;
+		// The view may have been shown while this draw waited its turn: never move a visible view to the 1 px position (a flicker); capture it normally.
+		try {
+			if (typeof view.getVisible === "function" && view.getVisible()) return await wc.capturePage(rect && rect.width > 0 ? rect : undefined);
+		} catch {
+			return img;
+		}
 		try {
 			const b = view.getBounds();
 			view.setBounds({ x: 1 - b.width, y: 1 - b.height, width: b.width, height: b.height });
