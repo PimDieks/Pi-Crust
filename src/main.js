@@ -1229,23 +1229,33 @@ ipcMain.handle("term:start", (_e, id, cols, rows) => {
 	const p = ptyMod.spawn(shellPath, shellArgs, { name: "xterm-256color", cols: cols || 100, rows: rows || 30, cwd: REPO, env: { ...ENV, TERM: "xterm-256color", COLORTERM: "truecolor" } });
 	terms.set(id, p);
 	// Foreground process of the shell, polled once a second: tells the UI what runs and since when.
-	// Not on Windows: there node-pty's p.process is always the terminal name, never the foreground process.
+	// Windows: node-pty's p.process is only the terminal name there, so ask Windows for the shell's child processes (src/win-busy.js: a hidden
+	// powershell.exe, about 0.3 s per check, never two at once, a 3 s limit; when it can't tell, the state stays as it was).
 	const shellName = path.basename(shellPath);
 	const idle = new Set([shellName, `-${shellName}`, "login", ""]);
 	let fg = null; // { name, since }
-	p._procPoll = IS_WIN ? null : setInterval(() => {
-		let name;
-		try {
-			name = String(p.process || "");
-		} catch {
-			return;
-		}
-		const busy = !idle.has(name);
+	const setFg = (name) => {
+		const busy = !!name && !idle.has(name);
 		if (busy && !fg) fg = { name, since: Date.now() };
 		else if (!busy && fg) fg = null;
 		else if (busy && fg.name !== name) fg.name = name; // npm -> node: same run, keep `since`
 		else return;
 		send("term:proc", { id, name: fg?.name || null, since: fg?.since || null });
+	};
+	let winChecking = false;
+	p._procPoll = setInterval(() => {
+		if (IS_WIN) {
+			if (winChecking) return;
+			winChecking = true;
+			require("./win-busy").check(p.pid, (name) => {
+				winChecking = false;
+				if (name !== undefined && terms.get(id) === p) setFg(name);
+			});
+			return;
+		}
+		try {
+			setFg(String(p.process || ""));
+		} catch {}
 	}, 1000);
 	p.onData((d) => send("term:data", { id, data: d }));
 	p.onExit(({ exitCode }) => {

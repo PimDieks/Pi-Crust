@@ -261,22 +261,15 @@ selftestSteps.push(async ({ snap, wait }) => {
 	await wait(1500);
 	const before = terms.length;
 	const a = activeTerm();
-	crust.term.input(a.id, "sleep 30\r");
-	await wait(1500);
+	// A command that starts a process: on Windows a PowerShell `sleep` is a cmdlet (no child process, so never busy), so use ping.exe there.
+	crust.term.input(a.id, isWin ? "ping -n 30 127.0.0.1\r" : "sleep 30\r");
+	await wait(isWin ? 3000 : 1500); // main polls once a second; on Windows a check takes about 0.3 s more
 	await runInTerminal("echo pi-crust-second-terminal-ok");
 	await wait(1500);
-	let b = activeTerm();
-	// A running command is detected only where the shell's foreground process can be read (main.js term:start polls p.process; on Windows node-pty
-	// gives no foreground process, so nothing is ever "busy"). Where it is detected: a command run from the app goes to a NEW terminal and the first
-	// stays busy. On Windows: it goes to the same terminal, and the second terminal is opened by hand, so the tabs, select and close checks below
-	// still run there.
-	if (isWin) {
-		const reused = terms.length === before && b.id === a.id && !termProcs.has(a.id);
-		console.error(`SELFTEST terminal: windows has no busy detection, run reuses terminal terms=${terms.length} busy-first=${termProcs.has(a.id)} -> ${reused ? "OK" : "MISMATCH"}`);
-		b = await newTerminal();
-		await wait(1000);
-	}
-	const ok = terms.length === before + 1 && b.id !== a.id && (isWin || termProcs.has(a.id));
+	const b = activeTerm();
+	// A running command is detected from the shell's foreground process (main.js term:start; on Windows from its child processes, src/win-busy.js):
+	// a command run from the app goes to a NEW terminal and the first stays busy.
+	const ok = terms.length === before + 1 && b.id !== a.id && termProcs.has(a.id);
 	console.error(`SELFTEST terminal: terms=${terms.length} busy-first=${termProcs.has(a.id)} new=${b.id} -> ${ok ? "OK" : "MISMATCH"}`);
 	await snap("terminal-multi");
 	console.error(`SELFTEST terminal-bar: proc box ${$("#term-proc").hidden ? "hidden" : "shown"} for idle terminal -> ${$("#term-proc").hidden ? "OK" : "MISMATCH"}`);
