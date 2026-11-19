@@ -1224,16 +1224,21 @@ function winBusyNow() {
 	if (winBusyRunning) return winBusyRunning;
 	const list = [...terms.entries()].filter(([, p]) => p._setFg);
 	if (!list.length) return Promise.resolve();
-	winBusyRunning = new Promise((resolve) => {
+	// checkAll may call back synchronously (spawn threw): clear the flag only for the promise that is current, after it was assigned.
+	let mine = null;
+	mine = new Promise((resolve) => {
 		require("./win-busy").checkAll(
 			list.map(([, p]) => ({ pid: p.pid, exe: p._shellName })),
 			(res) => {
-				winBusyRunning = null;
 				if (res) for (const [id, p] of list) if (terms.get(id) === p && res.has(p.pid)) p._setFg(res.get(p.pid));
 				resolve();
+				Promise.resolve().then(() => {
+					if (winBusyRunning === mine) winBusyRunning = null;
+				});
 			},
 		);
 	});
+	winBusyRunning = mine;
 	return winBusyRunning;
 }
 function winBusyStart() {
