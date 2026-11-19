@@ -3,7 +3,7 @@
 //   isSecretName(name)             the one name rule
 //   parseKeepList(value)           the setting "commandEnvKeep": names a command may keep (default none)
 //   secretNames(env, { keep })     the secret-looking names present in an environment object, minus the keep list
-//   shellFamily(...)               which shell syntax a command tool runs: "posix" (bash), "powershell" or "other"
+//   shellFamily(...)               which shell syntax a command tool runs: "posix" (bash, sh, dash, zsh), "powershell" or "other"
 //   hideCommand(command, family, names)  the command that actually runs: a prefix that removes those variables for that command only
 // Claude Agent chats drop the names from the engine's own environment (agents/claude/index.js). Pi needs its provider keys in its own
 // environment, so Pi's permission extension keeps them there and hides them from every command it runs (pi-extension/permission-modes.ts).
@@ -53,7 +53,8 @@ function secretNames(env, { keep = [], caseInsensitive = defaultFold() } = {}) {
 }
 
 // Which syntax a command tool speaks. The "powershell" tool is PowerShell. The "bash" tool runs Pi's shell: settings shellPath (global and
-// project, "" / null / undefined count as unset) or, with none, Git Bash (Windows) or bash. A shellPath must name bash or PowerShell; any other
+// project, "" / null / undefined count as unset) or, with none, Git Bash (Windows) or bash. bash, sh, dash and zsh are all "posix" (the prefix
+// below uses only what they all support); PowerShell is "powershell"; any other
 // shell (fish, cmd, nushell ...), a value that is not a string, two settings that disagree, or unreadable settings (shellPaths null) is "other".
 function shellFamily({ toolName, shellPaths = [], platform = process.platform } = {}) {
 	if (toolName === "powershell") return "powershell";
@@ -65,7 +66,7 @@ function shellFamily({ toolName, shellPaths = [], platform = process.platform } 
 	for (const sp of set) {
 		if (typeof sp !== "string") return "other";
 		const b = base(sp.trim()).toLowerCase();
-		fams.add(/^bash(\.exe)?$/.test(b) ? "posix" : /^(powershell|pwsh)(\.exe)?$/.test(b) ? "powershell" : "other");
+		fams.add(/^(bash|sh|dash|zsh)(\.exe)?$/.test(b) ? "posix" :/^(powershell|pwsh)(\.exe)?$/.test(b) ? "powershell" : "other");
 	}
 	return fams.size === 1 ? [...fams][0] : "other";
 }
@@ -79,29 +80,62 @@ const sq = (s) => "'" + String(s).replace(/'/g, SQ_ESCAPE) + "'"; // a POSIX sin
 const psName = (n) => (/^[A-Za-z0-9_]+$/.test(n) ? `'${n}'` : `(-join [char[]](${Array.from({ length: n.length }, (_, i) => n.charCodeAt(i)).join(",")}))`);
 
 // The command that actually runs. The caller has already decided on the ORIGINAL command; this only adds what removes the variables.
-//   posix       "unset -v A B; <command>" (a name that is not a shell identifier, such as "ProgramFiles(x86)" or one with a non-ASCII letter, cannot
-//               be unset and bash still hands it on: then the whole command runs through `exec env -u NAME ... bash -c '<command>'`)
-//   powershell  "'A','B' | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }; <command>"
+// The names go on a line of their own, so an error message about the person's own command (bash quotes the offending line) can never quote them.
+//   posix       "unset -v A B\n<command>" (a name that is not a shell identifier, such as "ProgramFiles(x86)" or one with a non-ASCII letter, cannot
+//               be unset and bash still hands it on: then the whole command runs through
+//               `exec env -u NAME ... "${BASH:-${0#-}}" -c '<command>' "$0"`, which is one line whose quoted text is only the person's command)
+//   powershell  "'A','B' | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }\n<wrapper>": the line that clears the
+//               names, then the person's command, unchanged, as a script block built from its Base64 text and dot-sourced. A command may have to
+//               start with `using namespace`, `[CmdletBinding()]param()` or `param(...)`, which only work as the first statement of the text
+//               they belong to, so nothing may come before them in it. A last line copies the command's own success flag into the exit code.
 // Idempotent: a command that already starts with exactly this prefix (or this wrapper) is returned as it is. No names: the command is returned
-// unchanged. Returns { ok: true, command, hidden } or { ok: false, reason } for a shell this cannot write for (fail closed).
-function hideCommand(command, family, names) {
+// unchanged. Returns { ok: true, command, hidden } or { ok: false, reason } for a shell this cannot write for (fail closed) or a command too
+// long for the Windows command line once wrapped.
+const PS_MARK = "try { $__crust = [scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('";
+const MAX_WINDOWS_LINE = 30000; // CreateProcess allows 32767 characters for the whole line, program and quoting included
+const tooLong = (text) => ({
+	ok: false,
+	reason: "This command is too long to run with the hiding of secret-looking environment variables on Windows (the wrapped text would pass the length limit of a Windows command line, " + MAX_WINDOWS_LINE + " characters). Nothing was run. Shorten the command, put it in a script file and run that, or list the variables in the commandEnvKeep setting.",
+	long: text.length,
+});
+// What a Windows command line costs for this argument: its length, and every quote and backslash may be escaped with one more character.
+const winCost = (text) => text.length + (text.match(/["\\]/g) || []).length;
+
+const UNKNOWN_SHELL_REASON =
+	"Pi is set to use a shell that Pi Crust does not know (the shellPath setting in Pi's settings.json names it; only bash, sh, dash, zsh and PowerShell are known). Pi Crust hides secret-looking environment variables from every command, and it cannot do that in this shell, so commands cannot run in it while such variables are present. Nothing was run. Set shellPath to bash, sh, dash, zsh or PowerShell (or remove it), or list the variables in the commandEnvKeep setting.";
+
+function hideCommand(command, family, names, { platform = process.platform } = {}) {
 	const list = [...new Set(names || [])];
 	if (typeof command !== "string") return { ok: false, reason: "The command is not text." };
 	if (!list.length) return { ok: true, command, hidden: 0 };
+	const win = platform === "win32";
 	if (family === "powershell") {
-		const prefix = `${list.map(psName).join(",")} | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }; `;
-		return { ok: true, command: command.startsWith(prefix) ? command : prefix + command, hidden: list.length };
+		const first = `${list.map(psName).join(",")} | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }\n`;
+		if (command.startsWith(first + PS_MARK)) return { ok: true, command, hidden: list.length };
+		// The footer line makes the script block's last statement store its own success flag; the exit code then follows it as in an unwrapped command.
+		const b64 = Buffer.from(command + "\n\n$__crustOk = $?", "utf8").toString("base64");
+		const wrapped =
+			first +
+			PS_MARK + b64 + "'))) } catch { [Console]::Error.WriteLine($_.Exception.InnerException.Message); exit 1 }\n" +
+			". $__crust\nif (-not $__crustOk) { exit 1 }";
+		if (win && winCost(wrapped) > MAX_WINDOWS_LINE) return tooLong(wrapped);
+		return { ok: true, command: wrapped, hidden: list.length };
 	}
 	if (family === "posix") {
 		if (list.every((n) => POSIX_NAME.test(n))) {
-			const prefix = `unset -v ${list.join(" ")}; `;
+			const prefix = `unset -v ${list.join(" ")}\n`;
 			return { ok: true, command: command.startsWith(prefix) ? command : prefix + command, hidden: list.length };
 		}
-		const head = `exec env ${list.map((n) => "-u " + sq(n)).join(" ")} "\${BASH:-bash}" -c '`;
-		if (command.startsWith(head) && command.endsWith("'")) return { ok: true, command, hidden: list.length };
-		return { ok: true, command: head + command.replace(/'/g, SQ_ESCAPE) + "'", hidden: list.length };
+		// "$0" is the shell as it was started (bash: also $BASH); a leading "-" marks a login shell and is no program name. The new shell gets the
+		// same $0 again, so scripts that print it see what they saw before.
+		const head = `exec env ${list.map((n) => "-u " + sq(n)).join(" ")} "\${BASH:-\${0#-}}" -c '`;
+		const tail = `' "$0"`;
+		if (command.startsWith(head) && command.endsWith(tail)) return { ok: true, command, hidden: list.length };
+		const wrapped = head + command.replace(/'/g, SQ_ESCAPE) + tail;
+		if (win && winCost(wrapped) > MAX_WINDOWS_LINE) return tooLong(wrapped);
+		return { ok: true, command: wrapped, hidden: list.length };
 	}
-	return { ok: false, reason: "Pi Crust hides secret-looking environment variables from commands, but it cannot do that in this shell (only bash and PowerShell). Nothing was run. Use Git Bash or PowerShell as the shell, or list the variables in the commandEnvKeep setting." };
+	return { ok: false, reason: UNKNOWN_SHELL_REASON };
 }
 
-module.exports = { SECRET_ENV_NAME, SECRET_ENV_NAME_MORE, isSecretName, parseKeepList, secretNames, shellFamily, hideCommand };
+module.exports = { UNKNOWN_SHELL_REASON, SECRET_ENV_NAME, SECRET_ENV_NAME_MORE, isSecretName, parseKeepList, secretNames, shellFamily, hideCommand };

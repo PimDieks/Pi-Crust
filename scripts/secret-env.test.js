@@ -17,7 +17,14 @@ const WIN = process.platform === "win32";
 const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "secret-env-")));
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-const PS_TAIL = " | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }; ";
+const PS_TAIL = " | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }";
+// The hidden names are on the first line, alone; what follows is the person's command (posix) or the wrapper of it (PowerShell).
+const firstLine = (cmd) => cmd.split("\n")[0];
+const posixNames = (cmd) => firstLine(cmd).replace(/^unset -v /, "").split(" ").sort();
+const psNames = (cmd) => firstLine(cmd).replace(PS_TAIL, "").split(",").map((s) => s.replace(/^'|'$/g, "")).sort();
+const afterFirstLine = (cmd) => cmd.slice(cmd.indexOf("\n") + 1);
+// The command the PowerShell wrapper carries, decoded.
+const psCarried = (cmd) => Buffer.from(/FromBase64String\('([A-Za-z0-9+/=]*)'\)/.exec(cmd)[1], "base64").toString("utf8").replace(/\n\n\$__crustOk = \$\?$/, "");
 
 // --- the name rule -----------------------------------------------------------------------------------------
 test("name rule: secret-looking names match, ordinary look-alikes and SSH_AUTH_SOCK do not", () => {
@@ -60,30 +67,47 @@ test("shellFamily: the powershell tool, Git Bash by default, a custom shellPath,
 	assert.equal(f({ toolName: "bash", shellPaths: ["bash.exe", "pwsh.exe"] }), "other", "two settings that disagree");
 	assert.equal(f({ toolName: "bash", shellPaths: null }), "other", "unreadable settings");
 	assert.equal(f({ toolName: "write" }), "other");
-	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: ["/usr/bin/zsh"] }), "other");
-	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: ["/bin/bash"] }), "posix");
+	for (const p of ["/usr/bin/zsh", "/bin/zsh", "/bin/sh", "/usr/bin/dash", "/bin/bash", "/opt/homebrew/bin/zsh"]) assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: [p] }), "posix", p);
+	assert.equal(S.shellFamily({ platform: "darwin", toolName: "bash", shellPaths: ["/bin/zsh", "/bin/sh"] }), "posix", "two POSIX shells agree");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: ["/usr/bin/fish"] }), "other");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: ["/usr/bin/nu"] }), "other");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: ["/bin/bashful"] }), "other", "only the exact program names count");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: [{}] }), "other", "a shellPath that is not a string");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: [true] }), "other", "a shellPath that is not a string");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: [0] }), "other", "0 is a value, not unset");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: ["/bin/zsh", "/bin/zsh"] }), "posix");
+	assert.equal(S.shellFamily({ platform: "linux", toolName: "bash", shellPaths: ["/bin/zsh", 7] }), "other", "one bad value among good ones");
 });
 
 // --- the prefix per shell --------------------------------------------------------------------------------------------
 test("posix prefix: exact text, names only", () => {
 	const r = S.hideCommand("echo hi", "posix", ["GH_TOKEN", "OPENAI_API_KEY"]);
-	assert.deepEqual(r, { ok: true, command: "unset -v GH_TOKEN OPENAI_API_KEY; echo hi", hidden: 2 });
-	assert.equal(S.hideCommand("echo hi", "posix", ["A_TOKEN", "A_TOKEN"]).command, "unset -v A_TOKEN; echo hi", "a name is listed once");
+	assert.equal(r.ok, true);
+	assert.equal(r.hidden, 2);
+	assert.ok(/^unset -v \S+ \S+\necho hi$/.test(r.command), "the names are alone on the first line: " + JSON.stringify(r.command));
+	assert.deepEqual(posixNames(r.command), ["GH_TOKEN", "OPENAI_API_KEY"], "in any order");
+	assert.equal(afterFirstLine(r.command), "echo hi");
+	assert.equal(S.hideCommand("echo hi", "posix", ["A_TOKEN", "A_TOKEN"]).command, "unset -v A_TOKEN\necho hi", "a name is listed once");
 });
-test("powershell prefix: exact text, and a name with any other character is built from character codes (pure ASCII)", () => {
-	assert.equal(S.hideCommand("Get-Date", "powershell", ["GH_TOKEN", "B_KEY"]).command, "'GH_TOKEN','B_KEY'" + PS_TAIL + "Get-Date");
+test("powershell prefix: the names are alone on the first line, the command is carried unchanged, and a name with any other character is built from character codes (pure ASCII)", () => {
+	const r = S.hideCommand("Get-Date", "powershell", ["GH_TOKEN", "B_KEY"]).command;
+	assert.deepEqual(psNames(r), ["B_KEY", "GH_TOKEN"], "in any order");
+	assert.equal(psCarried(r), "Get-Date");
+	assert.ok(!r.slice(r.indexOf("\n")).match(/GH_TOKEN|B_KEY/), "no name outside the first line");
+	const text = "using namespace System.Text\n[CmdletBinding()]param()\n'it''s' # \u00e9 \u2018";
+	assert.equal(psCarried(S.hideCommand(text, "powershell", ["A_TOKEN"]).command), text, "any text, quotes and non-ASCII included");
 	const odd = S.hideCommand("Get-Date", "powershell", ["A(B)_TOKEN", "100%_KEY", "\u00c4PI_KEY", "it's_TOKEN", "\u2018q\u2019_TOKEN"]).command;
 	assert.match(odd, /^\(-join \[char\[\]\]\(65,40,66,41,95,84,79,75,69,78\)\),/);
-	assert.ok(/^[\x20-\x7e]*$/.test(odd), "pure ASCII");
-	assert.ok(!/A\(B\)|%_KEY|PI_KEY|it's/.test(odd.split(PS_TAIL)[0]), "no odd name appears as text");
-	assert.ok(odd.endsWith(PS_TAIL + "Get-Date"));
+	assert.ok(/^[\x20-\x7e\n]*$/.test(odd), "pure ASCII");
+	assert.ok(!/A\(B\)|%_KEY|PI_KEY|it's/.test(firstLine(odd)), "no odd name appears as text");
+	assert.equal(psCarried(odd), "Get-Date");
 });
 test("posix: a name that is not a shell identifier (parentheses, percent, non-ASCII) runs through env -u, quoted", () => {
 	const r = S.hideCommand("echo 'it''s'; echo $HOME", "posix", ["GH_TOKEN", "ProgramFiles(x86)_TOKEN", "100%_KEY", "\u00c4PI_KEY"]);
 	assert.equal(r.ok, true);
 	assert.equal(
 		r.command,
-		`exec env -u 'GH_TOKEN' -u 'ProgramFiles(x86)_TOKEN' -u '100%_KEY' -u '\u00c4PI_KEY' "\${BASH:-bash}" -c 'echo '\\''it'\\'''\\''s'\\''; echo $HOME'`,
+		`exec env -u 'GH_TOKEN' -u 'ProgramFiles(x86)_TOKEN' -u '100%_KEY' -u '\u00c4PI_KEY' "\${BASH:-\${0#-}}" -c 'echo '\\''it'\\'''\\''s'\\''; echo $HOME' "$0"`,
 	);
 });
 test("nothing is added when there is nothing to hide, in any shell", () => {
@@ -259,7 +283,8 @@ test("extension: every mode hides the names from the command that runs; Trusted 
 			const input = { command: "ls src" };
 			const r = await h.tool_call({ toolName: "bash", input }, ctx);
 			assert.equal(r, undefined, mode);
-			assert.match(prefixOf(input.command, "ls src"), /^unset -v (OTHER_SERVICE_API_KEY Gh_Token|Gh_Token OTHER_SERVICE_API_KEY); $/, mode);
+			assert.deepEqual(posixNames(input.command), ["Gh_Token", "OTHER_SERVICE_API_KEY"], mode);
+			assert.equal(afterFirstLine(input.command), "ls src", mode);
 			assert.ok(!/dummy-value/.test(input.command), "names only: " + mode);
 		});
 	}
@@ -275,7 +300,7 @@ test("extension: a command that is asked about shows the ORIGINAL text in the pr
 		assert.equal(await h.tool_call({ toolName: "bash", input }, ctx), undefined);
 		assert.equal(seen.length, 1);
 		assert.ok(seen[0].includes("npm run build") && !/unset|OTHER_SERVICE/.test(seen[0]), "the prompt shows " + JSON.stringify(seen[0]));
-		assert.match(input.command, /^unset -v .*; npm run build$/);
+		assert.match(input.command, /^unset -v [^\n]*\nnpm run build$/);
 		assert.throws(() => (input.command = "x"), TypeError, "still pinned after the prefix");
 	});
 });
@@ -287,7 +312,7 @@ test("extension: Trusted rewrites only by adding the prefix (no git hardening); 
 		await c.mode.handler("trusted", ctx);
 		const a = { command: "git status" };
 		assert.equal(await h.tool_call({ toolName: "bash", input: a }, ctx), undefined);
-		assert.match(a.command, /^unset -v [^;]+; git status$/);
+		assert.match(a.command, /^unset -v [^\n]+\ngit status$/);
 		const b = { command: a.command };
 		assert.equal(await h.tool_call({ toolName: "bash", input: b }, ctx), undefined);
 		assert.equal(b.command, a.command);
@@ -316,10 +341,10 @@ test("extension: the keep list (PI_CRUST_ENV_KEEP) is honoured, a broken one kee
 		});
 		return a.command;
 	};
-	assert.equal(await run(JSON.stringify(["OTHER_SERVICE_API_KEY"])), "unset -v Gh_Token; echo hi");
-	assert.equal(await run(JSON.stringify(["OTHER_SERVICE_API_KEY", "gh_token"])), WIN ? "echo hi" : "unset -v Gh_Token; echo hi");
-	assert.match(await run("not json"), /^unset -v .*OTHER_SERVICE_API_KEY.*; echo hi$/);
-	assert.match(await run(undefined), /^unset -v .*Gh_Token.*; echo hi$/);
+	assert.equal(await run(JSON.stringify(["OTHER_SERVICE_API_KEY"])), "unset -v Gh_Token\necho hi");
+	assert.equal(await run(JSON.stringify(["OTHER_SERVICE_API_KEY", "gh_token"])), WIN ? "echo hi" : "unset -v Gh_Token\necho hi");
+	assert.match(await run("not json"), /^unset -v [^\n]*OTHER_SERVICE_API_KEY[^\n]*\necho hi$/);
+	assert.match(await run(undefined), /^unset -v [^\n]*Gh_Token[^\n]*\necho hi$/);
 });
 test("extension: the powershell tool, and a custom PowerShell shellPath, get the PowerShell prefix", async () => {
 	const { handlers: h, commands: c, mk } = await load();
@@ -329,14 +354,14 @@ test("extension: the powershell tool, and a custom PowerShell shellPath, get the
 		await c.mode.handler("trusted", ctx);
 		const a = { command: "Get-Date" };
 		assert.equal(await h.tool_call({ toolName: "powershell", input: a }, ctx), undefined);
-		assert.ok(a.command.endsWith(PS_TAIL + "Get-Date") && a.command.startsWith("'"), a.command);
+		assert.ok(psCarried(a.command) === "Get-Date" && a.command.startsWith("'"), a.command);
 	});
 	fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ shellPath: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" }));
 	try {
 		await withEnv(ENV, async () => {
 			const b = { command: "Get-Date" };
 			assert.equal(await h.tool_call({ toolName: "bash", input: b }, ctx), undefined);
-			assert.ok(b.command.endsWith(PS_TAIL + "Get-Date"), b.command);
+			assert.equal(psCarried(b.command), "Get-Date", b.command);
 		});
 		fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ shellPath: "C:\\tools\\fish.exe" }));
 		await withEnv(ENV, async () => {

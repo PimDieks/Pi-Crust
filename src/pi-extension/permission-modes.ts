@@ -256,11 +256,19 @@ export default function (pi: ExtensionAPI) {
 	// on the ORIGINAL command (the prompt and the chat show that one), and the command that actually runs gets a prefix that removes every
 	// secret-looking variable present in Pi's environment, by name, for that command only (secret-env.js). Every mode, Trusted included.
 	// A shell the prefix can't be written for blocks the call (fail closed) when there is anything to hide.
+	function shellFamilyFor(event: any, ctx: any): string {
+		return secretEnv.shellFamily({ toolName: event.toolName, shellPaths: readShellPaths(ctx.cwd) });
+	}
+	function unknownShell(event: any, ctx: any): Block | undefined {
+		if (logic.classify(event.toolName) !== "shell" || !event.input || typeof event.input.command !== "string") return undefined;
+		if (!secretEnv.secretNames(process.env, { keep: keepList() }).length) return undefined;
+		return shellFamilyFor(event, ctx) === "other" ? { block: true, reason: secretEnv.UNKNOWN_SHELL_REASON } : undefined;
+	}
 	function hideSecrets(event: any, ctx: any): Block | undefined {
 		if (logic.classify(event.toolName) !== "shell" || !event.input || typeof event.input.command !== "string") return undefined;
 		const names = secretEnv.secretNames(process.env, { keep: keepList() });
 		if (!names.length) return undefined;
-		const family = secretEnv.shellFamily({ toolName: event.toolName, shellPaths: readShellPaths(ctx.cwd) });
+		const family = shellFamilyFor(event, ctx);
 		const r = secretEnv.hideCommand(event.input.command, family, names);
 		if (!r.ok) return { block: true, reason: r.reason };
 		if (r.command !== event.input.command) event.input.command = r.command;
@@ -273,6 +281,10 @@ export default function (pi: ExtensionAPI) {
 			// Calls that need no question skip the queue.
 			const first = judge(event, ctx);
 			if (first.action === "block") return { block: true, reason: first.reason };
+			// A shell the secret-hiding prefix can't be written for is refused BEFORE any question, in every mode: the person must not answer
+			// "Allow once" and then see the command refused anyway.
+			const noShell = unknownShell(event, ctx);
+			if (noShell) return noShell;
 			if (first.action === "allow") return sealed(event, first, ctx);
 			const run = queue.then(() => review(event, ctx));
 			queue = run.catch(() => undefined);
