@@ -10,15 +10,16 @@
 // in a tab of the other session instead: a tab on the same site if there is one, else a new tab.
 //
 // Everything that used the one view acts on the ACTIVE tab: `activeView()` is what ctx.browserView returns, so Tweak, the browser tools,
-// Annotate, snapshots, Stories and Mendix keep working unchanged. What must still be reset per tab when the active tab changes (left to
-// task 6, feature side): browser-tools-main.js (CDP debugger attachment, forced states, the target selector, the emulated colour scheme
-// stay on the tab they were set on), design-main.js (Tweak CSS inserted into the old tab is never removed there), annotate.js (hides the
-// active view only), snap-main.js (the offscreen capture window hard-codes persist:devbrowser), design-stories.js and mendix.js (they
-// keep one browserUrl, not one per tab), and renderer.js (one address bar, one error box, one #browser-slot; the state event already
-// carries tabId, tabs and activeId, the UI ignores them until task 5). Done here: a running pick is cancelled on a switch.
+// Annotate, snapshots, Stories and Mendix keep working unchanged. A switch of tab (task 6): a running pick is cancelled, then every
+// listener added with onLeave() runs for the tab being left (browser-tools-main.js detaches CDP and clears the target and the forced
+// states; design-main.js removes the Tweak CSS it inserted there), then the new tab is active and onEnter() listeners run (the colour
+// scheme is applied to it). Stories and Mendix keep their one remembered address (task 14). The kind of the active tab (page, image,
+// pdf; src/viewer-kind.js) decides which tools act: pick refuses on an image or a PDF, and an image tab is shown at its real size or
+// fitted (setImageZoom).
 const L = require("./viewer-tabs-list");
 const pp = require("./project-protocol");
 const pf = require("./project-files");
+const K = require("./viewer-kind");
 
 const WEB_PARTITION = "persist:devbrowser";
 
@@ -32,6 +33,24 @@ function create(deps) {
 	let webSessionReady = false;
 	let bg = deps.nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0";
 	let pickTab = null; // the tab a running pick is on
+	const leaveFns = [];
+	const enterFns = [];
+	const guard = async (fn, arg) => {
+		try { await Promise.race([fn(arg), new Promise((r) => setTimeout(r, 4000))]); } catch { /* a feature's cleanup must not block a switch */ }
+	};
+	// What a tool must clean on the tab being left; runs before the switch, with { id, wc, kind } of that tab.
+	const leaveActive = async () => {
+		const t = activeTab();
+		if (!t) return;
+		const info = { id: t.id, wc: wcOf(t), kind: t.kind };
+		for (const fn of leaveFns) await guard(fn, info);
+	};
+	const enterActive = () => {
+		const t = activeTab();
+		if (!t) return;
+		const info = { id: t.id, wc: wcOf(t), kind: t.kind };
+		for (const fn of enterFns) { try { fn(info); } catch { /* ignore */ } }
+	};
 
 	const tabOf = (id) => L.find(list, id);
 	const activeTab = () => L.active(list);
@@ -39,7 +58,7 @@ function create(deps) {
 	const wcOf = (tab) => (tab && views.get(tab.id) ? views.get(tab.id).webContents : null);
 	const isActive = (tab) => !!tab && list.activeId === tab.id;
 
-	const publicTab = (t) => ({ id: t.id, session: t.session, kind: t.kind, address: t.address, title: t.title, loading: t.loading, canGoBack: t.canGoBack, canGoForward: t.canGoForward, error: t.error });
+	const publicTab = (t) => ({ id: t.id, session: t.session, kind: t.kind, zoom: t.zoom || "fit", address: t.address, title: t.title, loading: t.loading, canGoBack: t.canGoBack, canGoForward: t.canGoForward, error: t.error });
 	const snapshot = (changedId) => {
 		const a = activeTab() || {};
 		// The top-level fields are the ACTIVE tab's, as the single-page event had them (the UI keeps working); tabId says which tab changed.
@@ -170,12 +189,44 @@ function create(deps) {
 		};
 		wc.on("will-navigate", guardMove);
 		wc.on("will-redirect", guardMove);
-		if (web) {
-			// Only the active tab's events reach the browser tools: a background tab's navigation must not reset the active tab's target.
-			const filtered = { on: (ev, fn) => wc.on(ev, (...a) => isActive(tab) && fn(...a)) };
-			require("./browser-tools-main").attach?.(filtered);
-		}
+		// Only the active tab's events reach the browser tools: a background tab's navigation must not reset the active tab's target.
+		const filtered = { on: (ev, fn) => wc.on(ev, (...a) => isActive(tab) && fn(...a)) };
+		require("./browser-tools-main").attach?.(filtered);
+		// An image tab: neutral background, shown fitted or at its real size (setImageZoom).
+		wc.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) tab.imageKey = null; });
+		wc.on("did-finish-load", () => { if (mine()) paintImage(tab).catch(() => {}); });
 		return view;
+	}
+
+	// --- the image tab -----------------------------------------------------------------------------------------------------------
+	// Chromium's own image page, restyled: a neutral background (follows the app's light or dark) and one of two sizes. "fit": the whole
+	// image inside the view, never enlarged. "actual": the file's real size (one image pixel per CSS pixel at the app's zoom; the view
+	// scrolls). An SVG has no natural size in CSS, so its real size is its width and height (else its viewBox); its fit is the view.
+	const imageBg = () => (deps.nativeTheme.shouldUseDarkColors ? "#2b2b2b" : "#dedede");
+	async function paintImage(tab) {
+		const wc = wcOf(tab);
+		if (!wc || wc.isDestroyed() || tab.kind !== "image") return;
+		if (tab.imageKey) { const k = tab.imageKey; tab.imageKey = null; await wc.removeInsertedCSS(k).catch(() => {}); }
+		const mode = tab.zoom === "actual" ? "actual" : "fit";
+		const svg = await wc.executeJavaScript(`(() => { const r = document.documentElement; if (!(r instanceof SVGSVGElement)) return null;
+			const num = (v) => (/^\\s*[\\d.]+(px)?\\s*$/.test(v || "") ? parseFloat(v) : 0);
+			const vb = r.viewBox && r.viewBox.baseVal; return { w: num(r.getAttribute("width")) || (vb && vb.width) || 300, h: num(r.getAttribute("height")) || (vb && vb.height) || 150 }; })()`, true).catch(() => null);
+		let css = `html,body{background:${imageBg()}!important;margin:0!important}`;
+		if (svg) {
+			css += mode === "actual" ? `svg{width:${Math.round(svg.w)}px!important;height:${Math.round(svg.h)}px!important;max-width:none!important;max-height:none!important}` : `svg{width:100vw!important;height:100vh!important}`;
+		} else {
+			css += `body{display:flex!important;min-height:100vh!important}img{margin:auto!important;display:block!important;cursor:default!important;width:auto!important;height:auto!important;background:none!important;` +
+				(mode === "actual" ? "max-width:none!important;max-height:none!important}" : "max-width:100vw!important;max-height:100vh!important}");
+		}
+		tab.imageKey = await wc.insertCSS(css).catch(() => null);
+	}
+	async function setImageZoom(mode) {
+		const t = activeTab();
+		if (!t || t.kind !== "image") return { ok: false, reason: "not an image" };
+		t.zoom = mode === "actual" ? "actual" : "fit";
+		await paintImage(t);
+		report(t);
+		return { ok: true, zoom: t.zoom };
 	}
 
 	function load(tab, address) {
@@ -197,6 +248,10 @@ function create(deps) {
 	function makeTab(session, address, { activate = true } = {}) {
 		const r = L.add(list, { session, address, title: "", loading: false, canGoBack: false, canGoForward: false, error: null, kind: "page" }, { activate });
 		if (!r.ok) return r;
+		if (L.isProjectSession(session)) {
+			const p = protocol.fromAddress(deps.getRoot(), address);
+			r.tab.kind = p == null ? "page" : files.kindOf(p); // known before the first load, so the tools see it at once
+		}
 		buildView(r.tab);
 		load(r.tab, address);
 		return r;
@@ -207,6 +262,7 @@ function create(deps) {
 		deps.relayout();
 		if (tab.error) deps.send("browser:error", tab.error);
 		sync(tab);
+		enterActive();
 		report(tab);
 	}
 
@@ -215,6 +271,7 @@ function create(deps) {
 		if (!t) return { ok: false, reason: "unknown tab" };
 		if (list.activeId === id) return { ok: true, ...snapshot(id) };
 		await cancelPick();
+		await leaveActive();
 		L.activate(list, id);
 		becameActive(t);
 		return { ok: true, ...snapshot(id) };
@@ -238,6 +295,7 @@ function create(deps) {
 		if (!a.ok) return a;
 		if (list.tabs.length >= L.MAX_TABS) return { ok: false, reason: "limit" };
 		await cancelPick();
+		await leaveActive();
 		const r = makeTab(a.session, a.url);
 		if (!r.ok) return { ok: false, reason: r.reason };
 		becameActive(r.tab);
@@ -248,6 +306,7 @@ function create(deps) {
 		const t = tabOf(id);
 		if (!t) return { ok: false, reason: "unknown tab" };
 		if (pickTab && (pickTab === t || isActive(t))) await cancelPick();
+		if (isActive(t)) await leaveActive();
 		const view = views.get(id);
 		const r = L.close(list, id);
 		views.delete(id);
@@ -287,15 +346,36 @@ function create(deps) {
 		if (name === "reload") wc.reload();
 		if (name === "devtools") wc.toggleDevTools();
 		if (name === "external") {
-			const url = wc.getURL();
-			if (/^https?:\/\//i.test(url)) deps.shell.openExternal(url);
+			const x = externalTarget();
+			if (!x) return;
+			lastExternal = x;
+			if (deps.selftest) return; // a test never opens anything on the machine
+			if (x.url) deps.shell.openExternal(x.url);
+			else deps.shell.openPath(x.file).catch(() => {});
 		}
+	}
+	// "Open in system browser" works for every kind of tab: a web address opens in the browser; a file of the project (page, image, PDF) opens
+	// with the system's own program for it (the real path, found by the same rules as every request: never outside the project).
+	let lastExternal = null;
+	function externalTarget() {
+		const t = activeTab();
+		const wc = wcOf(t);
+		if (!t || !wc) return null;
+		const url = wc.getURL();
+		if (/^https?:\/\//i.test(url)) return { url };
+		if (!L.isProjectSession(t.session)) return null;
+		let u;
+		try { u = new URL(url); } catch { return null; }
+		if (protocol.fromAddress(deps.getRoot(), url) == null) return null;
+		const r = files.resolve(deps.getRoot(), u.pathname, "GET");
+		return r && r.ok && files.kindOf(r.file) !== "other" ? { file: r.file } : null;
 	}
 
 	async function pick(repo, opts) {
 		const t = activeTab();
 		const view = activeView();
 		if (!t || !view) return { cancelled: true };
+		if (!K.can(t.kind, "pick")) return { error: K.reason(t.kind, "pick") };
 		pickTab = t;
 		let toggled = false;
 		try {
@@ -305,6 +385,22 @@ function create(deps) {
 		} finally {
 			if (!toggled && pickTab === t) pickTab = null;
 		}
+	}
+
+	// The active tab, for the features: its address, kind and session.
+	const activeInfo = () => {
+		const t = activeTab();
+		return t ? { id: t.id, address: t.address, kind: t.kind, session: t.session, error: !!t.error } : null;
+	};
+	// How to open an offscreen window on an address with the session that address belongs to (a web address: the web session; an address
+	// of the open project: that project's own session). null when the Viewer would not open it.
+	function captureTarget(address) {
+		const a = accept(address);
+		if (!a.ok) return null;
+		if (a.session === "web") return { session: "web", kind: "page", webPreferences: { partition: WEB_PARTITION, sandbox: true, contextIsolation: true } };
+		protocol.ensureSession(deps.getRoot());
+		const p = protocol.fromAddress(deps.getRoot(), a.url);
+		return { session: a.session, kind: p == null ? "page" : files.kindOf(p), webPreferences: protocol.viewerWebPreferences(deps.getRoot()) };
 	}
 
 	// --- window-level state, applied to every tab -------------------------------------------------------------------------------
@@ -324,6 +420,7 @@ function create(deps) {
 	function setBackground(color) {
 		bg = color;
 		for (const view of views.values()) view.setBackgroundColor(color);
+		for (const tab of list.tabs) if (tab.kind === "image") paintImage(tab).catch(() => {});
 	}
 	function setZoom(level) {
 		for (const view of views.values()) view.webContents.setZoomLevel(level);
@@ -350,6 +447,7 @@ function create(deps) {
 		ipcMain.handle("browser:tabCreate", (_e, address) => createTab(address));
 		ipcMain.handle("browser:tabActivate", (_e, id) => setActive(String(id)));
 		ipcMain.handle("browser:tabClose", (_e, id) => closeTab(String(id)));
+		ipcMain.handle("browser:imageZoom", (_e, mode) => setImageZoom(mode));
 	}
 
 	return {
@@ -370,6 +468,13 @@ function create(deps) {
 		setBackground,
 		setZoom,
 		reloadActive: () => action("reload"),
+		onLeave: (fn) => leaveFns.push(fn),
+		onEnter: (fn) => enterFns.push(fn),
+		activeInfo,
+		externalTarget,
+		lastExternal: () => lastExternal,
+		captureTarget,
+		setImageZoom,
 		activeError: () => (activeTab() ? !!activeTab().error : false),
 		viewOf: (id) => views.get(id),
 		destroyAll,

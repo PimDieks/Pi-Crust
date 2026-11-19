@@ -239,6 +239,7 @@ $("#url-form").addEventListener("submit", (e) => {
 let picking = false;
 async function pickElement() {
 	if (picking) return crust.browser.pick(); // second press cancels the running pick
+	if (window.crustViewerKind && !crustViewerKind.can("pick")) return toast(crustViewerKind.reason("pick"), "warning"); // an image or a PDF tab
 	picking = true;
 	$("#pick-element").setAttribute("aria-pressed", "true");
 	try {

@@ -136,6 +136,7 @@
 		const capture = el("button", "btn secondary", "Capture build");
 		capture.type = "button";
 		capture.title = "Capture the Viewer tab's page (the URL in the address bar)";
+		window.crustViewerKind?.bind(capture, "capture"); // disabled with the reason on a PDF tab
 		const send = el("button", "btn", "Send to chat");
 		send.type = "button";
 		send.disabled = true;
@@ -197,11 +198,11 @@
 		let r;
 		let label;
 		if (kind === "url") {
-			if (!/^https?:\/\//i.test(pageUrl)) return toast("Open the page in the Viewer tab first", "warning");
+			if (!/^(https?|pi-project):\/\//i.test(pageUrl)) return toast("Open the page in the Viewer tab first", "warning");
 			const w = state.fig?.w || 1280;
 			const h = state.fig?.h || 800;
 			r = await crust.snap.url(pageUrl, { width: w, height: h, settleMs: 1000, kind: "design" });
-			label = `${pageUrl.replace(/^https?:\/\//, "")} at ${w}×${h}`;
+			label = `${pageUrl.replace(/^(https?|pi-project):\/\//, "")} at ${w}×${h}`;
 		} else if (kind === "live") {
 			r = await crust.snap.live({ kind: "design" });
 			label = "Viewer viewport";

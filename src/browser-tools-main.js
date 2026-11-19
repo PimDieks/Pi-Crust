@@ -24,16 +24,18 @@ function register(ctx) {
 	let scheme = normalizeScheme(ctx.readSettings().browserScheme);
 	let target = null; // CSS selector of the last picked element
 	let forced = emptyForced(); // what is applied right now
-	let wired = null;
-	const wc = () => ctx.browserView?.webContents;
+	const wired = new WeakSet();
+	const wc = () => ctx.browserView?.webContents; // always the ACTIVE tab's page
+	const isPage = () => (ctx.browserTab ? ctx.browserTab()?.kind === "page" : true); // an image or a PDF has nothing to inspect
 
-	// The single place that attaches the debugger to the dev browser.
+	// The single place that attaches the debugger to the Viewer. It only ever holds the active tab: a switch detaches the tab it leaves.
 	async function cdp(method, params) {
 		const w = wc();
 		if (!w || w.isDestroyed()) throw new Error("No browser");
+		if (!isPage()) throw new Error("Needs a web page");
 		if (!w.debugger.isAttached()) w.debugger.attach("1.3");
-		if (wired !== w) {
-			wired = w;
+		if (!wired.has(w)) {
+			wired.add(w);
 			w.debugger.on("detach", () => {
 				forced = emptyForced(); // DevTools or a crash dropped the session: its overrides are gone
 			});
@@ -43,7 +45,7 @@ function register(ctx) {
 
 	async function applyScheme() {
 		const w = wc();
-		if (!w || w.isDestroyed()) return;
+		if (!w || w.isDestroyed() || !isPage()) return;
 		if (scheme === "auto" && !w.debugger.isAttached()) return; // nothing was overridden
 		try {
 			await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme === "auto" ? "" : scheme }] });
@@ -179,9 +181,22 @@ function register(ctx) {
 		return scheme;
 	});
 	ctx.ipcMain.handle("browser:target", () => ({ selector: target }));
-	ctx.ipcMain.handle("browser:forceState", (_e, opts) => setForced(opts));
+	ctx.ipcMain.handle("browser:forceState", (_e, opts) => (isPage() ? setForced(opts) : { error: "Needs a web page" }));
 
-	// Called from main.js once the browser view exists.
+	// A switch of tab. The tab being left: its forced states are undone, the target is dropped (the UI hears it), and the debugger is
+	// detached, which also ends the emulated colour scheme there. The tab coming in starts clean and gets the Viewer's colour scheme.
+	// The colour scheme is ONE setting for the Viewer (as before: remembered in settings.json), applied to the active tab only.
+	ctx.onTabLeave?.(async ({ wc: w }) => {
+		if (ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "tools-leave") return; // selftest only: the deliberate break
+		await Promise.race([clearForced().catch(() => {}), new Promise((r) => setTimeout(r, 2500))]);
+		forced = emptyForced();
+		if (target) setTarget(null);
+		try { if (w && !w.isDestroyed() && w.debugger.isAttached()) w.debugger.detach(); } catch {}
+		forced = emptyForced();
+	});
+	ctx.onTabEnter?.(() => void applyScheme());
+
+	// Called by the tab model for each tab's page (only the active tab's events arrive here).
 	module.exports.attach = (w) => {
 		const reapply = () => void applyScheme();
 		w.on("did-navigate", reapply);
@@ -191,7 +206,6 @@ function register(ctx) {
 			forced = emptyForced(); // the new document starts clean
 			if (target) setTarget(null);
 		});
-		reapply();
 	};
 	// Called with each pick result; the last element picked becomes the target for forced states.
 	module.exports.notePick = async (r) => {

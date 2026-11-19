@@ -81,6 +81,11 @@
 						<div id="vt-list" role="tablist" aria-label="Pages"></div>
 						<button type="button" class="icon" id="vt-add" aria-label="New page" title="New page (⌘T)"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
 						<span id="vt-limit" class="vt-limit" hidden></span>
+						<div id="vt-zoom" class="vt-zoom" role="group" aria-label="Image size" hidden>
+							<button type="button" class="vt-zoom-btn" data-zoom="fit" title="Fit the whole image in the view" aria-pressed="true">Fit</button>
+							<button type="button" class="vt-zoom-btn" data-zoom="actual" title="Real size: one image pixel per pixel" aria-pressed="false">100%</button>
+						</div>
+						<span id="vt-reason" class="vt-reason" role="status"></span>
 					</div>
 					<div id="state-bar" hidden></div>
 					<div id="story-bar" hidden></div>
@@ -253,6 +258,8 @@
 		<script src="voice.js"></script>
 		<script src="duration.js"></script>
 		<script src="renderer.js"></script>
+		<script src="viewer-kind.js"></script>
+		<script src="viewer-kind-ui.js"></script>
 		<script src="changes.js"></script>
 		<script src="terminal.js"></script>
 		<script src="sessions.js"></script>
@@ -274,6 +281,7 @@
 		<script src="viewer-files-selftest.js"></script>
 		<script src="viewer-tabs-selftest.js"></script>
 		<script src="viewer-tabs-selftest-row.js"></script>
+		<script src="viewer-tools-selftest.js"></script>
 		<script src="claude-rewind-fork-selftest.js"></script>
 		<script src="claude-approval-selftest.js"></script>
 		<script src="slash-menu.js"></script>

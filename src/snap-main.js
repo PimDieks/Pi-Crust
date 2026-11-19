@@ -11,6 +11,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const PixelDiff = require("./pixel-diff");
+const VK = require("./viewer-kind");
 
 const KEEP = 500;
 const BUDGET_BYTES = 400 * 1024 * 1024; // total size of the stored shots per repo
@@ -106,13 +107,21 @@ function register(ctx) {
 	// skipEmpty (turn shots): nothing is stored for a page that failed to load or is blank. unlessSameAs: the id of an
 	// earlier shot; when the page looks the same nothing is stored ({ ok: false, same: true }). Explicit captures (design)
 	// pass neither and always get what is there.
-	async function captureLive({ rect, settleMs = 0, waitLoadMs = 0, kind, skipEmpty = false, unlessSameAs } = {}) {
+	// The ACTIVE tab (its view has the tab's own session). By its kind (src/viewer-kind.js): a web page or a project page works; an image
+	// works for explicit captures (Annotate, Capture build) but never for a turn's before/after shot (pageOnly: no card for that tab); a
+	// PDF never.
+	async function captureLive({ rect, settleMs = 0, waitLoadMs = 0, kind, skipEmpty = false, unlessSameAs, pageOnly = false, onlyTab } = {}) {
 		const view = ctx.browserView;
 		if (!ctx.repo) return { ok: false, error: "No repository open" };
 		if (!view) return { ok: false, error: "No browser view" };
 		const wc = view.webContents;
 		const url = wc.getURL();
-		if (!/^https?:/i.test(url) && !(ctx.selftest && /^data:text\/html/i.test(url))) return { ok: false, error: "The browser has no page open" };
+		const tabKind = ctx.browserTab?.()?.kind || "page";
+		const feature = pageOnly ? "shots" : "capture";
+		if (!VK.can(tabKind, feature) && !(ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "kind-capture")) return { ok: false, error: VK.reason(tabKind, feature) };
+		const tabId = ctx.browserTab?.()?.id;
+		if (onlyTab && onlyTab !== tabId) return { ok: false, error: "The Viewer switched to another tab" }; // an after shot is of the tab the before shot was of
+		if (!/^(https?|pi-project):/i.test(url) && !(ctx.selftest && /^data:text\/html/i.test(url))) return { ok: false, error: "The browser has no page open" };
 		if (skipEmpty && ctx.browserFailed?.()) return { ok: false, error: "The page did not load" };
 		if (settleMs) await new Promise((r) => setTimeout(r, settleMs));
 		if (waitLoadMs && wc.isLoading()) {
@@ -129,7 +138,18 @@ function register(ctx) {
 		const b = view.getBounds();
 		if (b.width < 8 || b.height < 8) return { ok: false, error: "The browser view has no size yet" };
 		if (skipEmpty && ctx.browserFailed?.()) return { ok: false, error: "The page did not load" }; // failed while we waited
-		const img = await wc.capturePage(rect && rect.width > 0 ? rect : undefined, { stayHidden: true });
+		// Right after a tab was shown or hidden the first capture can fail ("display surface not available", a viz error), most often on a
+		// project page or an image: try again, and then without stayHidden (the native view stays hidden either way).
+		let img;
+		for (let attempt = 0; ; attempt++) {
+			try {
+				img = await wc.capturePage(rect && rect.width > 0 ? rect : undefined, attempt === 0 ? { stayHidden: true } : undefined);
+				break;
+			} catch (e) {
+				if (attempt >= 3) throw e;
+				await new Promise((r) => setTimeout(r, 300));
+			}
+		}
 		if (img.isEmpty()) return { ok: false, error: "Empty capture" };
 		if (skipEmpty && isBlank(img)) return { ok: false, blank: true, error: "The page is blank" };
 		if (unlessSameAs) {
@@ -138,7 +158,7 @@ function register(ctx) {
 			const prev = k ? nativeImage.createFromPath(path.join(dir(k), `${id}.png`)) : null;
 			if (prev && isSame(img, prev)) return { ok: false, same: true, error: "Nothing changed on the page" };
 		}
-		return { ok: true, entry: store(img, { url, title: wc.getTitle(), blank: false }, kindOf(kind)) };
+		return { ok: true, tabId, entry: store(img, { url, title: wc.getTitle(), blank: false }, kindOf(kind)) };
 	}
 
 	// --- capture of an arbitrary URL in an offscreen window ------------------------------------
@@ -159,9 +179,15 @@ function register(ctx) {
 
 	async function captureUrl(url, { width = 1280, height = 800, colorScheme, mobile = false, fullPage = false, settleMs = 800, kind } = {}) {
 		url = String(url || "");
-		const okUrl = /^https?:\/\//i.test(url) || (ctx.selftest && /^data:text\/html/i.test(url));
-		if (!okUrl) return { ok: false, error: "Only http(s) pages can be captured" };
+		// The window gets the session the address belongs to: a web address the web session, an address of the open project that
+		// project's own session (the one a project tab of it has). A PDF is not captured.
+		const target = ctx.captureTarget ? ctx.captureTarget(url) : null;
+		const isData = ctx.selftest && /^data:text\/html/i.test(url);
+		if (!target && !isData) return { ok: false, error: "Only web pages and files of this project can be captured" };
+		if (target && !VK.can(target.kind, "capture") && !(ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "kind-capture")) return { ok: false, error: VK.reason(target.kind, "capture") };
 		if (!ctx.repo) return { ok: false, error: "No repository open" };
+		let prefs = target ? target.webPreferences : { partition: "persist:devbrowser", sandbox: true, contextIsolation: true };
+		if (ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "capture-session") prefs = { partition: "persist:devbrowser", sandbox: true, contextIsolation: true }; // selftest only: the deliberate break
 		width = Math.max(100, Math.min(3000, Math.round(width)));
 		height = Math.max(100, Math.min(4000, Math.round(height)));
 		const release = await slot();
@@ -175,10 +201,10 @@ function register(ctx) {
 				height,
 				// Windows and Linux (e.g. in Docker) paint no frames for a never-shown window (captureScreenshot hangs);
 				// offscreen rendering always paints.
-				webPreferences: { partition: "persist:devbrowser", sandbox: true, contextIsolation: true, backgroundThrottling: false, ...(process.platform !== "darwin" ? { offscreen: true } : {}) },
+				webPreferences: { ...prefs, backgroundThrottling: false, ...(process.platform !== "darwin" ? { offscreen: true } : {}) },
 			});
 			const wc = w.webContents;
-			// This window loads arbitrary pages with the dev browser's session: no popups, sound, downloads or odd schemes.
+			// This window loads arbitrary pages with the Viewer tab's session: no popups, sound, downloads or odd schemes.
 			wc.setWindowOpenHandler(() => ({ action: "deny" }));
 			wc.setAudioMuted(true);
 			onDownload = (e, _item, from) => {
@@ -187,7 +213,7 @@ function register(ctx) {
 			ses = wc.session;
 			ses.on("will-download", onDownload);
 			wc.on("will-navigate", (e, to) => {
-				if (!/^(https?|about):/i.test(to) && !(ctx.selftest && /^data:text\/html/i.test(to))) e.preventDefault();
+				if (!/^(https?|about|pi-project):/i.test(to) && !(ctx.selftest && /^data:text\/html/i.test(to))) e.preventDefault();
 			});
 			await wc.loadURL("about:blank"); // CDP emulation commands hang on a window that never loaded anything
 			wc.debugger.attach("1.3");

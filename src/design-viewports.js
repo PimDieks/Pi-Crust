@@ -33,7 +33,7 @@
 
 	const urlNow = () => {
 		const v = ui.url.value.trim();
-		return /^https?:\/\//i.test(v) || /^data:text\/html/i.test(v) ? v : "";
+		return /^(https?|pi-project):\/\//i.test(v) || /^data:text\/html/i.test(v) ? v : "";
 	};
 	const schemes = () => (state.scheme === "both" ? ["light", "dark"] : [state.scheme]);
 
@@ -99,6 +99,13 @@
 
 	function refresh() {
 		if (!ui) return;
+		if (window.crustViewerKind && !crustViewerKind.can("viewports")) { // a PDF tab
+			gen++;
+			queue.length = 0;
+			tiles = [];
+			ui.grid.replaceChildren(D.empty(crustViewerKind.reason("viewports")));
+			return;
+		}
 		const url = urlNow();
 		const my = ++gen;
 		queue.length = 0;
@@ -184,6 +191,13 @@
 		reload.setAttribute("aria-label", "Refresh");
 		reload.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>';
 		reload.onclick = refresh;
+		window.crustViewerKind?.bind(reload, "viewports"); // disabled with the reason on a PDF tab
+		let wasPdf = false;
+		addEventListener("viewer:kind", (e) => {
+			const pdf = e.detail.kind === "pdf";
+			if (visible && (pdf || wasPdf)) refresh(); // the reason replaces the tiles, and the tiles come back
+			wasPdf = pdf;
+		});
 		bar.append(sizes, scheme, form, reload);
 		const grid = el("div", "vp-grid dv-stage");
 		host.append(bar, grid);
@@ -195,7 +209,7 @@
 		visible = true;
 		const browserUrl = liveBrowserUrl;
 		// Follow the page open in the Viewer tab; the saved address is only a fallback (it may point at a server that's gone).
-		if (/^https?:\/\//i.test(browserUrl) && browserUrl !== ui.url.value) {
+		if (/^(https?|pi-project):\/\//i.test(browserUrl) && browserUrl !== ui.url.value) {
 			ui.url.value = browserUrl;
 			return refresh();
 		}

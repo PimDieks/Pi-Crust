@@ -304,9 +304,12 @@
 		if (ov && name !== "browser") close();
 	});
 
+	// The screenshot is of one tab: another tab becoming active closes Annotate (it hides and restores the active tab's view only).
+	addEventListener("viewer:kind", () => ov && close());
 	let busy = false;
 	async function start() {
 		if (busy || ov) return;
+		if (window.crustViewerKind && !crustViewerKind.can("annotate")) return toast(crustViewerKind.reason("annotate"), "warning"); // a PDF tab
 		busy = true;
 		try {
 			if (activeTab !== "browser") {

@@ -30,6 +30,7 @@
 	// --- opening ---------------------------------------------------------------------------------
 	async function start() {
 		if (picking) return void crust.browser.pick(); // a second press cancels the running pick
+		if (window.crustViewerKind && !crustViewerKind.can("tweak")) return toast(crustViewerKind.reason("tweak"), "warning"); // an image or a PDF tab
 		picking = true;
 		const btn = $("#tweak-btn");
 		btn.setAttribute("aria-pressed", "true");
@@ -353,6 +354,10 @@
 	});
 
 	$("#tweak-btn").addEventListener("click", start);
+	// A switch of tab: the main process has taken the Tweak CSS out of the tab being left; the panel and its element go too.
+	crust.browser.onTabLeft(() => {
+		if (t) closePanel(false);
+	});
 	const prev = window.crustPaletteActions;
 	window.crustPaletteActions = () => [...(prev?.() || []), { label: "Tweak an element's styles", desc: "padding, radius, type, colours", run: start }];
 

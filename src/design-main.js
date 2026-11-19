@@ -76,10 +76,12 @@ function register(ctx) {
 	});
 
 	// --- theme tokens of the page in the Viewer tab ---------------------------------------------
+	// Tweak, tokens and inspection need a web page in the active tab: not an image, not a PDF.
 	const noPage = () => {
 		const wc = pageWc();
 		const url = wc ? wc.getURL() : "";
-		return !wc || !(/^https?:/i.test(url) || (ctx.selftest && /^data:text\/html/i.test(url)));
+		if (ctx.browserTab && ctx.browserTab()?.kind !== "page") return true;
+		return !wc || !(/^(https?|pi-project):/i.test(url) || (ctx.selftest && /^data:text\/html/i.test(url)));
 	};
 
 	ipcMain.handle("design:tokens", async () => {
@@ -138,13 +140,38 @@ function register(ctx) {
 		if (noPage()) return;
 		await pageWc().executeJavaScript("document.querySelectorAll('[data-pi-tweak]').forEach((n) => n.removeAttribute('data-pi-tweak'))", true).catch(() => {});
 	});
+	// Tweak CSS belongs to the tab it was inserted on. The key the UI holds is "<tab id>|<key>": a removal goes to that tab, never to the
+	// active one, and a switch of tab takes it out of the tab being left (and tells the UI to close Tweak), so a tab never keeps it and
+	// another tab never gets it.
+	const tweakCss = new Map(); // tab id -> Set of Chromium keys
 	ipcMain.handle("browser:insertCss", async (_e, css) => {
 		if (noPage() || typeof css !== "string" || css.length > 20000) return null;
-		return await pageWc().insertCSS(css).catch(() => null);
+		const id = ctx.browserTab?.()?.id;
+		const key = await pageWc().insertCSS(css).catch(() => null);
+		if (!key || !id) return null;
+		if (!tweakCss.has(id)) tweakCss.set(id, new Set());
+		tweakCss.get(id).add(key);
+		return `${id}|${key}`;
 	});
-	ipcMain.handle("browser:removeCss", async (_e, key) => {
-		if (!pageWc() || !key) return;
-		await pageWc().removeInsertedCSS(key).catch(() => {});
+	const ownerOf = (token) => {
+		const i = String(token).indexOf("|");
+		return i < 0 ? null : { id: String(token).slice(0, i), key: String(token).slice(i + 1) };
+	};
+	ipcMain.handle("browser:removeCss", async (_e, token) => {
+		const o = ownerOf(token);
+		if (!o || !tweakCss.get(o.id)?.delete(o.key)) return; // not CSS Tweak put there, or already gone
+		const wc = ctx.browserViewOf?.(o.id)?.webContents;
+		if (wc && !wc.isDestroyed()) await wc.removeInsertedCSS(o.key).catch(() => {});
+	});
+	ctx.onTabLeave?.(async ({ id, wc }) => {
+		if (ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "tweak-leave") return; // selftest only: the deliberate break
+		const keys = [...(tweakCss.get(id) || [])];
+		tweakCss.delete(id);
+		if (wc && !wc.isDestroyed()) {
+			for (const k of keys) await wc.removeInsertedCSS(k).catch(() => {});
+			if (keys.length) await wc.executeJavaScript("document.querySelectorAll('[data-pi-tweak]').forEach((n) => n.removeAttribute('data-pi-tweak'))", true).catch(() => {});
+		}
+		ctx.send("browser:tabLeft", { id });
 	});
 
 	// --- Figma variables and the optional tokens file ----------------------------------------------

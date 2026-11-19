@@ -48,7 +48,7 @@
 
 	// --- capturing ------------------------------------------------------------------------------
 	onCrust("turn:start", (c) => {
-		c._shots = { edits: 0, node: null, before: enabled() ? crust.snap.live({ skipEmpty: true }).catch(() => null) : null };
+		c._shots = { edits: 0, node: null, before: enabled() ? crust.snap.live({ skipEmpty: true, pageOnly: true }).catch(() => null) : null };
 	});
 	onCrust("user:rendered", (c, node, _m, history) => {
 		if (!history && c._shots && !c._shots.node) c._shots.node = node;
@@ -72,7 +72,7 @@
 			const before = await s.before;
 			if (!before?.ok) return;
 			// No card when the page is blank, failed to load or looks the same as before: nothing was produced to show.
-			const after = await crust.snap.live({ settleMs: 600, waitLoadMs: 1500, skipEmpty: true, unlessSameAs: before.entry.id });
+			const after = await crust.snap.live({ settleMs: 600, waitLoadMs: 1500, skipEmpty: true, pageOnly: true, onlyTab: before.tabId, unlessSameAs: before.entry.id });
 			if (!after?.ok) return discard(before);
 			const [sessionFile, p] = await Promise.all([sessionFileOf(c), promptOf(s.node)]);
 			const base = { sessionFile, cpId: p.cpId, prompt: p.text };

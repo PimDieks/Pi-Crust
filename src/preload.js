@@ -136,6 +136,8 @@ contextBridge.exposeInMainWorld("crust", {
 		scheme: (value) => ipcRenderer.invoke("browser:scheme", value),
 		target: () => ipcRenderer.invoke("browser:target"),
 		forceState: (opts) => ipcRenderer.invoke("browser:forceState", opts),
+		imageZoom: (mode) => ipcRenderer.invoke("browser:imageZoom", mode),
+		onTabLeft: on("browser:tabLeft"),
 		onTarget: on("browser:target"),
 		onState: on("browser:state"),
 		onError: on("browser:error"),

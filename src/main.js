@@ -748,6 +748,7 @@ const viewerTabs = require("./viewer-tabs-main").create({
 		applyBrowserBounds();
 	},
 	breakMode: SELFTEST ? process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" : "",
+	selftest: SELFTEST,
 });
 viewerTabs.register(ipcMain);
 
@@ -1486,6 +1487,13 @@ const ctx = {
 	get browserView() {
 		return viewerTabs.activeView(); // the active tab's view
 	},
+	// The active tab's address, kind (page, image, pdf) and session; the capture target (session, preferences) of an address; and the hooks
+	// a tool uses to clean up on the tab it leaves (Viewer tabs, task 6).
+	browserTab: () => viewerTabs.activeInfo(),
+	captureTarget: (address) => viewerTabs.captureTarget(address),
+	browserViewOf: (id) => viewerTabs.viewOf(id),
+	onTabLeave: (fn) => viewerTabs.onLeave(fn),
+	onTabEnter: (fn) => viewerTabs.onEnter(fn),
 	// The dev browser's last load failed (Chromium's error page, hidden behind #browser-error): nothing to screenshot.
 	browserFailed: () => browserHidden.has("error"),
 	get selftest() {
@@ -1558,7 +1566,7 @@ app.whenReady().then(() => {
 	app.setName("Pi Crust");
 	// pi-project:// on its own session only (never persist:devbrowser): the handler, the request guard, no permissions, no downloads, no popups.
 	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
-	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, devUrl: DEV_URL });
+	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, getWin: () => win, devUrl: DEV_URL });
 	if (SELFTEST) require("./viewer-files-selftest-main").register({ ipcMain, BrowserWindow, session: electronSession, setRoot: (r) => (projectRootOverride = r) });
 	buildMenu();
 	createWindow();
