@@ -35,7 +35,7 @@ const TYPES = {
 	txt: "text/plain; charset=utf-8",
 };
 const OCTET = "application/octet-stream";
-const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp"]);
+const IMAGE_EXT = new Set(["svg", "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp"]);
 const RESERVED = /^(con|prn|aux|nul|conin\$|conout\$|clock\$|com[1-9¹²³]|lpt[1-9¹²³])$/i;
 // A control character, or one Windows reserves in names; this includes the colon (no alternate data streams).
 // eslint-disable-next-line no-control-regex
@@ -50,10 +50,10 @@ function extOf(name) {
 function contentTypeOf(name) {
 	return TYPES[extOf(name)] || OCTET;
 }
-// What a Viewer tab shows for a file: a web page, an image, a PDF, or something it does not open.
+// What a Viewer tab shows for a file: a web page, an image (SVG counts as an image, Pim 2026-11-19), a PDF, or something it does not open.
 function kindOf(p) {
 	const e = extOf(p);
-	if (e === "html" || e === "svg") return "page";
+	if (e === "html") return "page";
 	if (IMAGE_EXT.has(e)) return "image";
 	if (e === "pdf") return "pdf";
 	return "other";

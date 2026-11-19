@@ -26,6 +26,10 @@ function repoFromArgs(argv) {
 const DEV_URL = process.env.PI_CRUST_URL || "http://localhost:3000/";
 const SELFTEST = !app.isPackaged && process.env.PI_CRUST_SELFTEST === "1"; // never in a packaged app: a stray variable must not switch off updates or the crash dialog
 if (SELFTEST) process.on("uncaughtException", (e) => { console.error("SELFTEST crash", e); app.exit(1); }); // selftest only: a crash logs and exits, no dialog
+const { protocol: electronProtocol, session: electronSession } = require("electron");
+const projectProtocol = require("./project-protocol");
+projectProtocol.registerScheme(electronProtocol); // pi-project:// (Viewer project files); must run before the app is ready
+let projectRootOverride = null; // selftest only (viewer-files): a throwaway project stands in for the open one
 const START_HIDDEN = process.env.PI_CRUST_HIDDEN === "1"; // set by the login item: start in the background
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const IGNORED = new Set([".git", "node_modules", "dist", ".turbo", ".next", "coverage", ".DS_Store", "__generated__"]);
@@ -1590,6 +1594,9 @@ app.whenReady().then(() => {
 		if (!globalShortcut.register(HOTKEY, toggleWindow)) console.error(`Hotkey ${HOTKEY} is taken by another app`);
 	}
 	app.setName("Pi Crust");
+	// pi-project:// on its own session only (never persist:devbrowser): the handler, the request guard, no permissions, no downloads, no popups.
+	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
+	if (SELFTEST) require("./viewer-files-selftest-main").register({ ipcMain, BrowserWindow, session: electronSession, setRoot: (r) => (projectRootOverride = r) });
 	buildMenu();
 	createWindow();
 });

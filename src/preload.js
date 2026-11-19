@@ -243,5 +243,6 @@ contextBridge.exposeInMainWorld("crust", {
 		resize: (w, h) => ipcRenderer.invoke("selftest:resize", w, h),
 		bounds: () => ipcRenderer.invoke("selftest:bounds"),
 		focusEmulation: (on) => ipcRenderer.invoke("selftest:focusEmulation", on),
+		viewerFiles: () => ipcRenderer.invoke("viewerfiles:selftest"), // selftest only: the main side answers only in a selftest run
 	},
 });

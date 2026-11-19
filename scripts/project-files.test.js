@@ -83,7 +83,7 @@ test("an unknown extension is application/octet-stream, and none at all too", ()
 });
 
 test("kindOf: page, image, pdf or other", () => {
-	for (const [p, k] of [["a.html", "page"], ["docs/A.HTML", "page"], ["x.svg", "page"], ["a.png", "image"], ["a.JPG", "image"], ["a.jpeg", "image"], ["a.gif", "image"], ["a.webp", "image"], ["a.pdf", "pdf"], ["a.PDF", "pdf"],
+	for (const [p, k] of [["a.html", "page"], ["docs/A.HTML", "page"], ["x.svg", "image"], ["a.png", "image"], ["a.JPG", "image"], ["a.jpeg", "image"], ["a.gif", "image"], ["a.webp", "image"], ["a.pdf", "pdf"], ["a.PDF", "pdf"],
 		["a.txt", "other"], ["a.css", "other"], ["a.js", "other"], ["a.mp4", "other"], ["a", "other"], ["a.html.exe", "other"], ["", "other"], ["dir.html/file", "other"]]) {
 		assert.equal(pf.kindOf(p), k, p);
 	}
