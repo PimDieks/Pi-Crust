@@ -488,6 +488,7 @@ select option { background: var(--panel-2); color: var(--text); }
 #perm-mode { field-sizing: content; font-size: var(--fs-sm); font-weight: 500; border-radius: var(--radius-full); background-color: var(--selected); }
 #perm-mode.mode-none, #perm-mode:disabled { background-color: transparent; color: var(--muted); cursor: help; }
 #perm-mode:disabled { opacity: 0.45; border-color: transparent; } /* the same look as .is-disabled in both themes: no outline, just faded */
+#perm-oldcopy { font-size: var(--fs-sm); border-radius: var(--radius-full); padding: 2px var(--space-sm); }
 #perm-mode.mode-plan { background-color: var(--fills-action-muted); color: var(--text-action-on-surface); }
 #perm-mode.mode-ask-edits, #perm-mode.mode-ask-commands { background-color: var(--fills-minor-muted); color: var(--text-minor); }
 
@@ -1062,6 +1063,7 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .vp-scheme { margin-left: auto; }
 .vp-body { display: flex; align-items: center; justify-content: center; min-height: calc(var(--control-h) * 4); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); border: 1px solid var(--border); }
 .vp-body img { display: block; width: 100%; max-height: calc(var(--control-h) * 18); object-fit: contain; object-position: top; }
+.vp-note { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-size: var(--fs-xs); line-height: 1.35; }
 .vp-err { padding: var(--space-sm); color: var(--text-error); font-size: var(--fs-sm); text-align: center; }
 .vp-tile.failed .vp-body { background: var(--fills-error-muted); border-color: transparent; }
 .st-empty { max-width: calc(var(--control-h) * 22); margin: var(--space-xl) auto; padding: var(--panel-pad); display: flex; flex-direction: column; gap: var(--space-sm); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); }

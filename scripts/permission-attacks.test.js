@@ -226,6 +226,45 @@ test("S8: findOldCopy sees a permission-modes file or any extension that registe
 	fs.writeFileSync(path.join(a, "extensions", "permission-modes.ts"), "x");
 	assert.equal(L.findOldCopy(a), "permission-modes.ts");
 });
+test("S8: describeOldCopy names the file and the folder (home shown as ~) and the full path to reveal", () => {
+	const home = fs.mkdtempSync(path.join(tmp, "home-"));
+	const agent = path.join(home, ".pi", "agent");
+	assert.equal(L.describeOldCopy(agent, home), null, "no old copy");
+	fs.mkdirSync(path.join(agent, "extensions"), { recursive: true });
+	fs.writeFileSync(path.join(agent, "extensions", "permission-modes.ts"), "x");
+	const d = L.describeOldCopy(agent, home);
+	assert.equal(d.name, "permission-modes.ts");
+	assert.equal(d.file, path.join(agent, "extensions", "permission-modes.ts"));
+	assert.ok(d.dir.startsWith("~") && !d.dir.includes(home), d.dir);
+	assert.equal(L.describeOldCopy(path.join(tmp, "elsewhere"), home), null);
+	// an agent folder outside home is shown whole
+	const away = fs.mkdtempSync(path.join(tmp, "away-"));
+	fs.mkdirSync(path.join(away, "extensions"));
+	fs.writeFileSync(path.join(away, "extensions", "permission-modes.js"), "x");
+	assert.equal(L.describeOldCopy(away, home).dir, path.join(away, "extensions"));
+});
+test("S8: the old-copy folder is shown as its real path: ~ only inside home, whole outside, separators per platform", () => {
+	const S = L.shownExtensionsDir;
+	assert.equal(S("C:\\Users\\alex\\.pi\\agent", "C:\\Users\\alex", "win32").dir, "~\\.pi\\agent\\extensions");
+	assert.equal(S("C:\\Users\\alex\\.pi\\agent", "C:\\Users\\alex", "win32").full, "C:\\Users\\alex\\.pi\\agent\\extensions");
+	assert.equal(S("/Users/alex/.pi/agent", "/Users/alex", "darwin").dir, "~/.pi/agent/extensions");
+	assert.equal(S("/Users/alex/.pi/agent", "/Users/alex", "darwin").full, "/Users/alex/.pi/agent/extensions");
+	assert.equal(S("D:\\agent", "C:\\Users\\alex", "win32").dir, "D:\\agent\\extensions");
+	assert.equal(S("/opt/pi", "/home/alex", "linux").dir, "/opt/pi/extensions");
+	assert.equal(S("/home/alexis/agent", "/home/alex", "linux").dir, "/home/alexis/agent/extensions", "a sibling sharing a name prefix is not inside home");
+	assert.equal(S("C:\\Users\\alex\\work\\agent", "C:\\Users\\alex", "win32").dir, "~\\work\\agent\\extensions");
+	assert.equal(S("c:\\users\\alex\\.pi\\agent", "C:\\Users\\alex", "win32").dir, "~\\.pi\\agent\\extensions");
+	assert.equal(S("/x/agent", "/", "linux").dir, "/x/agent/extensions", "a home of / never shortens");
+	// on this machine: the text names the folder and the file Show the file reveals is in exactly that folder
+	const home = fs.mkdtempSync(path.join(tmp, "home2-"));
+	const agent = path.join(home, ".pi", "agent");
+	fs.mkdirSync(path.join(agent, "extensions"), { recursive: true });
+	fs.writeFileSync(path.join(agent, "extensions", "permission-modes.ts"), "x");
+	const d = L.describeOldCopy(agent, home);
+	assert.equal(d.dir, "~" + path.sep + path.join(".pi", "agent", "extensions"));
+	assert.equal(d.file, path.join(home, ".pi", "agent", "extensions", d.name));
+	assert.equal(path.join(home, d.dir.slice(2)), path.dirname(d.file), "the shown folder is the revealed file's folder");
+});
 test("S8: the app switches modes with /crust-mode, which no other extension can make ambiguous", () => {
 	for (const f of ["palette.js", "remote-main.js"]) {
 		const text = fs.readFileSync(path.join(SRC, f), "utf8");
@@ -322,7 +361,7 @@ test("S5: without the extension's status the selector is disabled with a reason,
 	assert.ok(t.resetModeSelect, "resetModeSelect exists");
 	t.resetModeSelect();
 	assert.equal(sel.disabled, true);
-	assert.match(sel.title, /not (active|enforced)|did not load/i);
+	assert.match(sel.title, /has not reported a mode.*restart the chat/i);
 	assert.equal(sel.dataset.mode || "", "");
 	await t.setMode("plan");
 	assert.equal(calls.length, 0, "no /crust-mode (it would reach the model as a normal prompt)");
@@ -1013,4 +1052,17 @@ test("git --version and git version run without asking, alone; nothing else join
 		assert.match(run.stdout, /^git version /, c + ": " + run.stderr);
 		assert.deepEqual(pwned(r), [], c);
 	}
+});
+
+test("Pi: the mode is reported again when a run starts, so a status the app missed is repaired", async () => {
+	const { handlers: h, mk } = await load();
+	const statuses = [];
+	const ctx = mk(async () => undefined);
+	ctx.ui.setStatus = (_k, t) => statuses.push(t);
+	await h.session_start({}, ctx);
+	assert.equal(statuses.length, 1);
+	assert.equal(typeof h.agent_start, "function", "no agent_start handler");
+	await h.agent_start({}, ctx);
+	assert.equal(statuses.length, 2);
+	assert.equal(statuses[1], statuses[0]);
 });

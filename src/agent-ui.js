@@ -94,11 +94,22 @@
 	const isDefault = (c = active) => !(c && c.agent && c.agent.id && c.agent.id !== DEFAULT_AGENT);
 	// A chat of another agent that has not started (no key or engine yet): nothing can run, so no mode is enforced for a true reason.
 	const notStarted = (c = active) => !isDefault(c) && !(c.state && c.state.ready);
-	const modeNotActive = (c = active) => (isDefault(c) ? "" : notStarted(c) ? `Nothing can run yet: ${labelOf(c)} has not started (it needs its key and engine first)` : `${labelOf(c)} has not reported its permission mode yet, so nothing is shown as enforced`);
+	// An older permission extension in Pi's folder asks instead of ours: name it, say what is known and what to do.
+	const OLD_COPY_LABEL = "Older copy active";
+	const oldCopyOf = (c = active) => (isDefault(c) && c && c.oldCopy && c.oldCopy.name ? c.oldCopy : null);
+	const oldCopyWhy = (o) => `An older copy of the permission extension ("${o.name}" in ${o.dir}) is the one asking before actions. The mode cannot be changed here until you remove or rename that file and restart the chat.`;
+	const modeNotActive = (c = active) => (isDefault(c) ? (oldCopyOf(c) ? oldCopyWhy(oldCopyOf(c)) : "") : notStarted(c) ? `Nothing can run yet: ${labelOf(c)} has not started (it needs its key and engine first)` : `${labelOf(c)} has not reported its permission mode yet, so nothing is shown as enforced`);
+	const oldCopyBtn = $("#perm-oldcopy");
+	oldCopyBtn.addEventListener("click", async () => {
+		const r = await crust.pi.revealOldCopy(); // main finds the file itself; the page sends no path. Nothing is changed or deleted.
+		oldCopyBtn.dataset.revealed = r && r.ok ? r.file : "";
+	});
 	const MODE_PLACEHOLDER = modeSel.options[0].textContent; // "Not enforced"
 	// The selector's own "no mode" text and its reason, for the active chat. Uses the disabled-with-reason pattern (title, description, reason line).
 	function syncModePlaceholder(c = active) {
-		modeSel.options[0].textContent = notStarted(c) ? "Can't run yet" : MODE_PLACEHOLDER;
+		const showOld = !!oldCopyOf(c) && modeSel.disabled && !modeSel.dataset.mode;
+		modeSel.options[0].textContent = notStarted(c) ? "Can't run yet" : showOld ? OLD_COPY_LABEL : MODE_PLACEHOLDER;
+		oldCopyBtn.hidden = !showOld;
 		if (modeSel.disabled && !modeSel.dataset.mode) {
 			const why = modeNotActive(c);
 			if (why) {
@@ -248,6 +259,42 @@
 			piChat.state.queue = { steering: [], followUp: [] };
 			renderQueue();
 			await shots("pi-chat");
+
+			// 1b. the mode selector of a Pi chat when no mode was reported: the default text, then with an older permission extension in Pi's folder
+			{
+				const btn = $("#perm-oldcopy");
+				resetModeSelect();
+				check(modeSel.disabled && modeSel.selectedOptions[0].textContent === "Not enforced" && btn.hidden, "no old copy: the selector or its button is wrong");
+				check(modeSel.title.startsWith("Pi Crust's permission extension has not reported a mode") && /restart the chat/.test(modeSel.title) && /Extension error/.test(modeSel.title) && !/did not load, so nothing/.test(modeSel.title), `default reason: ${modeSel.title}`);
+				await crust.pi.selftestOldCopy(); // a stand-in file in the temporary agent folder, so "Show the file" has something to find
+				piChat.oldCopy = await crust.pi.oldCopy(); // the real lookup of the main process: the unit test pins ~ versus whole path
+				const oc = piChat.oldCopy || {};
+				check(oc.name === "permission-modes.ts" && /^(~[\\/]|[A-Za-z]:[\\/]|\/)/.test(oc.dir || "") && /[\\/]extensions$/.test(oc.dir), `old copy folder "${oc.dir}" is not a real path (~ only for a folder inside home)`);
+				resetModeSelect();
+				const why = modeSel.title;
+				check(modeSel.disabled && modeSel.selectedOptions[0].textContent === "Older copy active", `old copy label "${modeSel.selectedOptions[0].textContent}"`);
+				check(why.includes('"permission-modes.ts"') && why.includes(oc.dir) && /remove or rename that file and restart the chat/.test(why) && /is the one asking/.test(why) && !/nothing is enforced|did not load/i.test(why), `old copy reason: ${why}`);
+				check(modeSel.dataset.reason === why && modeSel.getAttribute("aria-description") === why, "the old-copy reason is not the description and reason-line text");
+				check(vis(btn) && btn.textContent === "Show the file", "Show the file is not visible with an old copy");
+				const rs = modeSel.getBoundingClientRect();
+				const rb = btn.getBoundingClientRect();
+				check(rb.left >= rs.right - 0.5 || rb.top >= rs.bottom - 0.5, "Show the file overlaps the selector");
+				check(document.elementFromPoint(rb.left + rb.width / 2, rb.top + rb.height / 2) === btn, "Show the file is covered");
+				modeSel.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+				await wait(100);
+				check(vis(line) && line.textContent === why, "hovering the selector does not show the old-copy reason");
+				await shots("old-copy");
+				modeSel.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+				btn.click();
+				for (let i = 0; i < 20 && btn.dataset.revealed === undefined; i++) await wait(100);
+				check((btn.dataset.revealed || "").endsWith(oc.dir.replace(/^~/, "")+ (btn.dataset.revealed.includes("/") ? "/" : "\\") + "permission-modes.ts") && /[\\/]permission-modes\.ts$/.test(btn.dataset.revealed || ""), `Show the file (text names ${oc.dir}) reached "${btn.dataset.revealed}"`);
+				syncModeFromStatus("Mode: Plan (read-only)"); // the extension of the app reported: the old copy is no longer what the selector is about
+				check(!modeSel.disabled && btn.hidden && modeSel.selectedOptions[0].textContent === "Plan (read-only)", "the old-copy state stayed after a mode was reported");
+				piChat.oldCopy = null;
+				syncModeFromStatus(undefined);
+				check(modeSel.selectedOptions[0].textContent === "Not enforced" && btn.hidden, "the old-copy state stayed after the old copy went");
+				await wait(100);
+			}
 
 			// 2. a Claude Agent chat
 			await newChat(null, "agent test", { agent: "claude" });

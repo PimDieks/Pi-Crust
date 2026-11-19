@@ -740,8 +740,27 @@ function findOldCopy(agentDir) {
 	return null;
 }
 
+// The old copy for the selector: { name, dir (home shown as ~, for the text), file (full path, for "Show the file") } or null.
+// The extensions folder of an agent folder as the text shows it: { full (real path), dir (shown) }. "~" replaces the home folder only when
+// the folder really is inside it (whole path parts, never a prefix of one), otherwise the full path. Separators follow the platform
+// (`platform` is for tests; default is this machine's).
+function shownExtensionsDir(agentDir, home, platform = process.platform) {
+	const p = platform === "win32" ? nodePath.win32 : nodePath.posix;
+	const full = p.resolve(agentDir, "extensions");
+	const h = home ? p.resolve(home) : "";
+	const norm = (x) => (platform === "win32" ? x.toLowerCase() : x);
+	const inside = h && h !== p.parse(h).root && norm(full).startsWith(norm(h) + p.sep);
+	return { full, dir: inside ? "~" + p.sep + full.slice(h.length + 1) : full };
+}
+function describeOldCopy(agentDir, home) {
+	const name = findOldCopy(agentDir);
+	if (!name) return null;
+	const { full, dir } = shownExtensionsDir(agentDir, home);
+	return { name, dir, file: nodePath.join(full, name) };
+}
+
 module.exports = {
 	MODE_IDS, MODE_LABELS, DEFAULT_MODE, STATUS_KEY, ENTRY_TYPE, COMMAND_NAMES, OPTIONS, READ_ONLY_NAMES, MAX_SHOWN, MAX_ASKABLE, PROTECTED_WHY, PROGRAM_WHY,
 	isMode, statusText, parseMode, restoreMode, parseLastMode, lastModeToStore, canonName,
-	createGrants, clearGrants, classify, checkPath, bashShellKind, hasHidden, deviceName, DEVICE_WHY, HIDDEN_WHY, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, pinKeys,
+	createGrants, clearGrants, classify, checkPath, bashShellKind, hasHidden, deviceName, DEVICE_WHY, HIDDEN_WHY, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, describeOldCopy, shownExtensionsDir, pinKeys,
 };

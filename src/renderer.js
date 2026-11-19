@@ -2342,6 +2342,14 @@ crust.pi.onStarted(({ chatId, sessionFile, restore, active: wanted, worktree, ag
 	const fresh = !c;
 	if (!c) c = makeChat(chatId, { sessionFile, cwd: worktree?.cwd, branch: worktree?.branch, agent });
 	c.agent = agent || c.agent;
+	c.oldCopy = null;
+	if (!(agent && agent.id && agent.id !== "pi")) {
+		// An older permission extension in Pi's folder: the mode selector names it for as long as no mode is reported (asked every start, so a removed file stops counting).
+		crust.pi.oldCopy().then((o) => {
+			c.oldCopy = o || null;
+			if (c === active) window.agentUi?.syncModePlaceholder(c);
+		});
+	}
 	if (fork && fresh) {
 		// A Claude Agent fork in a new tab (slash.js): named "Fork of <title>", shows the part of the old chat it continues, and gets the message back in the box.
 		c.label = fork.title || c.label;

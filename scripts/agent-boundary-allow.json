@@ -76,8 +76,8 @@
 		{
 			"file": "src/main.js",
 			"rule": "pi-folder",
-			"contains": "findOldCopy(ENV.PI_CODING_AGENT_DIR || path.join(os.homedir(), \".pi\", \"agent\"))",
-			"reason": "permissionOldCopy: a read-only look in Pi's extensions folder for an older copy of the permission extension, to tell the user once (added by the permission-modes work). Phase 7 can make it the Pi adapter's onAppStart hint."
+			"contains": "const piAgentDir = () => ENV.PI_CODING_AGENT_DIR",
+			"reason": "piAgentDir: where Pi's agent folder is; used for a read-only look in its extensions folder for an older copy of the permission extension (named in the mode selector and, once, in a toast; revealed on request). Phase 7 can make it the Pi adapter's onAppStart hint."
 		},
 		{
 			"file": "src/permission-logic.js",

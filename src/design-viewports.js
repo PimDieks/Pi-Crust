@@ -61,6 +61,21 @@
 		return t;
 	}
 
+	// The Dark frame of a size says so when it looks the same as the Light one of that size: the page may switch its theme another way
+	// than the browser's colour-scheme setting, and nothing else would tell. Only once both captures of the size are in.
+	const SAME_NOTE = "Looks the same as light. This page may not follow the system's dark mode. If the app has its own theme setting, set it to System.";
+	async function checkSame(t, my) {
+		const other = tiles.find((x) => x.preset === t.preset && x !== t && x.scheme !== t.scheme);
+		if (!other || !other.entry || !t.entry) return;
+		const dark = t.scheme === "dark" ? t : other;
+		const light = dark === t ? other : t;
+		let same = false;
+		try {
+			same = await crust.snap.same(light.entry.id, dark.entry.id);
+		} catch {}
+		if (my !== gen || !same || dark.tile.classList.contains("failed") || dark.tile.querySelector(".vp-note")) return;
+		dark.tile.append(el("span", "vp-note", SAME_NOTE));
+	}
 	async function capture(t, url, my) {
 		try {
 			const r = await crust.snap.url(url, { width: t.preset.w, height: t.preset.h, colorScheme: t.scheme, mobile: t.preset.mobile, settleMs: 900, kind: "design" });
@@ -74,6 +89,7 @@
 			img.src = t.thumb;
 			t.body.replaceChildren(img);
 			t.tile.classList.remove("failed");
+			checkSame(t, my);
 		} catch (e) {
 			if (my !== gen) return;
 			t.tile.classList.add("failed");
@@ -207,6 +223,8 @@
 	selftestSteps.push(async ({ snap, wait }) => {
 		const page = `<style>body{margin:0;font:700 32px sans-serif;display:grid;place-items:center;height:100vh;background:#e8f0ff;color:#123}
 			@media (prefers-color-scheme: dark){body{background:#101828;color:#cde}}</style><body>Responsive page</body>`;
+		const problems = [];
+		const check = (ok, what) => ok || problems.push(what);
 		switchTab("design");
 		D.select("viewports");
 		await wait(300);
@@ -219,6 +237,60 @@
 		const sizes = ok.map((t) => `${t.entry.w}x${t.entry.h}`).join(",");
 		console.error(`SELFTEST viewports: ${ok.length}/${ts.length} tiles, sizes ${sizes} -> ${ts.length === 4 && ok.length === 4 && ok.some((t) => t.entry.w === 390) ? "OK" : "MISMATCH"}`);
 		await snap("viewports");
+		// No hint on a page that follows the system's dark mode; the capture view shows only the pictures.
+		check(!document.querySelector(".vp-note"), "a page that follows dark mode got the 'looks the same' note");
+		// A page that switches its theme another way (here: it does not switch at all) looks the same in both: the Dark frame says so.
+		const fixed = `<style>body{margin:0;font:700 32px sans-serif;display:grid;place-items:center;height:100vh;background:#e8f0ff;color:#123}</style><body>Fixed page</body>`;
+		D.viewports.setUrl(`data:text/html;charset=utf-8,${encodeURIComponent(fixed)}`);
+		D.viewports.refresh();
+		check(!document.querySelector(".vp-note"), "a note shows while the captures are loading");
+		for (let i = 0; i < 60 && !D.viewports.done(); i++) await wait(500);
+		await wait(1200);
+		const fts = D.viewports.tiles();
+		const notes = fts.map((t) => ({ scheme: t.scheme, note: t.tile.querySelector(".vp-note")?.textContent || "" }));
+		const NOTE = "Looks the same as light. This page may not follow the system's dark mode. If the app has its own theme setting, set it to System.";
+		check(fts.length === 4 && fts.every((t) => t.entry), "the fixed page did not capture");
+		check(notes.filter((n) => n.scheme === "dark").every((n) => n.note === NOTE) && notes.filter((n) => n.scheme === "light").every((n) => !n.note), `notes: ${JSON.stringify(notes)}`);
+		for (const t of fts) {
+			const n = t.tile.querySelector(".vp-note");
+			if (!n) continue;
+			const rb = t.body.getBoundingClientRect();
+			const rn = n.getBoundingClientRect();
+			check(rn.top >= rb.bottom - 0.5 && rn.width > 0, "the note overlaps the picture");
+			check(document.elementFromPoint(rn.left + rn.width / 2, rn.top + rn.height / 2)?.closest(".vp-note") === n, "the note is covered");
+		}
+		// The longer text wraps inside its frame, also at the narrowest frame width (the grid's column minimum).
+		for (const t of fts) {
+			const n = t.tile.querySelector(".vp-note");
+			if (!n) continue;
+			const was = t.tile.style.width;
+			const minW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")) * 9 || 9 * 24;
+			t.tile.style.width = `${minW}px`;
+			await wait(100);
+			const rt = t.tile.getBoundingClientRect();
+			const rn = n.getBoundingClientRect();
+			check(n.scrollWidth <= n.clientWidth + 1 && rn.left >= rt.left - 0.5 && rn.right <= rt.right + 0.5, `the note overflows its frame at ${Math.round(rt.width)}px (note ${Math.round(rn.width)}px, scroll ${n.scrollWidth}/${n.clientWidth})`);
+			check(t.tile.scrollWidth <= t.tile.clientWidth + 1, "the frame overflows with the note");
+			t.tile.style.width = was;
+		}
+		await snap("viewports-same-note");
+		const was0 = themeSetting();
+		setTheme(currentTheme() === "dark" ? "light" : "dark");
+		await wait(500);
+		await snap(`viewports-same-note-${currentTheme()}`);
+		setTheme(was0);
+		await wait(300);
+		// A capture that fails gets no note.
+		D.viewports.setUrl("http://127.0.0.1:9/");
+		D.viewports.refresh();
+		for (let i = 0; i < 60 && !D.viewports.done(); i++) await wait(500);
+		await wait(500);
+		check(D.viewports.tiles().every((t) => t.tile.classList.contains("failed")) && !document.querySelector(".vp-note"), "a failed capture shows the note (or did not fail)");
+		console.error(`SELFTEST viewports same-note: ${problems.length ? "MISMATCH " + problems.join("; ") : "OK"}`);
+		D.viewports.setUrl(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
+		D.viewports.refresh();
+		for (let i = 0; i < 60 && !D.viewports.done(); i++) await wait(500);
+		await wait(800);
 		const was = themeSetting();
 		setTheme(currentTheme() === "dark" ? "light" : "dark");
 		await wait(500);
