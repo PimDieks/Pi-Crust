@@ -666,10 +666,15 @@ test("R1: plain printable ASCII commands still work in PowerShell and the unknow
 	}
 	assert.equal(L.decide({ mode: "plan", toolName: "powershell", input: { command: "git status" }, cwd: proj }).action, "allow");
 });
-test("R1: real PowerShell: the proof input really splits at the no-break space and truncates a file (why the rule is needed)", { skip: !hasPS }, () => {
+// PowerShell finds git.exe through PATHEXT; a reduced environment without it (some sandboxes) makes `git` "not found" and the file is never
+// touched, which looked like a failure of the rule. The test gives PowerShell the standard PATHEXT and skips, with the reason, if git still cannot run.
+const psEnv = () => ({ ...process.env, PATHEXT: process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD" });
+const psGit = hasPS ? spawnSync(PS, ["-NoProfile", "-NonInteractive", "-Command", "git --version"], { env: psEnv(), windowsHide: true, encoding: "utf8" }) : null;
+const psGitOk = !!psGit && psGit.status === 0;
+test("R1: real PowerShell: the proof input really splits at the no-break space and truncates a file (why the rule is needed)", { skip: !hasPS ? "no Windows PowerShell here" : !psGitOk ? "git cannot be run from PowerShell here" : false }, () => {
 	const r = repo("r1ps");
 	fs.writeFileSync(path.join(r, "README.md"), "hello\n");
-	spawnSync(PS, ["-NoProfile", "-NonInteractive", "-Command", "git log --grep=a" + NBSP + "--output=README.md"], { cwd: r, windowsHide: true });
+	spawnSync(PS, ["-NoProfile", "-NonInteractive", "-Command", "git log --grep=a" + NBSP + "--output=README.md"], { cwd: r, env: psEnv(), windowsHide: true });
 	assert.equal(fs.statSync(path.join(r, "README.md")).size, 0, "PowerShell passed --output=README.md as its own argument");
 });
 test("R1: a WSL bash.exe and a Windows with no known Git Bash count as an unknown shell", async () => {
