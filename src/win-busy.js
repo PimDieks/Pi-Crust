@@ -1,8 +1,8 @@
 // Busy detection for Windows terminals. node-pty's `process` is only the terminal name there, so ask Windows instead: a shell is busy
 // while it has a live descendant process that is not the console host (conhost.exe / OpenConsole.exe, which ConPTY keeps around).
 // ONE short-lived hidden powershell.exe lists all processes once and every terminal is answered from that list, with a hard time limit
-// (then "unknown" and the caller keeps the state it had). A shell that starts a copy of itself as a wrapper (Git Bash: bin\bash.exe starts
-// usr\bin\bash.exe) is looked through, not counted. A builtin or cmdlet (Start-Sleep, cd) starts no process and is not seen as busy.
+// (then "unknown" and the caller keeps the state it had). Only Git Bash's wrapper (bin\bash.exe starts a child usr\bin\bash.exe) is looked
+// through, not counted; a child of the shell's own name otherwise (powershell -File x.ps1, cmd /c build, a nested pwsh) is real work. A builtin or cmdlet (Start-Sleep, cd) starts no process and is not seen as busy.
 "use strict";
 
 const path = require("node:path");
@@ -51,7 +51,7 @@ function parse(out) {
 
 // cb(Map pid -> name | null) or cb(undefined) when it could not tell (error, timeout). Returns a cancel function.
 function checkAll(shells, cb, { limitMs = LIMIT_MS } = {}) {
-	const ps = path.join(process.env.SystemRoot || "C:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+	const ps = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 	const cmd = "Get-CimInstance Win32_Process -Property Name,ProcessId,ParentProcessId | Select-Object Name,ProcessId,ParentProcessId | ConvertTo-Json -Compress";
 	let done = false;
 	let out = "";
