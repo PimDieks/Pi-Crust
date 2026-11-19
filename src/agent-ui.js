@@ -267,11 +267,13 @@
 				check(modeSel.disabled && modeSel.selectedOptions[0].textContent === "Not enforced" && btn.hidden, "no old copy: the selector or its button is wrong");
 				check(modeSel.title.startsWith("Pi Crust's permission extension has not reported a mode") && /restart the chat/.test(modeSel.title) && /Extension error/.test(modeSel.title) && !/did not load, so nothing/.test(modeSel.title), `default reason: ${modeSel.title}`);
 				await crust.pi.selftestOldCopy(); // a stand-in file in the temporary agent folder, so "Show the file" has something to find
-				piChat.oldCopy = { name: "permission-modes.ts", dir: "~/agent/extensions" };
+				piChat.oldCopy = await crust.pi.oldCopy(); // the real lookup of the main process: the unit test pins ~ versus whole path
+				const oc = piChat.oldCopy || {};
+				check(oc.name === "permission-modes.ts" && /^(~[\\/]|[A-Za-z]:[\\/]|\/)/.test(oc.dir || "") && /[\\/]extensions$/.test(oc.dir), `old copy folder "${oc.dir}" is not a real path (~ only for a folder inside home)`);
 				resetModeSelect();
 				const why = modeSel.title;
 				check(modeSel.disabled && modeSel.selectedOptions[0].textContent === "Older copy active", `old copy label "${modeSel.selectedOptions[0].textContent}"`);
-				check(why.includes('"permission-modes.ts"') && why.includes("~/agent/extensions") && /remove or rename that file and restart the chat/.test(why) && /is the one asking/.test(why) && !/nothing is enforced|did not load/i.test(why), `old copy reason: ${why}`);
+				check(why.includes('"permission-modes.ts"') && why.includes(oc.dir) && /remove or rename that file and restart the chat/.test(why) && /is the one asking/.test(why) && !/nothing is enforced|did not load/i.test(why), `old copy reason: ${why}`);
 				check(modeSel.dataset.reason === why && modeSel.getAttribute("aria-description") === why, "the old-copy reason is not the description and reason-line text");
 				check(vis(btn) && btn.textContent === "Show the file", "Show the file is not visible with an old copy");
 				const rs = modeSel.getBoundingClientRect();
@@ -285,7 +287,7 @@
 				modeSel.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
 				btn.click();
 				for (let i = 0; i < 20 && btn.dataset.revealed === undefined; i++) await wait(100);
-				check(/permission-modes\.ts$/.test(btn.dataset.revealed || ""), `Show the file reached "${btn.dataset.revealed}"`);
+				check((btn.dataset.revealed || "").endsWith(oc.dir.replace(/^~/, "")+ (btn.dataset.revealed.includes("/") ? "/" : "\\") + "permission-modes.ts") && /[\\/]permission-modes\.ts$/.test(btn.dataset.revealed || ""), `Show the file (text names ${oc.dir}) reached "${btn.dataset.revealed}"`);
 				syncModeFromStatus("Mode: Plan (read-only)"); // the extension of the app reported: the old copy is no longer what the selector is about
 				check(!modeSel.disabled && btn.hidden && modeSel.selectedOptions[0].textContent === "Plan (read-only)", "the old-copy state stayed after a mode was reported");
 				piChat.oldCopy = null;

@@ -63,7 +63,7 @@
 
 	// The Dark frame of a size says so when it looks the same as the Light one of that size: the page may switch its theme another way
 	// than the browser's colour-scheme setting, and nothing else would tell. Only once both captures of the size are in.
-	const SAME_NOTE = "Looks the same as light. This page may not follow the system's dark mode.";
+	const SAME_NOTE = "Looks the same as light. This page may not follow the system's dark mode. If the app has its own theme setting, set it to System.";
 	async function checkSame(t, my) {
 		const other = tiles.find((x) => x.preset === t.preset && x !== t && x.scheme !== t.scheme);
 		if (!other || !other.entry || !t.entry) return;
@@ -248,7 +248,7 @@
 		await wait(1200);
 		const fts = D.viewports.tiles();
 		const notes = fts.map((t) => ({ scheme: t.scheme, note: t.tile.querySelector(".vp-note")?.textContent || "" }));
-		const NOTE = "Looks the same as light. This page may not follow the system's dark mode.";
+		const NOTE = "Looks the same as light. This page may not follow the system's dark mode. If the app has its own theme setting, set it to System.";
 		check(fts.length === 4 && fts.every((t) => t.entry), "the fixed page did not capture");
 		check(notes.filter((n) => n.scheme === "dark").every((n) => n.note === NOTE) && notes.filter((n) => n.scheme === "light").every((n) => !n.note), `notes: ${JSON.stringify(notes)}`);
 		for (const t of fts) {
@@ -258,6 +258,20 @@
 			const rn = n.getBoundingClientRect();
 			check(rn.top >= rb.bottom - 0.5 && rn.width > 0, "the note overlaps the picture");
 			check(document.elementFromPoint(rn.left + rn.width / 2, rn.top + rn.height / 2)?.closest(".vp-note") === n, "the note is covered");
+		}
+		// The longer text wraps inside its frame, also at the narrowest frame width (the grid's column minimum).
+		for (const t of fts) {
+			const n = t.tile.querySelector(".vp-note");
+			if (!n) continue;
+			const was = t.tile.style.width;
+			const minW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")) * 9 || 9 * 24;
+			t.tile.style.width = `${minW}px`;
+			await wait(100);
+			const rt = t.tile.getBoundingClientRect();
+			const rn = n.getBoundingClientRect();
+			check(n.scrollWidth <= n.clientWidth + 1 && rn.left >= rt.left - 0.5 && rn.right <= rt.right + 0.5, `the note overflows its frame at ${Math.round(rt.width)}px (note ${Math.round(rn.width)}px, scroll ${n.scrollWidth}/${n.clientWidth})`);
+			check(t.tile.scrollWidth <= t.tile.clientWidth + 1, "the frame overflows with the note");
+			t.tile.style.width = was;
 		}
 		await snap("viewports-same-note");
 		const was0 = themeSetting();

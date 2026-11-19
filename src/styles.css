@@ -1063,7 +1063,7 @@ html.theme-changing, html.theme-changing *, html.theme-changing *::before, html.
 .vp-scheme { margin-left: auto; }
 .vp-body { display: flex; align-items: center; justify-content: center; min-height: calc(var(--control-h) * 4); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); border: 1px solid var(--border); }
 .vp-body img { display: block; width: 100%; max-height: calc(var(--control-h) * 18); object-fit: contain; object-position: top; }
-.vp-note { color: var(--muted); font-size: var(--fs-xs); line-height: 1.35; }
+.vp-note { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-size: var(--fs-xs); line-height: 1.35; }
 .vp-err { padding: var(--space-sm); color: var(--text-error); font-size: var(--fs-sm); text-align: center; }
 .vp-tile.failed .vp-body { background: var(--fills-error-muted); border-color: transparent; }
 .st-empty { max-width: calc(var(--control-h) * 22); margin: var(--space-xl) auto; padding: var(--panel-pad); display: flex; flex-direction: column; gap: var(--space-sm); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); }
