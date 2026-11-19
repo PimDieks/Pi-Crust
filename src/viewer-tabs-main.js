@@ -21,6 +21,7 @@ const pp = require("./project-protocol");
 const pf = require("./project-files");
 const K = require("./viewer-kind");
 const S = require("./viewer-tabs-store");
+const T = require("./viewer-agent-target");
 const VO = require("./viewer-open-logic");
 const RL = require("./viewer-reload");
 const { fileURLToPath } = require("node:url");
@@ -28,14 +29,14 @@ const { fileURLToPath } = require("node:url");
 const WEB_PARTITION = "persist:devbrowser";
 
 // deps: { WebContentsView, nativeTheme, getWin, send, isLocal, isWin, devUrl, getRoot, getZoomLevel, relayout, setErrorHidden,
-//         breakMode (selftest only), files, protocol,
+//         breakMode (selftest only), files, protocol, platform (default: this machine's), remotePorts() -> [port] (the app's own Remote server),
 //         store: { read(root), write(root, value | null) } (the remembered tabs, in settings.json) }
 function create(deps) {
 	const files = deps.files || pf;
 	const protocol = deps.protocol || pp;
 	const list = L.create();
 	const brk = deps.selftest ? deps.breakMode || "" : ""; // selftest only: the deliberate breaks (reload-*, site-*) of the step viewer-reload
-	const logic = VO.create({ files, protocol, breakMode: brk });
+	const logic = VO.create({ files, protocol, platform: deps.platform, breakMode: brk });
 	// Live reload (spec task 12): which real files each project tab uses, watched by viewer-reload.js; a change arrives in changed().
 	const reload = RL.create({ breakMode: brk, debounceMs: brk === "reload-storm" ? 0 : undefined, onChange: (id) => changed(id) });
 	const views = new Map(); // tab id -> WebContentsView
@@ -97,7 +98,7 @@ function create(deps) {
 		const wc = wcOf(tab);
 		if (!wc || wc.isDestroyed() || tab.missing) return; // a file that is gone has no page: it keeps its stored address and title
 		tab.address = wc.getURL() || tab.address;
-		tab.title = wc.getTitle() || "";
+		tab.title = S.cleanTitle(wc.getTitle());
 		tab.loading = wc.isLoading();
 		tab.canGoBack = wc.navigationHistory.canGoBack();
 		tab.canGoForward = wc.navigationHistory.canGoForward();
@@ -238,7 +239,7 @@ function create(deps) {
 	// refused before the file system is touched), then it opens as a dropped file does, or the refusal shows in the Viewer's reason line.
 	async function fileDropped(url) {
 		let abs = "";
-		try { abs = fileURLToPath(url); } catch { /* a host the platform cannot read as a path */ }
+		try { abs = fileURLToPath(url, { windows: (deps.platform || process.platform) === "win32" }); } catch { /* a host the platform cannot read as a path */ }
 		const r = abs ? logic.checkDropped(deps.getRoot(), abs) : { refuse: VO.R.invalid };
 		if (r.refuse) return void deps.send("browser:notice", { message: r.refuse });
 		const res = await openFile(protocol.toAddress(deps.getRoot(), r.file.path));
@@ -276,11 +277,23 @@ function create(deps) {
 		return { ok: true, zoom: t.zoom };
 	}
 
+	// Every real navigation of a tab goes through here. A remembered tab that came back unloaded (no page view, a Load button) protects only
+	// its STORED address from loading by itself: a navigation to any address builds the page view and loads it at once, the notice goes away.
 	function load(tab, address) {
+		const wasUnloaded = !!tab.unloaded;
+		if (wasUnloaded) {
+			tab.unloaded = false;
+			tab.error = null;
+			tab.lazy = false;
+			buildView(tab);
+			if (isActive(tab)) deps.setErrorHidden(false);
+			deps.relayout(); // the new view starts visible: only the active tab may show
+		}
 		const wc = wcOf(tab);
 		tab.address = address;
 		tab.missing = false;
 		if (wc) wc.loadURL(address).catch(() => {});
+		if (wasUnloaded) report(tab);
 	}
 
 	// --- operations -------------------------------------------------------------------------------------------------------------
@@ -304,7 +317,7 @@ function create(deps) {
 		if (lazy) {
 			r.tab.lazy = true;
 			if (missing) markMissing(r.tab);
-			else if (unloaded) markUnloaded(r.tab);
+			else if (unloaded || (session === "web" && isRemote(address))) markUnloaded(r.tab);
 			return r;
 		}
 		buildView(r.tab);
@@ -392,6 +405,13 @@ function create(deps) {
 		tab.missing = true;
 		tab.error = { code: 404, desc: MISSING, url: tab.address, missing: true };
 	}
+	// The app's own Remote server is not a page of the person's: a remembered address on its port is treated like a non-local site.
+	const isRemote = (address) => {
+		try {
+			const u = new URL(String(address));
+			return (u.protocol === "http:" || u.protocol === "https:") && T.remotePortsOf({ remotePorts: deps.remotePorts }).includes(T.portOf(u.href));
+		} catch { return false; }
+	};
 	// A remembered web address that is not local (viewer-tabs-store.js): no view, no load. The tab shows its address and a Load button (the UI
 	// reads error.unloaded); loadTab, from that click, is the only way it loads.
 	function markUnloaded(tab) {
@@ -403,16 +423,7 @@ function create(deps) {
 		if (!tab || !tab.unloaded) return { ok: false, reason: "nothing waiting" };
 		const a = accept(tab.address);
 		if (!a.ok || a.session !== "web") return { ok: false, reason: "refused" };
-		tab.unloaded = false;
-		tab.error = null;
-		tab.lazy = false;
-		buildView(tab);
-		load(tab, a.url);
-		if (isActive(tab)) {
-			deps.setErrorHidden(false);
-			deps.relayout();
-		}
-		report(tab);
+		load(tab, a.url); // builds the view, clears the notice, reports
 		return { ok: true, tabId: tab.id };
 	}
 	// Is the file of a project tab gone now? (Same rules as every request.)
@@ -426,6 +437,7 @@ function create(deps) {
 	// First time a restored tab is shown: build its view and load it, unless its file is gone (then it keeps the message).
 	function materialize(tab) {
 		if (!tab.lazy || tab.unloaded) return;
+		if (tab.session === "web" && isRemote(tab.address)) return markUnloaded(tab); // the Remote server may have started since the tab came back
 		tab.lazy = false;
 		buildView(tab);
 		if (fileGone(tab)) {

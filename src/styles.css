@@ -252,6 +252,9 @@ select option { background: var(--panel-2); color: var(--text); }
 .vt-zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 #browser-error { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); padding: 24px; text-align: center; }
 #browser-error code { font-family: var(--mono); color: var(--text); }
+#browser-error .unloaded-address { max-width: 100%; overflow-wrap: anywhere; word-break: break-all; }
+#browser-error .unloaded-address .host { color: var(--text); }
+#browser-error .unloaded-address .rest { opacity: 0.75; }
 
 /* Chat */
 #messages-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }

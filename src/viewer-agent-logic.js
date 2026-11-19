@@ -34,10 +34,6 @@ function create(opts = {}) {
 	// The ports of the app's own Remote server (a function: it can change while the app runs). A localhost address on one of them is not a page
 	// the person's project serves; showing it would put the app's own pairing and chat pages in the Viewer.
 	const remotePorts = typeof opts.remotePorts === "function" ? opts.remotePorts : () => [];
-	const portOf = (url) => {
-		const u = new URL(url);
-		return Number(u.port) || (u.protocol === "https:" ? 443 : 80);
-	};
 
 	function check(root, raw, ctx = {}) {
 		const t = T.parse(raw);
@@ -47,7 +43,7 @@ function create(opts = {}) {
 			if (!(t.local || brk === "agent-host")) return { refuse: R.host };
 			let blocked = [];
 			try { blocked = remotePorts() || []; } catch { /* no list: nothing is known to refuse */ }
-			return blocked.includes(portOf(t.url)) ? { refuse: R.remote } : { address: t.url };
+			return blocked.includes(T.portOf(t.url)) ? { refuse: R.remote } : { address: t.url };
 		}
 		// A path.
 		if (!root) return { refuse: R.noproject };

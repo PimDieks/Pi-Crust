@@ -11,6 +11,24 @@ const RL = require("../src/viewer-reload");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pi-rl-")));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
+// fs.watch has no "ready" event, and on a cold machine a watcher can miss a write made right after it was created. Wait for the folder's
+// watch to be live instead of for time: a probe watcher on the same folder (made after the module's own) must see a write to a file nobody
+// uses; then the module's watcher is live too. The wait ends the moment that is seen, and the test fails if it never is.
+const ready = async (dir) => {
+	const probe = path.join(dir, "ready-probe.tmp");
+	let seen = false;
+	const pw = fs.watch(dir, { persistent: false }, (_type, name) => { if (name === "ready-probe.tmp") seen = true; });
+	try {
+		for (let i = 0; i < 200 && !seen; i++) {
+			fs.writeFileSync(probe, String(i));
+			await sleep(25);
+		}
+	} finally {
+		pw.close();
+		fs.rmSync(probe, { force: true });
+	}
+	assert.ok(seen, "the folder's watcher became ready");
+};
 const make = (opts = {}) => {
 	const calls = [];
 	const w = RL.create({ debounceMs: 80, ...opts, onChange: (id) => calls.push(id) });
@@ -23,6 +41,7 @@ test("a change to a watched file calls once, after the pause", async () => {
 	fs.writeFileSync(f, "1");
 	const { w, calls } = make();
 	w.add("t1", f);
+	await ready(dir);
 	fs.writeFileSync(f, "2");
 	await sleep(30);
 	assert.equal(calls.length, 0, "not before the pause");
@@ -38,6 +57,7 @@ test("many quick saves give one call", async () => {
 	fs.writeFileSync(f, "0");
 	const { w, calls } = make();
 	w.add("t1", f);
+	await ready(dir);
 	for (let i = 1; i <= 10; i++) { fs.writeFileSync(f, String(i)); await sleep(10); }
 	await sleep(500);
 	assert.equal(calls.length, 1);
@@ -64,6 +84,7 @@ test("a file that is deleted and comes back both call; the watcher survives", as
 	fs.writeFileSync(f, "0");
 	const { w, calls } = make();
 	w.add("t1", f);
+	await ready(dir);
 	fs.rmSync(f);
 	await sleep(400);
 	assert.equal(calls.length, 1, "deleted");

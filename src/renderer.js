@@ -320,7 +320,17 @@ function showBrowserError(err) {
 		const btn = el("button", "", "Load");
 		btn.type = "button";
 		btn.addEventListener("click", () => crust.browser.loadTab(shownTabId));
-		box.replaceChildren(el("strong", "", "This page is not loaded"), el("div", "", err.url), btn);
+		// The address wraps (it can be long) and shows the host clearly: the host in the normal text colour, the rest dimmer.
+		const addr = el("div", "unloaded-address");
+		let host = "";
+		try { const u = new URL(err.url); if (err.url.startsWith(`${u.protocol}//${u.host}`)) host = u.host; } catch { /* shown whole */ }
+		if (host) {
+			const at = err.url.indexOf("//") + 2;
+			addr.append(el("span", "rest", err.url.slice(0, at)), el("span", "host", host), el("span", "rest", err.url.slice(at + host.length)));
+		} else {
+			addr.textContent = err.url;
+		}
+		box.replaceChildren(el("strong", "", "This page is not loaded"), addr, btn);
 		box.hidden = false;
 		return;
 	}

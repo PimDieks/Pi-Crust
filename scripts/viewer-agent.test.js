@@ -549,11 +549,18 @@ test("S4: whatever the rule allows, the main side accepts (the two never disagre
 	}
 });
 
-test("S4: Remote publishes its ports for the Viewer's agent tool (in the self-test too: the default port)", () => {
+test("S4: Remote publishes its ports, and the one reader main.js gives the agent tool hands them over (behaviour, not source text)", async () => {
 	const ctx = { selftest: true, ipcMain: { handle() {} } };
+	assert.deepEqual(T.remotePortsOf(ctx), [], "before Remote registers: nothing to refuse");
 	require("../src/remote-main").register(ctx);
-	assert.deepEqual(ctx.remotePorts(), [7391]);
-	const src = fs.readFileSync(path.join(__dirname, "..", "src", "remote-main.js"), "utf8");
-	assert.match(src, /ctx\.remotePorts = \(\) => \[cfg\.port, boundPort\]/, "the real server reports the configured and the bound port");
-	assert.match(fs.readFileSync(path.join(__dirname, "..", "src", "main.js"), "utf8"), /remotePorts: \(\) => \(ctx\.remotePorts \? ctx\.remotePorts\(\) : \[\]\)/, "main.js hands them to the agent tool");
+	assert.deepEqual(ctx.remotePorts(), [7391], "in the self-test the default port");
+	assert.deepEqual(T.remotePortsOf(ctx), [7391]);
+	// the app side as main.js builds it: the port list is read from the context each time (it changes while the app runs)
+	const tabs = [];
+	const am = AM.create({ getRoot: () => root, viewerTabs: { openBackground: async (x) => (tabs.push(x), { ok: true, tabId: "t", reused: false, active: false }) }, chatInfo: () => ({ cwd: root }), send: () => {}, protocol: pp, remotePorts: () => T.remotePortsOf(ctx) });
+	assert.deepEqual(await am.show("c", "http://localhost:7391/"), { ok: false, text: R.remote });
+	assert.deepEqual(tabs, []);
+	ctx.remotePorts = () => [7391, 9000]; // the real server reports the configured and the bound port
+	assert.deepEqual(await am.show("c", "http://127.0.0.1:9000/x"), { ok: false, text: R.remote });
+	assert.equal((await am.show("c", "http://localhost:3000/")).ok, true);
 });

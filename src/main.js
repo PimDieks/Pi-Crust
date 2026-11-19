@@ -752,6 +752,7 @@ const viewerStore = {
 	},
 };
 // The Viewer's tabs (spec: Viewer tabs and project files). The first tab loads the dev address, as the one view always did.
+const { remotePortsOf } = require("./viewer-agent-target");
 const viewerTabs = require("./viewer-tabs-main").create({
 	WebContentsView,
 	nativeTheme,
@@ -760,6 +761,7 @@ const viewerTabs = require("./viewer-tabs-main").create({
 	send: (ch, p) => send(ch, p),
 	isLocal,
 	isWin: IS_WIN,
+	remotePorts: () => remotePortsOf(ctx), // the app's own Remote server: its address is not a page of the person's (remembered tabs)
 	devUrl: DEV_URL,
 	getRoot: () => (SELFTEST && projectRootOverride) || REPO,
 	getZoomLevel: () => zoomLevel,
@@ -793,7 +795,7 @@ require("./viewer-open-main").register({
 // Pi asks through its extension (see the sink below), the Claude Agent through its host-defined tool (configured here).
 const viewerAgent = require("./viewer-agent-main").create({
 	getRoot: () => (SELFTEST && projectRootOverride) || REPO,
-	remotePorts: () => (ctx.remotePorts ? ctx.remotePorts() : []), // the app's own Remote server (remote-main.js)
+	remotePorts: () => remotePortsOf(ctx), // the app's own Remote server (remote-main.js)
 	viewerTabs,
 	chatInfo: (chatId) => {
 		const c = chats.get(chatId);

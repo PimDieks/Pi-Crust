@@ -236,3 +236,17 @@ test("sameSite: same scheme, host and port, web tabs only; the active tab wins",
 	L.activate(l, p.id);
 	assert.equal(L.sameSite(l, "http://localhost:6006/").id, a.id);
 });
+
+const cp = (...c) => String.fromCodePoint(...c); // invisible characters by code point, so the source shows what is tested
+test("store: titles lose bidirectional and invisible format characters, keep one space, and are cut on a whole character", () => {
+	assert.equal(S.cleanTitle(`  Pay${cp(0x202e)}pal${cp(0x2066, 0x200b, 0x200f, 0xfeff, 0xad)}${cp(7)} 
+	 login  `), "Paypal login");
+	assert.equal(S.cleanTitle(`a${cp(0x2028)}b${cp(0x2029)}c`), "a b c");
+	assert.equal(S.cleanTitle(7), "");
+	const long = S.cleanTitle("x".repeat(S.TITLE_MAX - 1) + "\u{1F600}\u{1F600}");
+	assert.ok(long.length <= S.TITLE_MAX && !/[\ud800-\udbff]$/.test(long), "no half of a surrogate pair at the cut");
+	const root = project();
+	const r = S.fromStored({ tabs: [{ address: "https://a.example/", title: `Bank${cp(0x202e)} gnp` }, { path: "pic.png", title: cp(0x200b, 0x200b) }] }, env(root));
+	assert.deepEqual(r.tabs.map((t) => t.title), ["Bank gnp", ""]);
+	fs.rmSync(root, { recursive: true, force: true });
+});

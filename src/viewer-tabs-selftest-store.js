@@ -123,6 +123,13 @@ window.viewerTabsStoreChecks = async function viewerTabsStoreChecks({ S, check, 
 		await sleep(400);
 		check("missing file: Reload looks again and it is still gone, the message stays", byId(await list(), gone.id).error && !$("#browser-error").hidden && /no longer exists/.test($("#browser-error").textContent));
 		await shot("vt-restored-gone");
+		// The unloaded notice: the address wraps instead of overflowing and shows the host clearly.
+		await B.activateTab(planted.id);
+		await until(() => !!document.querySelector("#browser-error .unloaded-address"));
+		const addrEl = document.querySelector("#browser-error .unloaded-address");
+		const hostEl = addrEl.querySelector(".host");
+		check("unloaded notice: the stored address in full, the host on its own in full strength and the rest dimmer, wrapping, and a Load button", addrEl.textContent === "https://planted.invalid/login" && !!hostEl && hostEl.textContent === "planted.invalid" && getComputedStyle(addrEl).overflowWrap === "anywhere" && Number(getComputedStyle(addrEl.querySelector(".rest")).opacity) < 1 && Number(getComputedStyle(hostEl).opacity) === 1 && /Load/.test($("#browser-error button").textContent), addrEl.textContent);
+		await shot("vt-unloaded");
 		// Showing another tab loads it then.
 		const pdfTab = l.tabs[4];
 		await B.activateTab(pdfTab.id);

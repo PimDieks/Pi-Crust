@@ -40,4 +40,15 @@ function parse(raw) {
 	return { kind: "path", text };
 }
 
-module.exports = { parse, LOCAL_HOSTS, MAX_TARGET };
+// The port of an http(s) address, with the default of its scheme.
+const portOf = (url) => {
+	const u = new URL(url);
+	return Number(u.port) || (u.protocol === "https:" ? 443 : 80);
+};
+// The ports of the app's own Remote server, from the app context (ctx.remotePorts, set by remote-main.js): [] while there is none or it
+// throws. The one place the agent tool and the remembered tabs read them from (src/main.js hands this to both).
+const remotePortsOf = (ctx) => {
+	try { return (ctx && typeof ctx.remotePorts === "function" ? ctx.remotePorts() : []) || []; } catch { return []; }
+};
+
+module.exports = { parse, LOCAL_HOSTS, MAX_TARGET, portOf, remotePortsOf };

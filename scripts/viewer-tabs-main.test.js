@@ -33,7 +33,7 @@ class FakeWC extends EventEmitter {
 	}
 	loadURL(u) { this.loads.push(u); this.url = u; return Promise.resolve(); }
 	getURL() { return this.url; }
-	getTitle() { return ""; }
+	getTitle() { return this.title || ""; }
 	isLoading() { return false; }
 	isDestroyed() { return this.destroyed; }
 	isFocused() { return false; }
@@ -51,7 +51,7 @@ class FakeView {
 	getVisible() { return this.visible; }
 }
 
-function make({ current = root, stored = null, isWin = true } = {}) {
+function make({ current = root, stored = null, isWin = true, platform, remotePorts } = {}) {
 	views = [];
 	base = 0;
 	const state = { root: current, sent: [], errorHidden: null, saved: [] };
@@ -63,6 +63,8 @@ function make({ current = root, stored = null, isWin = true } = {}) {
 		send: (ch, p) => state.sent.push([ch, p]),
 		isLocal: (u) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(String(u)),
 		isWin,
+		platform,
+		remotePorts,
 		devUrl: DEV,
 		getRoot: () => state.root,
 		getZoomLevel: () => 0,
@@ -299,4 +301,199 @@ test("an app page (story, Mendix, a chat link) at 8 pages with no tab on its sit
 	assert.equal(r.ok, false);
 	assert.deepEqual(state.sent.filter(([ch]) => ch === "browser:notice").map(([, p]) => p.message), ["8 pages is the most. Close one first."]);
 	assert.equal(vt.list().tabs.length, 8);
+});
+
+// --- an unloaded remembered tab (a Load button and its stored address) --------------------------------------------------------------
+// The rule: the unloaded state protects only the STORED address from loading by itself. A real navigation of that tab builds the view and
+// loads the new address at once, and the notice goes away. The address the notice shows is always exactly what Load will load.
+const UNLOADED = "https://evil.example/login";
+const unloadedTab = (extra = {}) => {
+	const m = make({ stored: storedWith([{ path: "index.html", title: "I" }, { address: UNLOADED, title: "Bank" }], 1), ...extra });
+	m.vt.init();
+	base = views.length;
+	m.vt.projectChanged();
+	const l = m.vt.list();
+	const tab = l.tabs.find((t) => t.address === UNLOADED);
+	assert.equal(tab.error && tab.error.unloaded, true, "set up: the tab came back unloaded");
+	assert.equal(l.activeId, tab.id, "set up: it is the active tab");
+	assert.equal(views.length - base, 0, "set up: no view yet");
+	return { ...m, id: tab.id, projectId: l.tabs.find((t) => t.address !== UNLOADED).id };
+};
+const settled = (vt, id, address, loads) => {
+	const t = vt.list().tabs.find((x) => x.id === id);
+	assert.equal(t.error, null, "the unloaded notice is gone");
+	assert.equal(t.address, address);
+	assert.deepEqual(loadsOf(), loads);
+	assert.equal(views.length - base, 1, "the page view was built");
+};
+
+test("unloaded tab: the address bar loads what was typed at once and the notice goes away", async () => {
+	const { vt, state, id } = unloadedTab();
+	const r = await vt.navigate("example.org/next");
+	assert.equal(r.ok, true);
+	settled(vt, id, "https://example.org/next", ["https://example.org/next"]);
+	assert.equal(state.errorHidden, false, "the view shows again");
+	assert.equal((await vt.loadTab(id)).ok, false, "nothing is waiting any more");
+});
+
+test("unloaded tab: a page the app opens on its site (story, Mendix, chat link) loads at once", async () => {
+	const { vt, id } = unloadedTab();
+	const r = await vt.openSite("https://evil.example/other");
+	assert.deepEqual([r.ok, r.reused, r.tabId], [true, true, id]);
+	settled(vt, id, "https://evil.example/other", ["https://evil.example/other"]);
+	assert.equal(vt.list().activeId, id);
+});
+
+test("unloaded tab: a link the person clicked on a project page, to its site, loads at once", async () => {
+	const { vt, id, projectId } = unloadedTab();
+	await vt.activate(projectId); // materializes the project tab (one view)
+	const project = views[views.length - 1].webContents;
+	const nViews = views.length;
+	const e = event();
+	project.emit("will-navigate", e, "https://evil.example/next");
+	await wait(30);
+	assert.equal(e.prevented, true);
+	assert.equal(views.length, nViews + 1, "the unloaded tab got its view");
+	const t = vt.list().tabs.find((x) => x.id === id);
+	assert.deepEqual([t.error, t.address], [null, "https://evil.example/next"]);
+	assert.deepEqual(views[views.length - 1].webContents.loads, ["https://evil.example/next"]);
+});
+
+test("unloaded tab: the agent tool never loads the stored address by itself; Load loads exactly the address the notice shows", async () => {
+	const { vt, id } = unloadedTab();
+	const r = await vt.openBackground(UNLOADED);
+	assert.deepEqual([r.ok, r.reused], [true, true]);
+	let t = vt.list().tabs.find((x) => x.id === id);
+	assert.deepEqual([t.error.unloaded, t.error.url, t.address], [true, UNLOADED, UNLOADED]);
+	assert.equal(views.length - base, 0);
+	assert.equal((await vt.loadTab(id)).ok, true);
+	assert.deepEqual(loadsOf(), [UNLOADED], "Load loads the address the notice showed");
+	t = vt.list().tabs.find((x) => x.id === id);
+	assert.equal(t.error, null);
+});
+
+test("unloaded tab: a typed project file does not touch the stored address; the notice still shows what Load loads", async () => {
+	const { vt, id } = unloadedTab();
+	await vt.navigate("index.html"); // a project file from a web tab: its own tab
+	const t = vt.list().tabs.find((x) => x.id === id);
+	assert.deepEqual([t.error.unloaded, t.error.url, t.address], [true, UNLOADED, UNLOADED]);
+	assert.deepEqual(loadsOf().filter((u) => u.includes("evil")), []);
+});
+
+// --- the app's own Remote port is not a page of the person's -------------------------------------------------------------------------
+test("remembered tab on the app's own Remote port comes back unloaded, like any non-local site; Load still works", async () => {
+	const { vt, state } = make({ remotePorts: () => [7391], stored: storedWith([{ address: "http://localhost:7391/pair", title: "R" }, { address: "http://localhost:3000/", title: "App" }, { address: "http://127.0.0.1:7391/", title: "R2" }], 0) });
+	vt.init();
+	base = views.length;
+	vt.projectChanged();
+	const l = vt.list();
+	const [remote, app, remote2] = l.tabs;
+	assert.equal(remote.error && remote.error.unloaded, true);
+	assert.equal(remote.error.url, "http://localhost:7391/pair");
+	assert.deepEqual([views.length - base, loadsOf().length], [0, 0], "nothing loaded, no view built");
+	assert.equal(state.errorHidden, true);
+	await vt.activate(app.id);
+	assert.deepEqual(loadsOf(), ["http://localhost:3000/"], "another local port loads as before");
+	await vt.activate(remote2.id);
+	assert.equal(vt.list().tabs.find((t) => t.id === remote2.id).error.unloaded, true, "127.0.0.1 too");
+	assert.deepEqual(loadsOf(), ["http://localhost:3000/"]);
+	assert.equal((await vt.loadTab(remote.id)).ok, true, "the click loads it");
+});
+
+test("remembered Remote port: a port that is only known when the tab is first shown is checked then", async () => {
+	let ports = [];
+	const { vt } = make({ remotePorts: () => ports, stored: storedWith([{ address: "http://localhost:3000/", title: "A" }, { address: "http://localhost:7391/", title: "R" }], 0) });
+	vt.init();
+	base = views.length;
+	vt.projectChanged();
+	ports = [7391]; // the Remote server started after the tabs came back
+	const l = vt.list();
+	await vt.activate(l.tabs[1].id);
+	assert.equal(vt.list().tabs[1].error.unloaded, true);
+	assert.deepEqual(loadsOf(), ["http://localhost:3000/"]);
+});
+
+test("remotePortsOf: the one place both Viewer features read the app's Remote ports from", () => {
+	const { remotePortsOf } = require("../src/viewer-agent-target");
+	assert.deepEqual(remotePortsOf({ remotePorts: () => [7391, 8123] }), [7391, 8123]);
+	assert.deepEqual(remotePortsOf({}), []);
+	assert.deepEqual(remotePortsOf(undefined), []);
+	assert.deepEqual(remotePortsOf({ remotePorts: () => { throw new Error("not yet"); } }), []);
+});
+
+// --- titles ---------------------------------------------------------------------------------------------------------------------------
+test("a page's title is cleaned before it is kept, shown or saved: no bidirectional or invisible format characters, one-space whitespace, a length limit", () => {
+	const { vt, state } = make();
+	vt.init();
+	vt.projectChanged();
+	const wc = views[0].webContents;
+	wc.title = `  Paypal${String.fromCodePoint(0x202e, 0x2066)} gnp.exe${String.fromCodePoint(0x200b, 0x200f, 0xfeff, 0xad)}${String.fromCodePoint(7)}  
+	 login  ` + "x".repeat(500);
+	wc.emit("page-title-updated");
+	const title = vt.list().tabs[0].title;
+	assert.ok(title.startsWith("Paypal gnp.exe login x"), JSON.stringify(title));
+	assert.ok(title.length <= 200);
+	assert.doesNotMatch(title, /[\p{Cf}\p{Cc}]|\s{2}/u);
+	assert.ok(state.sent.some(([ch, p]) => ch === "browser:state" && p.title === title), "the UI gets the clean one");
+});
+
+// --- guardMove, with and without a redirect; another project; the platform's network path ----------------------------------------------
+test("guardMove: a drop onto the page (will-navigate to a file: address, no initiator) opens; the same move as a redirect, or with an initiator, never does", async () => {
+	const { vt, state } = make();
+	vt.init();
+	vt.projectChanged();
+	const { pathToFileURL } = require("node:url");
+	const fileUrl = pathToFileURL(path.join(root, "index.html")).href;
+	const page = views[0].webContents;
+	const n0 = vt.list().tabs.length;
+	state.sent.length = 0;
+	const redirect = event(); // a server's redirect to a file: address, no initiator: cancelled, nothing else
+	page.emit("will-redirect", redirect, fileUrl);
+	const own = Object.assign(event(), { initiator: {} }); // a page's own link: cancelled, nothing else
+	page.emit("will-navigate", own, fileUrl);
+	await wait(60);
+	assert.deepEqual([redirect.prevented, own.prevented], [true, true]);
+	assert.equal(vt.list().tabs.length, n0, "no tab");
+	assert.deepEqual(state.sent.filter(([ch]) => ch === "browser:notice"), [], "no notice");
+	const drop = event(); // no redirect, no initiator: a drop, it opens the file
+	page.emit("will-navigate", drop, fileUrl);
+	await wait(60);
+	assert.equal(drop.prevented, true);
+	assert.equal(vt.list().tabs.length, n0 + 1, "the dropped file got a tab");
+});
+
+test("a project tab's link to ANOTHER project's address is refused, as a click and as a redirect: no tab, no load", async () => {
+	const { vt } = make();
+	vt.init();
+	vt.projectChanged();
+	await vt.openFile(projAddr("index.html"));
+	const page = views[views.length - 1].webContents;
+	const before = JSON.stringify(vt.list());
+	const nViews = views.length;
+	const loads = page.loads.length;
+	for (const ev of ["will-navigate", "will-redirect"]) {
+		const e = event();
+		page.emit(ev, e, projAddr("other.html", root2));
+		assert.equal(e.prevented, true, ev);
+	}
+	await wait(30);
+	assert.equal(JSON.stringify(vt.list()), before);
+	assert.deepEqual([views.length, page.loads.length], [nViews, loads]);
+});
+
+test("a dropped network path is refused on the platform's rule, on every machine (the platform is injected)", async () => {
+	for (const platform of ["win32", "linux"]) {
+		const { vt, state } = make({ platform });
+		vt.init();
+		vt.projectChanged();
+		const n0 = vt.list().tabs.length;
+		const e = event();
+		views[0].webContents.emit("will-navigate", e, "file://server/share/a.html");
+		await wait(60);
+		assert.equal(e.prevented, true, platform);
+		assert.equal(vt.list().tabs.length, n0, platform);
+		const notes = state.sent.filter(([ch]) => ch === "browser:notice").map(([, p]) => p.message);
+		// win32: judged by its spelling (outside the project); linux: a host in a file address is no path at all. Never opened, always said.
+		assert.deepEqual(notes, [platform === "win32" ? "Only files inside this project can be shown here." : "That path can't be shown here."], platform);
+	}
 });

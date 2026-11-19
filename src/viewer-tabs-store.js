@@ -21,7 +21,14 @@ const TITLE_MAX = 200;
 const ADDRESS_MAX = 2048;
 const MAX_ENTRIES = 64; // read at most this many stored entries; the list keeps the first 8 that pass
 
-const cleanTitle = (t) => (typeof t === "string" ? t.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, TITLE_MAX) : "");
+// A title is page text (or a stored copy of it): shown in the tab row and the tooltip. Invisible format characters (bidirectional controls that
+// reorder what is read, zero-width marks, the byte order mark, soft hyphens, tags) are removed; control characters and line and paragraph
+// separators become spaces; whitespace collapses to one space; the length is limited (never in the middle of a surrogate pair).
+const cleanTitle = (t) => {
+	if (typeof t !== "string") return "";
+	const s = t.replace(/\p{Cf}/gu, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX);
+	return s.replace(/[\ud800-\udbff]$/, "").trim();
+};
 const sameAddress = (a, b) => String(a || "").replace(/\/$/, "") === String(b || "").replace(/\/$/, "");
 
 // The tabs of the list as they would be saved. A tab that cannot be saved (an address that is neither http(s) nor a file of this project)
@@ -93,4 +100,4 @@ function fromStored(raw, { root, protocol, files }) {
 	return tabs.length ? { tabs, active: Math.max(0, active) } : null;
 }
 
-module.exports = { TITLE_MAX, toStored, isDefault, fromStored, checkAddress };
+module.exports = { TITLE_MAX, cleanTitle, toStored, isDefault, fromStored, checkAddress };
