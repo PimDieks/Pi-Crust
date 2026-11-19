@@ -356,7 +356,7 @@ selftestSteps.push(async () => {
 						const k = wi.naturalWidth / (innerWidth * sv.z);
 						g.drawImage(vi, sv.bounds.x * k, sv.bounds.y * k, sv.bounds.width * k, sv.bounds.height * k);
 					}
-					const saved = await T({ op: "saveShot", name: `vt-kind-${name}-${th}`, dataUrl: c2.toDataURL("image/png") });
+					const saved = await T({ op: "saveShot", name: `vt-kind-${name}-${th}-v2`, dataUrl: c2.toDataURL("image/png") });
 					console.error(`SELFTEST viewer-tools screenshot ${name} ${th}: ${saved.ok ? saved.file : "not saved (PI_CRUST_VT_SHOTDIR unset)"}`);
 					node.blur();
 				}

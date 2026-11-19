@@ -29,6 +29,12 @@ selftestSteps.push(async () => {
 	let S;
 	try {
 		S = await T("start");
+		// A restart run (scripts/viewer-tabs-restart.js, two launches with one data folder) runs only the remembered-tabs checks.
+		run: {
+		if (S.phase) {
+			await window.viewerTabsStoreChecks({ S, check, sleep, list, byId, ids, phase: S.phase });
+			break run;
+		}
 		const web = `http://127.0.0.1:${S.port}/`;
 		const webOther = `http://localhost:${S.port}/`; // the same server, another site
 
@@ -169,6 +175,11 @@ selftestSteps.push(async () => {
 
 		// --- the row of page tabs (src/viewer-tab-row.js; checks in viewer-tabs-selftest-row.js) ----------------------------------------
 		await window.viewerTabsRowChecks({ S, check, sleep, list, byId, ids });
+		// --- the active tab in view, Fit and 100% in the toolbar, the reason line, the fade (viewer-tabs-selftest-active.js) ---------------
+		await window.viewerTabsActiveChecks({ S, check, sleep, list, byId, ids });
+		// --- remembered tabs: shape, project switch and back, a first run with nothing stored (viewer-tabs-selftest-store.js) ----------
+		await window.viewerTabsStoreChecks({ S, check, sleep, list, byId, ids, phase: "" });
+		}
 	} catch (e) {
 		check("no exception", false, e && e.stack ? e.stack : e);
 	} finally {

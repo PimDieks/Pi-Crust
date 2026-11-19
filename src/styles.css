@@ -204,8 +204,8 @@ select option { background: var(--panel-2); color: var(--text); }
 #browser-slot { flex: 1; position: relative; }
 /* Viewer page tabs: one row under the address bar, outside #browser-slot (the native page view is drawn above the DOM, so its slot starts below the row).
    Same pill look as the chat tabs; the row scrolls sideways when the pages do not fit. */
-.vt-row { flex: none; display: flex; align-items: center; gap: var(--space-3xs); height: 36px; box-sizing: border-box; padding: 0 var(--panel-pad-sm); border-bottom: 1px solid var(--border); background: var(--panel); overflow: hidden; }
-#vt-list { display: flex; gap: var(--space-3xs); align-items: center; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 3px; margin: -3px; } /* room inside the scroll box so focus rings are not clipped */
+.vt-row { flex: none; display: flex; align-items: flex-start; gap: var(--space-3xs); min-height: 36px; box-sizing: border-box; padding: 0 var(--panel-pad-sm); border-bottom: 1px solid var(--border); background: var(--panel); overflow: hidden; }
+#vt-list { display: flex; gap: var(--space-3xs); align-items: center; flex: 0 1 auto; min-width: min(116px, 100%); overflow-x: auto; scrollbar-width: none; padding: 3px; margin: 3px -3px -3px; } /* room inside the scroll box so focus rings are not clipped */
 #vt-list::-webkit-scrollbar { display: none; }
 .vt-item { display: flex; align-items: center; flex: 0 1 auto; min-width: 104px; max-width: 230px; height: var(--control-h); border-radius: var(--radius-full); color: var(--muted); }
 .vt-item:hover { color: var(--text); background: var(--hover); }
@@ -222,21 +222,28 @@ select option { background: var(--panel-2); color: var(--text); }
 .vt-item.active .vt-close:hover { background: var(--hover); }
 .vt-spin { display: block; width: 10px; height: 10px; box-sizing: border-box; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.9s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .vt-spin { animation: none; } }
-#vt-add { order: 1; flex: none; }
+#vt-add { order: 1; flex: none; margin-top: 5px; }
 #vt-add[aria-disabled="true"] { opacity: 0.35; cursor: not-allowed; }
 #vt-add[aria-disabled="true"]:hover { background: none; color: var(--muted); }
-/* The reason for the disabled +, drawn inside the row (a popup below it would sit under the native page view). Shown on hover and focus. */
-.vt-limit { order: 0; flex: 0 0 auto; max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; font-size: var(--fs-sm); color: var(--text-secondary); }
-#vt-add:hover ~ .vt-limit, #vt-add:focus ~ .vt-limit { max-width: 280px; margin: 0 var(--space-3xs); opacity: 1; }
-/* The image tab's two sizes, and the reason of a disabled tool (shown on hover and focus of that tool, inside the row). */
-.vt-zoom { order: 2; flex: none; display: flex; gap: var(--space-3xs); margin-left: var(--space-xs); }
+/* A reason drawn inside the row (a popup below it would sit under the native page view): the one for the disabled +, and the one for a disabled
+   tool of the toolbar. Only while that control is hovered or focused. At most half the row, wrapped to that width, never cut (no ellipsis, no
+   clipping), and it never covers a tab: the list of tabs gives way, and the active tab is scrolled back into view (viewer-tab-row.js). */
+.vt-limit, .vt-reason { box-sizing: border-box; max-width: max(56px, min(50%, calc(100% - 160px))); flex: 0 0 auto; min-height: 35px; align-items: center; white-space: normal; overflow-wrap: break-word; line-height: 14px; font-size: var(--fs-sm); color: var(--text-secondary); }
+.vt-limit { order: 0; display: none; margin: 0 var(--space-3xs); }
+#vt-add:hover ~ .vt-limit:not([hidden]), #vt-add:focus ~ .vt-limit:not([hidden]) { display: flex; }
+.vt-reason { order: 3; display: flex; margin-left: auto; padding-left: var(--space-xs); text-align: right; visibility: hidden; }
+.vt-reason.show { visibility: visible; }
+/* More tabs than room: the cut-off side fades out, on the left and on the right (viewer-tab-row.js sets data-fade). */
+#vt-list[data-fade="left"] { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px); mask-image: linear-gradient(to right, transparent 0, #000 24px); }
+#vt-list[data-fade="right"] { -webkit-mask-image: linear-gradient(to left, transparent 0, #000 24px); mask-image: linear-gradient(to left, transparent 0, #000 24px); }
+#vt-list[data-fade="both"] { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%); }
+/* The image tab's two sizes: in the toolbar, with the other page tools (shown for an image tab only). */
+.vt-zoom { flex: none; display: flex; gap: var(--space-3xs); margin: 0 var(--space-3xs); }
 .vt-zoom[hidden] { display: none; }
 .vt-zoom-btn { height: var(--control-h); padding: 0 var(--space-sm); border: 0; border-radius: var(--radius-full); background: none; color: var(--muted); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; }
 .vt-zoom-btn:hover { color: var(--text); background: var(--hover); }
 .vt-zoom-btn[aria-pressed="true"] { color: var(--text); background: var(--selected); }
 .vt-zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.vt-reason { order: 3; flex: 0 1 auto; min-width: 0; margin-left: auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-sm); color: var(--text-secondary); visibility: hidden; }
-.vt-reason.show { visibility: visible; flex: 0 0 auto; max-width: 70%; } /* the room it needs comes from the (scrolling) list of tabs */
 #browser-error { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); padding: 24px; text-align: center; }
 #browser-error code { font-family: var(--mono); color: var(--text); }
 

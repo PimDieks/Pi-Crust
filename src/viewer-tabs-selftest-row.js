@@ -167,11 +167,11 @@ window.viewerTabsRowChecks = async function viewerTabsRowChecks({ S, check, snap
 
 	// --- screenshots: one tab (row shown, and with the row hidden for the comparison), three tabs, a 2x crop of the row -------------
 	const shots = [];
-	const themed = async (name, crop) => {
+	const themed = async (name, crop, suffix = "") => {
 		for (const th of ["light", "dark"]) {
 			setTheme(th);
 			await sleep(700);
-			shots.push(await crust.selftest.capture(`vt-${name}-${th}`, crop));
+			shots.push(await crust.selftest.capture(`vt-${name}-${th}${suffix}`, crop));
 		}
 	};
 	await themed("one");
@@ -204,7 +204,7 @@ window.viewerTabsRowChecks = async function viewerTabsRowChecks({ S, check, snap
 	await until(() => getComputedStyle($("#vt-limit")).opacity === "1" && rect($("#vt-limit")).width > 100);
 	const lim = rect($("#vt-limit"));
 	check("limit: the reason shows inside the row on focus, not covered, not below the row", getComputedStyle($("#vt-limit")).opacity === "1" && lim.width > 100 && lim.top >= rect(ROW()).top - 0.5 && lim.bottom <= rect(ROW()).bottom + 0.5 && document.elementFromPoint(lim.left + lim.width / 2, lim.top + lim.height / 2) === $("#vt-limit"), JSON.stringify(lim));
-	await themed("eight-limit");
+	await themed("eight-limit", undefined, "-v2");
 	$("#url").focus();
 	press("t", modKeys);
 	await sleep(400);

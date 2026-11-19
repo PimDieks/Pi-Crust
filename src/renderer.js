@@ -307,6 +307,14 @@ crust.browser.onState((s) => {
 crust.browser.onError((err) => showBrowserError(err));
 function showBrowserError(err) {
 	const box = $("#browser-error");
+	if (err.missing) {
+		// A restored tab whose project file is gone (viewer-tabs-main.js): not an error code, just the plain fact and where it was.
+		let where = err.url || "";
+		try { where = decodeURIComponent(new URL(where).pathname).replace(/^\/+/, ""); } catch { /* keep the address */ }
+		box.replaceChildren(el("strong", "", err.desc), el("div", "", where));
+		box.hidden = false;
+		return;
+	}
 	box.replaceChildren(
 		el("strong", "", "Can't load the page"),
 		el("div", "", `${err.desc} (${err.code})`),

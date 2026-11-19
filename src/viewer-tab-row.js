@@ -150,11 +150,44 @@
 		if (full) addBtn.setAttribute("aria-describedby", "vt-limit");
 		else addBtn.removeAttribute("aria-describedby");
 		const a = items.get(activeId);
-		if (a) {
-			if (focusedId && !items.has(focusedId)) a.tabBtn.focus(); // the focused page was closed: focus goes to the active one
-			if (a.item.offsetParent) a.item.scrollIntoView({ block: "nearest", inline: "nearest" });
+		if (a && focusedId && !items.has(focusedId)) a.tabBtn.focus(); // the focused page was closed: focus goes to the active one
+		revealActive();
+	}
+
+	// The active tab is always fully in view: after it changes, after a tab is added or closed, and whenever the list's width changes (a
+	// window resize, a reason shown at the right end of the row; see the ResizeObserver below). The list is scrolled by its own scrollLeft:
+	// scrollIntoView would also move the row. Next to a cut-off side the tab keeps clear of the fade (FADE px).
+	const FADE = 24;
+	function revealActive() {
+		const a = items.get(activeId);
+		if (!a || !a.item.offsetParent) return;
+		const lr = listEl.getBoundingClientRect();
+		const ir = a.item.getBoundingClientRect();
+		const w = listEl.clientWidth;
+		const maxLeft = Math.max(0, listEl.scrollWidth - w);
+		const x0 = ir.left - lr.left + listEl.scrollLeft; // the tab's edges in the scrolled content
+		const x1 = x0 + ir.width;
+		let t = listEl.scrollLeft;
+		if (ir.width + 2 * FADE > w) t = x0 - 3; // no room for the fades: show the tab from its left edge
+		else if (x0 - FADE < t) t = x0 - FADE;
+		else if (x1 + FADE > t + w) t = x1 + FADE - w;
+		t = Math.max(0, Math.min(maxLeft, t));
+		if (Math.abs(t - listEl.scrollLeft) > 0.5) listEl.scrollLeft = t;
+		updateFade();
+	}
+	// The cut-off side of a scrolling list fades out (CSS: #vt-list[data-fade]).
+	function updateFade() {
+		const more = listEl.scrollWidth - listEl.clientWidth > 1;
+		const l = more && listEl.scrollLeft > 1;
+		const r = more && listEl.scrollLeft + listEl.clientWidth < listEl.scrollWidth - 1;
+		const v = l && r ? "both" : l ? "left" : r ? "right" : "";
+		if ((listEl.dataset.fade || "") !== v) {
+			if (v) listEl.dataset.fade = v;
+			else delete listEl.dataset.fade;
 		}
 	}
+	listEl.addEventListener("scroll", updateFade, { passive: true });
+	if (typeof ResizeObserver === "function") new ResizeObserver(() => revealActive()).observe(listEl);
 
 	function apply(s) {
 		if (!s || !Array.isArray(s.tabs)) return;

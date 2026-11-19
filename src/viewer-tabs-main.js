@@ -20,11 +20,13 @@ const L = require("./viewer-tabs-list");
 const pp = require("./project-protocol");
 const pf = require("./project-files");
 const K = require("./viewer-kind");
+const S = require("./viewer-tabs-store");
 
 const WEB_PARTITION = "persist:devbrowser";
 
 // deps: { WebContentsView, nativeTheme, getWin, send, isLocal, isWin, devUrl, getRoot, getZoomLevel, relayout, setErrorHidden,
-//         breakMode (selftest only), files, protocol }
+//         breakMode (selftest only), files, protocol,
+//         store: { read(root), write(root, value | null) } (the remembered tabs, in settings.json) }
 function create(deps) {
 	const files = deps.files || pf;
 	const protocol = deps.protocol || pp;
@@ -74,11 +76,14 @@ function create(deps) {
 			tabs: list.tabs.map(publicTab),
 		};
 	};
-	const report = (tab) => deps.send("browser:state", snapshot(tab ? tab.id : null));
+	const report = (tab) => {
+		deps.send("browser:state", snapshot(tab ? tab.id : null));
+		scheduleSave();
+	};
 
 	function sync(tab) {
 		const wc = wcOf(tab);
-		if (!wc || wc.isDestroyed()) return;
+		if (!wc || wc.isDestroyed() || tab.missing) return; // a file that is gone has no page: it keeps its stored address and title
 		tab.address = wc.getURL() || tab.address;
 		tab.title = wc.getTitle() || "";
 		tab.loading = wc.isLoading();
@@ -232,6 +237,7 @@ function create(deps) {
 	function load(tab, address) {
 		const wc = wcOf(tab);
 		tab.address = address;
+		tab.missing = false;
 		if (wc) wc.loadURL(address).catch(() => {});
 	}
 
@@ -245,19 +251,60 @@ function create(deps) {
 		if (wc && !wc.isDestroyed()) await wc.executeJavaScript("window.__piPickCancel && window.__piPickCancel()", true).catch(() => {});
 	}
 
-	function makeTab(session, address, { activate = true } = {}) {
-		const r = L.add(list, { session, address, title: "", loading: false, canGoBack: false, canGoForward: false, error: null, kind: "page" }, { activate });
+	// `lazy`: a restored tab that is not shown yet: no view and no load until it is first shown (materialize).
+	function makeTab(session, address, { activate = true, lazy = false, title = "", missing = false } = {}) {
+		const r = L.add(list, { session, address, title, loading: false, canGoBack: false, canGoForward: false, error: null, kind: "page" }, { activate });
 		if (!r.ok) return r;
 		if (L.isProjectSession(session)) {
 			const p = protocol.fromAddress(deps.getRoot(), address);
 			r.tab.kind = p == null ? "page" : files.kindOf(p); // known before the first load, so the tools see it at once
+		}
+		if (lazy) {
+			r.tab.lazy = true;
+			if (missing) markMissing(r.tab);
+			return r;
 		}
 		buildView(r.tab);
 		load(r.tab, address);
 		return r;
 	}
 
+	// --- a restored tab ----------------------------------------------------------------------------------------------------------
+	const MISSING = "This file no longer exists";
+	function markMissing(tab) {
+		tab.missing = true;
+		tab.error = { code: 404, desc: MISSING, url: tab.address, missing: true };
+	}
+	// Is the file of a project tab gone now? (Same rules as every request.)
+	function fileGone(tab) {
+		if (!L.isProjectSession(tab.session)) return false;
+		try {
+			const r = files.resolve(deps.getRoot(), new URL(tab.address).pathname, "GET");
+			return !r.ok && r.status === 404;
+		} catch { return false; }
+	}
+	// First time a restored tab is shown: build its view and load it, unless its file is gone (then it keeps the message).
+	function materialize(tab) {
+		if (!tab.lazy) return;
+		tab.lazy = false;
+		buildView(tab);
+		if (fileGone(tab)) markMissing(tab);
+		else {
+			tab.error = null;
+			tab.missing = false;
+			load(tab, tab.address);
+		}
+	}
+	// Reload on a tab whose file was gone: look again.
+	function recheckMissing(tab) {
+		if (fileGone(tab)) return markMissing(tab);
+		tab.error = null;
+		deps.setErrorHidden(false);
+		load(tab, tab.address);
+	}
+
 	function becameActive(tab) {
+		materialize(tab);
 		deps.setErrorHidden(!!tab.error);
 		deps.relayout();
 		if (tab.error) deps.send("browser:error", tab.error);
@@ -343,7 +390,10 @@ function create(deps) {
 		if (!wc) return;
 		if (name === "back" && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
 		if (name === "forward" && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
-		if (name === "reload") wc.reload();
+		if (name === "reload") {
+			if (activeTab().missing) recheckMissing(activeTab());
+			else wc.reload();
+		}
 		if (name === "devtools") wc.toggleDevTools();
 		if (name === "external") {
 			const x = externalTarget();
@@ -426,6 +476,64 @@ function create(deps) {
 		for (const view of views.values()) view.webContents.setZoomLevel(level);
 	}
 
+	// --- remembered tabs (settings.json, per project; src/viewer-tabs-store.js) ----------------------------------------------------
+	// Saved a moment after any change (report), when the project changes and when the app quits (flush). Nothing is saved while a project
+	// switch rebuilds the list, and a list that is just the first-run tab on the dev address stores nothing (and clears an old entry).
+	let saveTimer = null;
+	let held = false;
+	function persist() {
+		clearTimeout(saveTimer);
+		saveTimer = null;
+		const root = deps.getRoot();
+		if (held || !deps.store || !root || !list.tabs.length) return;
+		if (deps.breakMode === "tabs-forget") return; // selftest only: the deliberate break (nothing is remembered)
+		try {
+			deps.store.write(root, S.isDefault(list, deps.devUrl) ? null : S.toStored(list, { root, protocol }));
+		} catch { /* a settings file that cannot be written must not break the Viewer */ }
+	}
+	function scheduleSave() {
+		if (held || !deps.store) return;
+		clearTimeout(saveTimer);
+		saveTimer = setTimeout(persist, 500);
+		if (saveTimer.unref) saveTimer.unref();
+	}
+	// The project is about to change (call BEFORE the root changes): the old project's tabs are saved and closed. A late request from
+	// one of those pages gets 404 (the address handler checks the project).
+	function projectWillChange() {
+		persist();
+		if (!deps.getRoot() || !list.tabs.length) return;
+		cancelPick().catch(() => {});
+		leaveActive().catch(() => {});
+		destroyAll();
+		held = true;
+	}
+	// The project has changed (call AFTER the root changed): its remembered tabs come back in order; only the active one loads now.
+	// Nothing remembered: one tab on the dev address, as on a first run.
+	function projectChanged() {
+		const root = deps.getRoot();
+		let stored = null;
+		try { stored = deps.store && root ? S.fromStored(deps.store.read(root), { root, protocol, files }) : null; } catch { stored = null; }
+		held = true;
+		try {
+			if (stored) {
+				destroyAll();
+				let activeId = null;
+				stored.tabs.forEach((t, i) => {
+					const r = makeTab(t.session, t.address, { lazy: true, title: t.title, missing: t.missing });
+					if (r.ok && i === stored.active) activeId = r.tab.id;
+				});
+				if (activeId) L.activate(list, activeId);
+				else if (list.tabs.length) L.activate(list, list.tabs[0].id);
+				becameActive(activeTab());
+			} else if (!list.tabs.length) {
+				becameActive(makeTab("web", deps.devUrl).tab);
+			}
+		} finally {
+			held = false;
+		}
+		scheduleSave();
+	}
+
 	function init() {
 		destroyAll();
 		const r = makeTab("web", deps.devUrl);
@@ -478,6 +586,9 @@ function create(deps) {
 		activeError: () => (activeTab() ? !!activeTab().error : false),
 		viewOf: (id) => views.get(id),
 		destroyAll,
+		projectWillChange,
+		projectChanged,
+		flush: persist,
 	};
 }
 

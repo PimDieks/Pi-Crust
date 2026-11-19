@@ -12,14 +12,41 @@ const { nativeImage } = require("electron");
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8z8Dwn4EIwESMolGFxCsEAHkDAhFq7qtlAAAAAElFTkSuQmCC", "base64");
 const PDF = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n";
 
-function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl, getWin }) {
+// PI_CRUST_VT_PHASE ("save" or "restore") with PI_CRUST_VT_PROJECT (a project folder that outlives the run) are set by
+// scripts/viewer-tabs-restart.js, which launches the app twice with the same data folder: the step then runs only its restart checks.
+const PHASE = process.env.PI_CRUST_VT_PHASE || "";
+const FIXED_PROJECT = process.env.PI_CRUST_VT_PROJECT || "";
+
+function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl, getWin, userData }) {
 	let server = null;
 	let tmp = null;
 	let curRoot = null;
+	// What opening a project does in the app (main.js openRepo): the old project's tabs are saved and closed, the new one's come back.
+	// The selftest cannot move the app's real project (that would restart Pi), so it replaces the project root the Viewer sees.
+	const open = (root) => {
+		viewerTabs.projectWillChange();
+		setRoot(root);
+		curRoot = root || curRoot;
+		viewerTabs.projectChanged();
+	};
 	const stop = () => {
 		if (server) { try { server.close(); } catch { /* closed */ } server = null; }
-		setRoot(null);
+		if (!PHASE) open(null); // a restart run keeps the project open: the app's own quit saves its tabs under its key
 		if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ } tmp = null; }
+	};
+	const curRootFixed = () => (FIXED_PROJECT ? fs.realpathSync(FIXED_PROJECT) : "");
+	const makeProject = (root, fixed) => {
+		fs.mkdirSync(root, { recursive: true });
+		if (fixed && PHASE === "restore" && root === curRootFixed()) return; // launch 2 finds the project as launch 1 and the runner left it (one file gone)
+		const put = (name, data) => { if (!fixed || !fs.existsSync(path.join(root, name))) fs.writeFileSync(path.join(root, name), data); };
+		put("a.html", "<!doctype html><title>project page</title><p>hello</p>");
+		put("long.html", "<!doctype html><title>A very long page title that goes past twenty-four characters</title><p>long</p>");
+		put("pic.png", PNG);
+		put("b.html", "<!doctype html><title>second page</title><p>second</p>");
+		put("cap.html", CAP);
+		put("pic.svg", "<svg xmlns='http://www.w3.org/2000/svg' width='40' height='30'><rect width='40' height='30' fill='#c33'/></svg>");
+		put("doc.pdf", PDF);
+		put("gone.html", "<!doctype html><title>soon gone</title><p>gone</p>");
 	};
 	// A page that paints its whole background by what its session's localStorage holds under "k": red nothing, green "project", blue "web".
 	const CAP = "<!doctype html><title>cap</title><body style='margin:0'><script>var v=localStorage.getItem('k');var c=v==='project'?'#00c800':v==='web'?'#0000c8':'#c80000';document.documentElement.style.background=c;document.body.style.background=c;document.body.style.height='100vh'</script>";
@@ -28,20 +55,12 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl, getW
 		if (op === "start") {
 			stop();
 			tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pi-crust-vt-")));
-			const root = path.join(tmp, "project");
-			fs.mkdirSync(root, { recursive: true });
-			fs.writeFileSync(path.join(root, "a.html"), "<!doctype html><title>project page</title><p>hello</p>");
-			fs.writeFileSync(path.join(root, "long.html"), "<!doctype html><title>A very long page title that goes past twenty-four characters</title><p>long</p>");
-			fs.writeFileSync(path.join(root, "pic.png"), PNG);
-			fs.writeFileSync(path.join(root, "b.html"), "<!doctype html><title>second page</title><p>second</p>");
-			fs.writeFileSync(path.join(root, "cap.html"), CAP);
-			fs.writeFileSync(path.join(root, "pic.svg"), "<svg xmlns='http://www.w3.org/2000/svg' width='40' height='30'><rect width='40' height='30' fill='#c33'/></svg>");
+			const root = FIXED_PROJECT ? fs.realpathSync(FIXED_PROJECT) : path.join(tmp, "project");
+			makeProject(root, !!FIXED_PROJECT);
 			const bw = 1600, bh = 1200, buf = Buffer.alloc(bw * bh * 4);
 			for (let i = 0; i < bw * bh; i++) { buf[i * 4] = i % bw < bw / 2 ? 40 : 200; buf[i * 4 + 1] = 120; buf[i * 4 + 2] = 200; buf[i * 4 + 3] = 255; }
 			fs.writeFileSync(path.join(root, "big.png"), nativeImage.createFromBitmap(buf, { width: bw, height: bh }).toPNG());
-			fs.writeFileSync(path.join(root, "doc.pdf"), PDF);
-			setRoot(root);
-			curRoot = root;
+			open(root);
 			await new Promise((resolve) => {
 				server = http.createServer((req, res) => {
 					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -52,6 +71,9 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl, getW
 			});
 			const port = server.address().port;
 			return {
+				phase: PHASE,
+				root,
+				tmp,
 				port,
 				devUrl,
 				page: pp.toAddress(root, "a.html"),
@@ -78,7 +100,7 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl, getW
 				tabs: tabs.map((t) => {
 					const v = viewerTabs.viewOf(t.id);
 					const wc = v && v.webContents;
-					return { id: t.id, isProjectSession: !!wc && wc.session === project, isWebSession: !!wc && wc.session === web, visible: !!v && v.getVisible(), isCtxView: !!v && v === cv, debuggerAttached: !!wc && !wc.isDestroyed() && wc.debugger.isAttached() };
+					return { id: t.id, hasView: !!v, wcUrl: wc && !wc.isDestroyed() ? wc.getURL() : "", isProjectSession: !!wc && wc.session === project, isWebSession: !!wc && wc.session === web, visible: !!v && v.getVisible(), isCtxView: !!v && v === cv, debuggerAttached: !!wc && !wc.isDestroyed() && wc.debugger.isAttached() };
 				}),
 			};
 		}
@@ -92,6 +114,30 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl, getW
 		if (op === "notePick") {
 			await require("./browser-tools-main").notePick({ raw: [{ selector: String(arg.selector) }] });
 			return { ok: true };
+		}
+		// Remembered tabs: the stored value of a project (by the same key the app uses), and a project switch (as openRepo does it).
+		if (op === "stored") {
+			try {
+				const all = JSON.parse(fs.readFileSync(path.join(userData(), "settings.json"), "utf8")).viewerTabs || {};
+				const key = require("./figma-main").repoKey(arg.root);
+				return { all, entry: all[key] === undefined ? null : all[key], key, file: fs.readFileSync(path.join(userData(), "settings.json"), "utf8") };
+			} catch (e) { return { all: {}, entry: null, error: String((e && e.message) || e) }; }
+		}
+		if (op === "flush") { viewerTabs.flush(); return { ok: true }; }
+		if (op === "project") {
+			if (arg.make) fs.mkdirSync(arg.root, { recursive: true });
+			const root = fs.realpathSync(arg.root);
+			if (arg.make) makeProject(root, true);
+			open(root);
+			return { ok: true, root, page: pp.toAddress(root, "a.html"), image: pp.toAddress(root, "pic.png"), page2: pp.toAddress(root, "b.html"), pdf: pp.toAddress(root, "doc.pdf"), gone: pp.toAddress(root, "gone.html") };
+		}
+		// A late request from a page of the project that was open: the address handler (project-protocol serve, which every request goes
+		// through) answers 404 for another project's host; and a real request on that project's own session is never served either.
+		if (op === "lateFetch") {
+			const address = pp.toAddress(arg.root, arg.file);
+			const out = { serve: pp.serve({ method: "GET", url: address, headers: new Headers() }, curRoot).status };
+			try { out.fetch = (await session.fromPartition(pp.partitionFor(arg.root)).fetch(address)).status; } catch (e) { out.fetch = "refused: " + String((e && e.message) || e).slice(0, 80); }
+			return out;
 		}
 		if (op === "external") return { last: viewerTabs.lastExternal() };
 		// The window and the active tab's page, as two images (the native view is not part of the window's own capture).

@@ -727,6 +727,27 @@ function applyBrowserBounds() {
 	);
 }
 
+// The remembered tabs, per project, in settings.json "viewerTabs" keyed like "figmaFiles" (src/viewer-tabs-store.js): an unknown key to older
+// versions, which keep it when they write the file and never read it.
+const viewerStore = {
+	read: (root) => {
+		const all = readSettings().viewerTabs;
+		return all && typeof all === "object" ? all[require("./figma-main").repoKey(root)] : undefined;
+	},
+	write: (root, value) => {
+		const all = readSettings().viewerTabs;
+		const next = all && typeof all === "object" && !Array.isArray(all) ? { ...all } : {};
+		const key = require("./figma-main").repoKey(root);
+		if (value == null) {
+			if (!(key in next)) return;
+			delete next[key];
+		} else {
+			if (JSON.stringify(next[key]) === JSON.stringify(value)) return;
+			next[key] = value;
+		}
+		writeSettings({ viewerTabs: next });
+	},
+};
 // The Viewer's tabs (spec: Viewer tabs and project files). The first tab loads the dev address, as the one view always did.
 const viewerTabs = require("./viewer-tabs-main").create({
 	WebContentsView,
@@ -749,6 +770,7 @@ const viewerTabs = require("./viewer-tabs-main").create({
 	},
 	breakMode: SELFTEST ? process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" : "",
 	selftest: SELFTEST,
+	store: viewerStore,
 });
 viewerTabs.register(ipcMain);
 
@@ -883,6 +905,7 @@ function openRepo(p) {
 	const target = p && path.resolve(p);
 	if (!target || !fs.existsSync(target) || !fs.statSync(target).isDirectory()) return { ok: false, error: `Not a folder: ${p}` };
 	if (target === REPO && chats.size) return { ok: true, repo: REPO };
+	viewerTabs.projectWillChange(); // the old project's Viewer tabs are saved and closed while the root is still the old one
 	REPO = target;
 	try {
 		REPO_REAL = fs.realpathSync.native(REPO);
@@ -890,6 +913,7 @@ function openRepo(p) {
 		REPO_REAL = REPO;
 	}
 	ENV = buildEnv();
+	viewerTabs.projectChanged(); // the new project's remembered tabs come back
 	rememberRepo(REPO);
 	for (const [id, t] of terms) {
 		clearInterval(t._procPoll);
@@ -1566,7 +1590,7 @@ app.whenReady().then(() => {
 	app.setName("Pi Crust");
 	// pi-project:// on its own session only (never persist:devbrowser): the handler, the request guard, no permissions, no downloads, no popups.
 	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
-	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, getWin: () => win, devUrl: DEV_URL });
+	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, getWin: () => win, devUrl: DEV_URL, userData: () => app.getPath("userData") });
 	if (SELFTEST) require("./viewer-files-selftest-main").register({ ipcMain, BrowserWindow, session: electronSession, setRoot: (r) => (projectRootOverride = r) });
 	buildMenu();
 	createWindow();
@@ -1575,7 +1599,10 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
 	if (quitting || SELFTEST || IS_WIN) app.quit();
 });
-app.on("before-quit", () => killAllChats());
+app.on("before-quit", () => {
+	viewerTabs.flush(); // the Viewer's tabs of the open project are remembered
+	killAllChats();
+});
 process.on("exit", () => require("./exit-backstop").killAllSync(chats.values())); // a crash must not leave a Pi behind
 
 process.on("uncaughtException", (e) => {

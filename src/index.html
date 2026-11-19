@@ -74,6 +74,10 @@
 						<button class="icon" id="pick-figma" title="Add Figma desktop selection (⌘⇧F)" aria-label="Add Figma desktop selection"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5.5 1.5h2.5v4H5.5a2 2 0 0 1 0-4zM8 1.5h2.5a2 2 0 0 1 0 4H8zM5.5 5.5H8v4H5.5a2 2 0 0 1 0-4zM5.5 9.5H8v2.5a2.5 2.5 0 1 1-2.5-2.5zM8 5.5h2.5a2 2 0 0 1 0 4H8z"/></g></svg></button>
 						<button class="icon" id="scheme-btn" title="Colour scheme: Auto" aria-label="Colour scheme: Auto"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11" /></svg></button>
 						<button class="icon" id="state-btn" title="Force element state (hover, focus, active, disabled)" aria-label="Force element state" aria-expanded="false"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M6 8.5l1.5 1.5L10.5 6.5"/></svg></button>
+						<div id="vt-zoom" class="vt-zoom" role="group" aria-label="Image size" hidden>
+							<button type="button" class="vt-zoom-btn" data-zoom="fit" title="Fit the whole image in the view" aria-pressed="true">Fit</button>
+							<button type="button" class="vt-zoom-btn" data-zoom="actual" title="Real size: one image pixel per pixel" aria-pressed="false">100%</button>
+						</div>
 						<button class="icon" data-action="devtools" title="DevTools" aria-label="DevTools"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M5 7l2 1.5L5 10M8.5 10.5H11"/></svg></button>
 						<button class="icon" data-action="external" title="Open in system browser" aria-label="Open in system browser"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/></svg></button>
 					</header>
@@ -81,10 +85,6 @@
 						<div id="vt-list" role="tablist" aria-label="Pages"></div>
 						<button type="button" class="icon" id="vt-add" aria-label="New page" title="New page (⌘T)"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
 						<span id="vt-limit" class="vt-limit" hidden></span>
-						<div id="vt-zoom" class="vt-zoom" role="group" aria-label="Image size" hidden>
-							<button type="button" class="vt-zoom-btn" data-zoom="fit" title="Fit the whole image in the view" aria-pressed="true">Fit</button>
-							<button type="button" class="vt-zoom-btn" data-zoom="actual" title="Real size: one image pixel per pixel" aria-pressed="false">100%</button>
-						</div>
 						<span id="vt-reason" class="vt-reason" role="status"></span>
 					</div>
 					<div id="state-bar" hidden></div>
@@ -281,6 +281,8 @@
 		<script src="viewer-files-selftest.js"></script>
 		<script src="viewer-tabs-selftest.js"></script>
 		<script src="viewer-tabs-selftest-row.js"></script>
+		<script src="viewer-tabs-selftest-active.js"></script>
+		<script src="viewer-tabs-selftest-store.js"></script>
 		<script src="viewer-tools-selftest.js"></script>
 		<script src="claude-rewind-fork-selftest.js"></script>
 		<script src="claude-approval-selftest.js"></script>
