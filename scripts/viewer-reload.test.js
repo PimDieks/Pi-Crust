@@ -9,7 +9,7 @@ const path = require("node:path");
 const RL = require("../src/viewer-reload");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pi-rl-")));
+const tmp = () => fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "pi-rl-")));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
 // fs.watch has no "ready" event, and on a cold machine a watcher can miss a write made right after it was created. Wait for the folder's
 // watch to be live instead of for time: a probe watcher on the same folder (made after the module's own) must see a write to a file nobody
@@ -297,7 +297,7 @@ test("pageCandidate: a page's own file is watched only when it is a project file
 	let junction = true;
 	try { fs.symlinkSync(outside, path.join(root, "linkdir"), "junction"); } catch { junction = false; }
 	const c = (...segs) => RL.pageCandidate(root, segs);
-	assert.equal(c("docs", "a.html"), path.join(root, "docs", "a.html"));
+	assert.equal(c("docs", "a.html"), path.join(root, "docs", "a.html"), `candidate ${c("docs", "a.html")} vs ${path.join(root, "docs", "a.html")}`);
 	assert.equal(c("docs", "gone.html"), path.join(root, "docs", "gone.html"), "a deleted file is still watched, in its own folder");
 	assert.equal(c("later", "deeper", "new.html"), path.join(root, "later", "deeper", "new.html"), "a folder that is not there yet, under the project");
 	for (const bad of [[], [".git", "x.html"], ["docs", ".x.html"], ["docs", ".."], ["a:b.html"], ["a\\b.html"], ["a\0.html"]]) assert.equal(c(...bad), null, JSON.stringify(bad));

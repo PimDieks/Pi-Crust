@@ -11,7 +11,7 @@ const pf = require("../src/project-files");
 const WIN = process.platform === "win32";
 const tmps = [];
 function sandbox() {
-	const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pf-test-")));
+	const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "pf-test-")));
 	tmps.push(base);
 	const root = path.join(base, "proj");
 	const outside = path.join(base, "outside");
@@ -258,7 +258,7 @@ test("a link inside the root, to a file inside the root, is served as the real f
 	if (why) { t.skip(why); return; }
 	const r = get(root, "/alias.html");
 	assert.equal(r.ok, true);
-	assert.equal(r.file, path.join(root, "index.html"));
+	assert.equal(r.file, path.join(root, "index.html"), `served file ${r.file} vs expected ${path.join(root, "index.html")}`);
 });
 test("a link inside the root to a dot file is refused by its real name", (t) => {
 	const { root } = sandbox();
@@ -286,7 +286,7 @@ test("the project root itself may be reached through a link: the real root is wh
 	if (why) { t.skip(why); return; }
 	const r = get(alias, "/index.html");
 	assert.equal(r.ok, true);
-	assert.equal(r.file, path.join(root, "index.html"));
+	assert.equal(r.file, path.join(root, "index.html"), `served file ${r.file} vs expected ${path.join(root, "index.html")}`);
 });
 test("a dangling link is a 404", (t) => {
 	const { root, base } = sandbox();
@@ -303,7 +303,7 @@ test("SRC against src on this file system", () => {
 	const r = get(root, "/SRC/app.js");
 	if (ci) {
 		assert.equal(r.ok, true, "case-insensitive file system: SRC finds src");
-		assert.equal(r.file, path.join(root, "src", "app.js"), "the answer is the real on-disk name");
+		assert.equal(r.file, path.join(root, "src", "app.js"), `the answer is the real on-disk name: got ${r.file}, expected ${path.join(root, "src", "app.js")}`);
 	} else {
 		assert.equal(r.status, 404, "case-sensitive file system: SRC is not src");
 	}
@@ -571,7 +571,7 @@ test("a hard link is accepted on purpose: package managers make them, and whoeve
 	fs.linkSync(path.join(root, "index.html"), path.join(root, "alias2.html"));
 	const out = get(root, "/linked.txt");
 	assert.equal(out.ok, true, "a hard link to a file outside the project is served: it is indistinguishable from a file of the project");
-	assert.equal(path.dirname(out.file), root);
+	assert.equal(path.dirname(out.file), root, `dirname of ${out.file} vs root ${root}`);
 	assert.equal(out.size, 10);
 	assert.equal(get(root, "/alias2.html").ok, true);
 	const o = pf.open(root, "/linked.txt", "GET");
@@ -580,4 +580,15 @@ test("a hard link is accepted on purpose: package managers make them, and whoeve
 	// ...whereas a symbolic link to the same outside file is not
 	const why = tryLink(path.join(outside, "secret.txt"), path.join(root, "sym.txt"), "file");
 	if (!why) assert.equal(get(root, "/sym.txt").status, 403);
+});
+
+test("a project opened through a short-name (8.3) or linked path is served, and the answer is the real long name", (t) => {
+	const raw = fs.mkdtempSync(path.join(os.tmpdir(), "pf-alias-"));
+	tmps.push(raw);
+	const real = fs.realpathSync.native(raw);
+	if (real === raw) { t.skip("the temp folder has no short-name form on this machine"); return; }
+	fs.writeFileSync(path.join(raw, "index.html"), "<p>hi</p>");
+	const r = get(raw, "/index.html");
+	assert.equal(r.ok, true, `root ${raw} (real ${real}) must be accepted: ${JSON.stringify(r)}`);
+	assert.equal(r.file, path.join(real, "index.html"), `served ${r.file} vs expected ${path.join(real, "index.html")}`);
 });
