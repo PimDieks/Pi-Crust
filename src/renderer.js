@@ -1388,11 +1388,21 @@ async function runSelftestTour() {
 		for (const step of selftestSteps) {
 			if (!selftestWants(step.stepName)) continue;
 			$("#toasts")?.replaceChildren(); // a toast one step caused on purpose must not show in the next step's screenshots
+			// A step that prints no "SELFTEST ..." line at all checked nothing visible: that fails the run (the exit code follows the output).
+			let printed = 0;
+			const realError = console.error;
+			console.error = (...a) => {
+				if (/^SELFTEST (?!screenshot|only)/.test(String(a[0]))) printed++;
+				realError.apply(console, a);
+			};
 			try {
 				await step({ snap, wait });
 			} catch (e) {
 				console.error(`selftest step ${step.stepName} failed`, e);
+			} finally {
+				console.error = realError;
 			}
+			if (!printed && step.stepName !== "char") console.error(`SELFTEST ${step.stepName}: no SELFTEST result line -> MISMATCH`);
 		}
 	} catch (e) {
 		console.error("tour failed", e);

@@ -239,7 +239,15 @@
 			check(chip.textContent === "Pi" && vis(chip), `Pi chip reads "${chip.textContent}"`);
 			check(!document.querySelector(".chat-tab .ct-agent"), "a Pi tab has an agent mark");
 			check([...modeSel.options].filter((o) => o.value).map((o) => o.value).join() === "plan,ask-edits,ask-commands,trusted", "Pi mode list is not the four modes");
-			check(!document.querySelector("[aria-disabled=true]"), "a Pi chat has a disabled control");
+			// Scoped to the chat pane: the Viewer's tools are disabled with a reason while its tab has not loaded (the default dev address refuses
+			// in a test, and when that arrives varies), which is not about a Pi chat. The Viewer's tools get their own check below.
+			check(!$("#chat-pane").querySelector("[aria-disabled=true]"), "a Pi chat has a disabled control");
+			for (const [id, feature] of [["pick-element", "pick"], ["tweak-btn", "tweak"], ["scheme-btn", "scheme"], ["state-btn", "state"], ["annotate-btn", "annotate"]]) {
+				const n = document.getElementById(id);
+				const off = n.getAttribute("aria-disabled") === "true";
+				check(off === !window.crustViewerKind.can(feature), `Viewer tool ${id} is ${off ? "disabled" : "enabled"} against the tab's state`);
+				check(!off || (n.title && n.title === window.crustViewerKind.reason(feature)), `Viewer tool ${id} is disabled without its reason`);
+			}
 			check(agentLabel(piChat) === "Pi" && input.placeholder === "Ask Pi…  (Enter to send, Shift+Enter for a new line)" && $("#ask").getAttribute("aria-label") === "Pi asks", "a Pi chat's texts changed");
 			check(piModeText === "Not enforced", `Pi mode placeholder "${piModeText}"`);
 			check(vis(line) === false, "the reason line shows in a Pi chat");

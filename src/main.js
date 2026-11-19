@@ -1383,11 +1383,22 @@ function createWindow() {
 const SELFTEST_DIR = path.join(__dirname, "..", "out");
 const SELFTEST_RUN = Date.now();
 
+// Selftest exit code: 0 only when no output line said MISMATCH, no step threw, none printed no result line and the run did not time out.
+// Otherwise 1, after a line "SELFTEST RESULT: FAILED (n)". A crash during exit after "SELFTEST RESULT: OK" is a different, native exit code.
+const selftestFailures = [];
+function selftestExit() {
+	console.log(selftestFailures.length ? `SELFTEST RESULT: FAILED (${selftestFailures.length})` : "SELFTEST RESULT: OK");
+	if (selftestFailures.length) app.once("quit", () => process.exit(1)); // the quit handlers (before-quit cleanup) run first
+	app.quit();
+}
 async function runSelftest() {
 	fs.mkdirSync(SELFTEST_DIR, { recursive: true });
 	win.webContents.on("console-message", (e) => {
 		const level = e.level ?? e.params?.level;
 		if (level === "error" || level === "warning" || level >= 2) console.log(`[ui ${level}] ${e.message ?? e.params?.message}`);
+		// The exit code follows the output: any MISMATCH line, a failed step or a missing result line makes the run exit 1 (see selftestExit).
+		const text = String(e.message ?? e.params?.message ?? "");
+		if (/MISMATCH|selftest step .* failed|tour failed|no SELFTEST result line/.test(text)) selftestFailures.push(text.slice(0, 160));
 	});
 	const prompt = process.env.PI_CRUST_SELFTEST_PROMPT || "Reply with one short sentence: which folder are you working in?";
 	await new Promise((r) => setTimeout(r, 4000));
@@ -1395,12 +1406,13 @@ async function runSelftest() {
 	ipcMain.once("selftest:done", async () => {
 		await new Promise((r) => setTimeout(r, 1000));
 		await capture("final");
-		app.quit();
+		selftestExit();
 	});
 	setTimeout(async () => {
 		console.log("SELFTEST timeout");
 		await capture("timeout");
-		app.quit();
+		selftestFailures.push("timeout");
+		selftestExit();
 	}, Number(process.env.PI_CRUST_SELFTEST_TIMEOUT || 240000));
 }
 
