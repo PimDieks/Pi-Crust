@@ -103,6 +103,28 @@ function register(ctx) {
 		return entry;
 	}
 
+	// Shows a never-drawn hidden native view for a moment with only its bottom-right pixel inside the window (a view wholly outside it is never drawn), so Chromium produces a frame, captures it,
+	// then restores the bounds and hides it again. The view keeps its size, so the capture has the real size.
+	async function captureViaOffscreenDraw(view, wc, rect) {
+		const b = view.getBounds();
+		let img = nativeImage.createEmpty();
+		try {
+			view.setBounds({ x: 1 - b.width, y: 1 - b.height, width: b.width, height: b.height });
+			view.setVisible(true);
+			for (let attempt = 0; attempt < 8 && img.isEmpty(); attempt++) {
+				await new Promise((r) => setTimeout(r, 150));
+				try {
+					wc.invalidate();
+					img = await wc.capturePage(rect && rect.width > 0 ? rect : undefined);
+				} catch {}
+			}
+		} finally {
+			view.setVisible(false);
+			view.setBounds(b);
+		}
+		return img;
+	}
+
 	// --- live capture of the dev browser -------------------------------------------------------
 	// skipEmpty (turn shots): nothing is stored for a page that failed to load or is blank. unlessSameAs: the id of an
 	// earlier shot; when the page looks the same nothing is stored ({ ok: false, same: true }). Explicit captures (design)
@@ -151,7 +173,9 @@ function register(ctx) {
 				await new Promise((r) => setTimeout(r, 300));
 			}
 		}
-		// A native view Chromium has never drawn (its tab was never shown) gives an empty image even with stayHidden.
+		// A native view Chromium has never drawn (its tab was never shown) gives an empty image even with stayHidden: draw it once, moved
+		// out of the window (1 px left of it, see captureViaOffscreenDraw), then put it back hidden.
+		if (img.isEmpty() && !view.getVisible()) img = await captureViaOffscreenDraw(view, wc, rect);
 		if (img.isEmpty()) return { ok: false, error: view.getVisible() ? "Empty capture" : "The page has not been drawn yet: open the Viewer tab once" };
 		if (skipEmpty && isBlank(img)) return { ok: false, blank: true, error: "The page is blank" };
 		if (unlessSameAs) {

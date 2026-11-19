@@ -154,6 +154,12 @@
 		// The dev browser view while its tab is hidden (the Viewer tab is not the active one).
 		// Chromium draws a native view only once it has been shown: a Viewer view that was never on screen has no frame to capture (empty
 		// image, see snap-main.js captureLive). So show the Viewer first, as a person would have, then hide it and capture.
+		// First: the Viewer has never been shown (in a run of this step alone), the case of a person who never opened the Viewer tab.
+		await crust.snap.selftestLoad(page("#36c", "Live"));
+		const stNever = await crust.selftest.bounds();
+		const never = await crust.snap.live({});
+		const stAfter = await crust.selftest.bounds();
+		console.error(`SELFTEST snap:live never shown: view visible=${stNever.visible}->${stAfter.visible} ${never.ok ? `${never.entry.w}x${never.entry.h}` : never.error} -> ${!stNever.visible && !stAfter.visible && never.ok && never.entry.w > 100 ? "OK" : "MISMATCH"}`);
 		switchTab("browser");
 		await wait(800);
 		await crust.snap.selftestLoad(page("#36c", "Live"));
