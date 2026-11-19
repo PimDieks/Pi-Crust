@@ -45,11 +45,26 @@ window.viewerTabsStoreChecks = async function viewerTabsStoreChecks({ S, check, 
 	};
 	const mk = async (a) => (await B.createTab(a)).tabId;
 	let pr;
-	const shot = async (name) => {
+	// Colour maths (WCAG) for the contrast check: computed colours come as rgb(), rgba() or color(srgb ...).
+	const chan = (str) => {
+		const n = (String(str).match(/-?\d*\.?\d+(?:e-?\d+)?/g) || []).map(Number);
+		const unit = /^color\(/.test(String(str)) ? 255 : 1;
+		return [n[0] * unit, n[1] * unit, n[2] * unit];
+	};
+	const lum = (c) => {
+		const f = (v) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+		return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+	};
+	const ratio = (fg, bg) => {
+		const [a, b] = [lum(chan(fg)), lum(chan(bg))].sort((x, y) => y - x);
+		return (a + 0.05) / (b + 0.05);
+	};
+	const shot = async (name, suffix = "v2", each) => {
 		for (const th of ["light", "dark"]) {
 			setTheme(th);
 			await sleep(700);
-			await crust.selftest.capture(`${name}-${th}-v2`);
+			if (each) each(th);
+			await crust.selftest.capture(`${name}-${th}-${suffix}`);
 		}
 		setTheme("light");
 	};
@@ -129,7 +144,12 @@ window.viewerTabsStoreChecks = async function viewerTabsStoreChecks({ S, check, 
 		const addrEl = document.querySelector("#browser-error .unloaded-address");
 		const hostEl = addrEl.querySelector(".host");
 		check("unloaded notice: the stored address in full, the host on its own in full strength and the rest dimmer, wrapping, and a Load button", addrEl.textContent === "https://planted.invalid/login" && !!hostEl && hostEl.textContent === "planted.invalid" && getComputedStyle(addrEl).overflowWrap === "anywhere" && Number(getComputedStyle(addrEl.querySelector(".rest")).opacity) < 1 && Number(getComputedStyle(hostEl).opacity) === 1 && /Load/.test($("#browser-error button").textContent), addrEl.textContent);
-		await shot("vt-unloaded");
+		await shot("vt-unloaded", "v3", (th) => {
+			const lb = $("#browser-error button");
+			const cs = getComputedStyle(lb);
+			const r = ratio(cs.color, cs.backgroundColor);
+			check("unloaded notice: the Load button is the app's filled button (not the plain grey one), 4.5:1 or better, not faded, in " + th, lb.classList.contains("btn") && cs.backgroundColor !== "rgba(0, 0, 0, 0)" && r >= 4.5 && Number(cs.opacity) === 1 && !lb.disabled, `${r.toFixed(2)}:1 ${cs.color} on ${cs.backgroundColor}`);
+		});
 		// Showing another tab loads it then.
 		const pdfTab = l.tabs[4];
 		await B.activateTab(pdfTab.id);

@@ -95,6 +95,11 @@ test("a file that is deleted and comes back both call; the watcher survives", as
 	rm(dir);
 });
 
+const until = async (fn, ms = 6000) => {
+	for (let t = 0; t < ms && !fn(); t += 25) await sleep(25);
+	return fn();
+};
+
 test("a folder that is deleted and comes back is noticed (retry every second)", async () => {
 	const dir = tmp();
 	const sub = path.join(dir, "sub");
@@ -103,15 +108,115 @@ test("a folder that is deleted and comes back is noticed (retry every second)", 
 	fs.writeFileSync(f, "0");
 	const { w, calls } = make();
 	w.add("t1", f);
+	await ready(sub);
 	fs.rmSync(sub, { recursive: true });
 	await sleep(400);
 	fs.mkdirSync(sub);
 	fs.writeFileSync(f, "back");
-	await sleep(2600);
-	assert.ok(calls.length >= 1);
+	assert.ok(await until(() => calls.length >= 1), "the file that came back with its folder is reported");
 	assert.equal(w.count(), 1, "watching again");
 	w.dropAll();
 	assert.equal(w.count(), 0);
+	rm(dir);
+});
+
+// The defect: on Windows the watcher of a deleted folder neither errors nor closes, so nothing was retried and later saves reached nobody.
+test("after a folder is deleted and made again, the next change in it still reloads once", async () => {
+	const dir = tmp();
+	const sub = path.join(dir, "dist");
+	fs.mkdirSync(sub);
+	const f = path.join(sub, "a.html");
+	fs.writeFileSync(f, "0");
+	const { w, calls } = make();
+	w.add("t1", f);
+	await ready(sub);
+	for (let round = 1; round <= 2; round++) {
+		fs.rmSync(sub, { recursive: true });
+		fs.mkdirSync(sub);
+		fs.writeFileSync(f, "built " + round);
+		assert.ok(await until(() => calls.length >= 1), "round " + round + ": the rebuilt file is reported");
+		await sleep(400);
+		await ready(sub);
+		calls.length = 0;
+		fs.writeFileSync(f, "edited " + round);
+		await sleep(600);
+		assert.equal(calls.length, 1, "round " + round + ": one reload follows the next change");
+		assert.equal(w.count(), 1, "one watcher");
+	}
+	w.dropAll();
+	rm(dir);
+});
+
+test("a folder that is renamed away and back keeps working", async () => {
+	const dir = tmp();
+	const sub = path.join(dir, "sub");
+	const away = path.join(dir, "away");
+	fs.mkdirSync(sub);
+	const f = path.join(sub, "a.html");
+	fs.writeFileSync(f, "0");
+	const { w, calls } = make();
+	w.add("t1", f);
+	await ready(sub);
+	fs.renameSync(sub, away);
+	await sleep(1500);
+	fs.renameSync(away, sub);
+	await sleep(1500);
+	assert.equal(w.count(), 1);
+	await ready(sub);
+	calls.length = 0;
+	fs.writeFileSync(f, "changed");
+	await sleep(600);
+	assert.equal(calls.length, 1, "one reload after the folder came back");
+	w.dropAll();
+	rm(dir);
+});
+
+test("a folder replaced by a link that leads elsewhere is not followed", async () => {
+	const dir = tmp();
+	const sub = path.join(dir, "sub");
+	const outside = path.join(dir, "outside");
+	fs.mkdirSync(sub);
+	fs.mkdirSync(outside);
+	const f = path.join(sub, "a.html");
+	fs.writeFileSync(f, "0");
+	fs.writeFileSync(path.join(outside, "a.html"), "secret");
+	const { w, calls } = make();
+	w.add("t1", f);
+	await ready(sub);
+	fs.rmSync(sub, { recursive: true });
+	try { fs.symlinkSync(outside, sub, "junction"); } catch { w.dropAll(); rm(dir); return; } // no links here: nothing to check
+	await sleep(2500);
+	assert.equal(w.count(), 0, "no watcher on the link's target");
+	calls.length = 0;
+	fs.writeFileSync(path.join(outside, "a.html"), "changed outside");
+	await sleep(600);
+	assert.equal(calls.length, 0, "a change outside reaches nobody");
+	w.dropAll();
+	rm(dir);
+});
+
+test("no watcher is leaked across many delete and recreate rounds", async () => {
+	const dir = tmp();
+	const sub = path.join(dir, "sub");
+	fs.mkdirSync(sub);
+	const f = path.join(sub, "a.html");
+	fs.writeFileSync(f, "0");
+	const { w } = make();
+	w.add("t1", f);
+	w.add("t2", f);
+	for (let i = 0; i < 6; i++) {
+		fs.rmSync(sub, { recursive: true });
+		fs.mkdirSync(sub);
+		fs.writeFileSync(f, "r" + i);
+		assert.ok(await until(() => w.count() === 1 && fs.existsSync(f)), "round " + i);
+		await sleep(1100); // let the check of the folder's identity run between rounds
+		assert.equal(w.count(), 1, "round " + i + ": exactly one watcher for the folder");
+	}
+	w.drop("t1");
+	assert.equal(w.count(), 1, "t2 still uses it");
+	w.drop("t2");
+	assert.equal(w.count(), 0, "all closed");
+	w.dropAll();
 	rm(dir);
 });
 

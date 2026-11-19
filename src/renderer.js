@@ -317,7 +317,7 @@ function showBrowserError(err) {
 	}
 	if (err.unloaded) {
 		// A remembered web address (viewer-tabs-main.js markUnloaded): nothing was loaded; it loads only when the person says so.
-		const btn = el("button", "", "Load");
+		const btn = el("button", "btn", "Load"); // the app's filled primary button: clearly clickable in both themes
 		btn.type = "button";
 		btn.addEventListener("click", () => crust.browser.loadTab(shownTabId));
 		// The address wraps (it can be long) and shows the host clearly: the host in the normal text colour, the rest dimmer.

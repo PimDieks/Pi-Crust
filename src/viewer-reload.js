@@ -15,7 +15,9 @@
 // Pause: `debounceMs` (250) after the LAST change of a tab, per tab: many quick saves, or a build writing for a while, give one call.
 //
 // A folder that is gone (deleted, renamed) or a watcher that fails is kept as "pending" and tried again every second, so a file that
-// comes back in a folder that came back is noticed (and a tab whose file was deleted can load again).
+// comes back in a folder that came back is noticed (and a tab whose file was deleted can load again). On Windows a watcher of a deleted
+// folder does not fail: it stays open on the dead folder, so every second the folder's identity is compared with the one it was opened on.
+// A folder that is now reached through a link is never watched again.
 const nodeFs = require("node:fs");
 const nodePath = require("node:path");
 
@@ -83,11 +85,47 @@ function create(opts = {}) {
 		for (const id of hit) schedule(id);
 	}
 
+	// The identity of a folder on disk (null: not there). A folder that is deleted and made again has another one, so does a link put in
+	// its place; a folder that is only renamed away and back has the same.
+	const idOf = (dir) => {
+		try {
+			const st = fs.statSync(dir, { bigint: true });
+			return st.isDirectory() ? `${st.dev}:${st.ino}` : null;
+		} catch {
+			return null;
+		}
+	};
+	// The folder is reached by its own real path (no link on the way): the paths given to add are real ones, so a folder that now resolves
+	// somewhere else was replaced by a link, and a link is never followed (it could lead out of the project).
+	const isReal = (dir) => {
+		try {
+			return keyOf((fs.realpathSync.native || fs.realpathSync)(dir)) === keyOf(dir);
+		} catch {
+			return false;
+		}
+	};
+
+	function closeWatcher(d) {
+		const w = d.watcher;
+		if (!w) return;
+		d.watcher = null;
+		open.delete(w);
+		try { w.close(); } catch { /* closed */ }
+	}
+
 	function attach(d) {
 		if (d.watcher) return true;
+		const id = idOf(d.dir);
+		if (!id || !isReal(d.dir)) return false;
 		let w;
 		try {
-			w = fs.watch(d.dir, { persistent: false }, (_type, name) => event(d, name == null ? null : keyOf(String(name))));
+			w = fs.watch(d.dir, { persistent: false }, (_type, name) => {
+				// On Windows a folder that is deleted keeps its old handle: no "error", but an endless stream of events that carry the
+				// folder's own full path as the name. Such a name, or a changed identity, means this watcher is dead.
+				const n = name == null ? null : String(name);
+				if (n != null && (path.isAbsolute(n) || /[\\/]/.test(n))) return lost();
+				event(d, n == null ? null : keyOf(n));
+			});
 		} catch {
 			return false;
 		}
@@ -101,25 +139,30 @@ function create(opts = {}) {
 		w.on("error", lost); // the folder went away: tried again below
 		w.on("close", lost);
 		d.watcher = w;
+		d.id = id;
 		open.add(w);
+		// The folder may have been replaced between the check and the watch: look once more, a watcher on the old one is no use.
+		if (idOf(d.dir) !== id) {
+			lost();
+			return false;
+		}
 		return true;
 	}
 
-	// Folders that could not be watched (or lost their watcher): look again every second, and say "changed" for the tabs that use
-	// them when the watcher is back (the file may have returned with its folder).
+	// Every second while any folder is watched or waiting: a watcher whose folder is gone, or is another folder now (deleted and made
+	// again, replaced by a link), is closed and made again; a folder that could not be watched is tried again. When a watcher is back
+	// the tabs that use the folder are told it changed (the file may have returned with its folder).
 	function pending() {
 		if (retryTimer) return;
 		retryTimer = setInterval(() => {
-			let left = false;
+			let any = false;
 			for (const d of dirs.values()) {
+				any = true;
+				if (d.watcher && idOf(d.dir) !== d.id) closeWatcher(d);
 				if (d.watcher) continue;
-				if (attach(d)) {
-					event(d, null);
-				} else {
-					left = true;
-				}
+				if (attach(d)) event(d, null);
 			}
-			if (!left) {
+			if (!any) {
 				clearInterval(retryTimer);
 				retryTimer = null;
 			}
@@ -167,7 +210,8 @@ function create(opts = {}) {
 		ids.add(id);
 		d.names.set(key, path.basename(real));
 		if (!d.sigs.has(key)) d.sigs.set(key, sigOf(d, key)); // taken now, before the watcher can say anything
-		if (!attach(d)) pending();
+		attach(d);
+		pending();
 		return true;
 	}
 
