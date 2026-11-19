@@ -32,7 +32,7 @@ function busyByShell(procs, shells) {
 				seen.add(id);
 				const low = n.toLowerCase();
 				if (IGNORED.has(low)) continue;
-				if (own && low === own) walk(id); // wrapper copy of the shell: look through it
+				if (own === "bash.exe" && low === own) walk(id); // Git Bash's wrapper copy of itself: look through it (idle subtree = idle)
 				else found = n.replace(/\.exe$/i, "");
 			}
 		};
