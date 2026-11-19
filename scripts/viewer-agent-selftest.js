@@ -38,8 +38,8 @@ const SCRIPT = [
 	call("doc.pdf"),
 	{ type: "result", subtype: "success", is_error: false, result: "ok", total_cost_usd: 0, session_id: "s" },
 ];
-// [tool, outcome, asked]: the first three go through the hook's "ask" and canUseTool, which allows without a question; the network path is denied by the hook.
-const WANT = [[FULL, "allow", true], [FULL, "allow", true], [FULL, "allow", true], [FULL, "deny", false], [FULL, "allow", true]];
+// [tool, outcome, asked]: the first two go through the hook's "ask" and canUseTool, which allows without a question; the file outside the project and the network path are denied by the hook.
+const WANT = [[FULL, "allow", true], [FULL, "allow", true], [FULL, "deny", false], [FULL, "deny", false], [FULL, "allow", true]]; // the file outside the project and the network path are refused by the gate itself
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8z8Dwn4EIwESMolGFxCsEAHkDAhFq7qtlAAAAAElFTkSuQmCC", "base64");
 const page = (title) => `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font:20px sans-serif;margin:24px"><h1>${title}</h1></body>`;

@@ -138,6 +138,7 @@ contextBridge.exposeInMainWorld("crust", {
 		createTab: (address) => ipcRenderer.invoke("browser:tabCreate", address),
 		activateTab: (id) => ipcRenderer.invoke("browser:tabActivate", id),
 		closeTab: (id) => ipcRenderer.invoke("browser:tabClose", id),
+		loadTab: (id) => ipcRenderer.invoke("browser:tabLoad", id), // the Load button of a remembered web address that was not loaded -> { ok } | { ok: false }
 		setTheme: (setting, bg) => ipcRenderer.invoke("browser:theme", setting, bg),
 		pick: (opts) => ipcRenderer.invoke("browser:pick", opts),
 		insertCss: (css) => ipcRenderer.invoke("browser:insertCss", css),

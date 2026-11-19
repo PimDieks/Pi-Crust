@@ -143,7 +143,7 @@ function actions() {
 		a("Pick element in browser", "⌘⇧C", () => pickElement()),
 		a("Pick Figma desktop selection", "⌘⇧F", () => pickFigma()),
 		a("Viewer: new page", "⌘T", () => (switchTab("browser"), window.crustViewerRow?.add())),
-		a("Viewer: close page", "⌘W", () => (switchTab("browser"), window.crustViewerRow?.close(window.crustViewerRow.state().activeId))),
+		a("Viewer: close page", isMac ? "⌥⌘W" : "⌘W", () => (switchTab("browser"), window.crustViewerRow?.close(window.crustViewerRow.state().activeId))),
 		a("Viewer: previous page", "⌥⌘←", () => (switchTab("browser"), window.crustViewerRow?.step(-1))),
 		a("Viewer: next page", "⌥⌘→", () => (switchTab("browser"), window.crustViewerRow?.step(1))),
 		a("Viewer: reload", "", () => crust.browser.action("reload")),

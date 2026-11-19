@@ -90,7 +90,9 @@ window.viewerTabsStoreChecks = async function viewerTabsStoreChecks({ S, check, 
 		await sleep(800); // the restored list is rebuilt by the project opening; give the first (active) page time to load
 		const l = await list();
 		const places = l.tabs.map((t) => (t.session.startsWith("project:") ? pathOf(t.address) : t.address));
-		check("restore: the six stored tabs are back, in the stored order (dev address, web page, a.html, pic.png, doc.pdf, gone.html)", l.tabs.length === 6 && places[0].replace(/\/$/, "") === S.devUrl.replace(/\/$/, "") && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(places[1]) && JSON.stringify(places.slice(2)) === JSON.stringify(["a.html", "pic.png", "doc.pdf", "gone.html"]), JSON.stringify(places));
+		check("restore: the six stored tabs are back, in the stored order (dev address, web page, a.html, pic.png, doc.pdf, gone.html), then the planted address", l.tabs.length === 7 && places[0].replace(/\/$/, "") === S.devUrl.replace(/\/$/, "") && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(places[1]) && JSON.stringify(places.slice(2, 6)) === JSON.stringify(["a.html", "pic.png", "doc.pdf", "gone.html"]) && places[6] === "https://planted.invalid/login", JSON.stringify(places));
+		const planted = l.tabs[6];
+		check("restore: a planted web address (not local) is an unloaded tab with its address and no page; the one with a password is gone", !!planted && planted.error && planted.error.unloaded === true && planted.error.url === "https://planted.invalid/login" && !l.tabs.some((t) => /secret|user:/.test(t.address)), JSON.stringify(planted));
 		const act = byId(l, l.activeId);
 		const im = l.tabs[3];
 		check("restore: the active tab is the one that was active (the image)", !!act && act.id === im.id && pathOf(act.address) === "pic.png" && act.kind === "image", JSON.stringify(act));
@@ -102,10 +104,10 @@ window.viewerTabsStoreChecks = async function viewerTabsStoreChecks({ S, check, 
 		check("lazy: only the active tab has a view and has loaded; the others load when first shown", withView.length === 1 && withView[0] === im.id && /pic\.png$/.test(pr.find((t) => t.id === im.id).wcUrl) && pr.filter((t) => t.id !== im.id).every((t) => !t.hasView && t.wcUrl === ""), JSON.stringify(pr.map((t) => [t.hasView, t.wcUrl])));
 		// Tampered entries are gone.
 		const bad = l.tabs.filter((t) => /^file:|^javascript:|\.\.|^chrome|^data:/i.test(t.address) || (t.session.startsWith("project:") && !t.address.startsWith(S.page.replace(/\/a\.html$/, "/"))));
-		check("tampered: a file: address, another project's address, a path with .., a dot folder, javascript:, a type the Viewer does not show and entries without an address are all dropped", bad.length === 0 && l.tabs.length === 6, JSON.stringify(bad.map((t) => t.address)));
-		await until(async () => { const e = await storedOf(S.root); return e && e.tabs.length === 6; }, 4000);
+		check("tampered: a file: address, another project's address, a path with .., a dot folder, javascript:, a type the Viewer does not show and entries without an address are all dropped", bad.length === 0 && l.tabs.length === 7, JSON.stringify(bad.map((t) => t.address)));
+		await until(async () => { const e = await storedOf(S.root); return e && e.tabs.length === 7; }, 4000);
 		const e = await storedOf(S.root);
-		check("tampered: and what is stored afterwards is clean again (the same six, the same active tab)", shapeOk(e) && e.tabs.length === 6 && e.active === 3 && e.tabs.every((x) => !("address" in x) || /^https?:/.test(x.address)), JSON.stringify(e));
+		check("tampered: and what is stored afterwards is clean again (the same six and the planted address, the same active tab)", shapeOk(e) && e.tabs.length === 7 && e.active === 3 && e.tabs.every((x) => !("address" in x) || /^https?:/.test(x.address)), JSON.stringify(e));
 		await shot("vt-restored");
 		// The file that is gone.
 		const gone = l.tabs[5];

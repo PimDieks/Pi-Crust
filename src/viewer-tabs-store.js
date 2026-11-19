@@ -11,8 +11,11 @@
 //
 // A stored entry is data, never trusted: every address goes through the same checks as one typed by hand (http, https, or a file of
 // THIS project that project-files accepts and the Viewer shows); anything else is dropped. A file that no longer exists is not dropped:
-// it comes back with `missing: true`.
+// it comes back with `missing: true`. A web address is not loaded on trust either: a planted entry must not make the project open a site.
+// A local address (localhost, 127.0.0.1, [::1]) loads as before; any other web address comes back with `unloaded: true` (the tab shows its
+// address and a Load button, and loads only on that click); an address with a user name or a password is dropped.
 const L = require("./viewer-tabs-list");
+const { LOCAL_HOSTS } = require("./viewer-agent-target");
 
 const TITLE_MAX = 200;
 const ADDRESS_MAX = 2048;
@@ -51,7 +54,10 @@ function isDefault(list, devUrl) {
 function checkAddress(address, { root, protocol, files }) {
 	let u;
 	try { u = new URL(String(address)); } catch { return null; }
-	if (u.protocol === "http:" || u.protocol === "https:") return { session: "web", address: u.href, kind: "page", missing: false };
+	if (u.protocol === "http:" || u.protocol === "https:") {
+		if (u.username || u.password) return null;
+		return { session: "web", address: u.href, kind: "page", missing: false, unloaded: !LOCAL_HOSTS.has(u.hostname) };
+	}
 	if (u.protocol !== protocol.SCHEME + ":") return null; // file:, javascript:, data:, anything else
 	const p = protocol.fromAddress(root, u.href); // another project's address gives null
 	if (p == null) return null;
@@ -59,7 +65,7 @@ function checkAddress(address, { root, protocol, files }) {
 	if (kind === "other") return null;
 	const r = files.resolve(root, u.pathname, "GET");
 	if (!r.ok && r.status !== 404) return null; // refused by the path rules (a dot, "..", a link out of the project...): dropped
-	return { session: L.sessionOf(u.href), address: u.href, kind, missing: !r.ok };
+	return { session: L.sessionOf(u.href), address: u.href, kind, missing: !r.ok, unloaded: false };
 }
 
 // The stored value of one project -> checked tabs and the index of the active one, or null when there is nothing usable.

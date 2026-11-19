@@ -315,6 +315,15 @@ function showBrowserError(err) {
 		box.hidden = false;
 		return;
 	}
+	if (err.unloaded) {
+		// A remembered web address (viewer-tabs-main.js markUnloaded): nothing was loaded; it loads only when the person says so.
+		const btn = el("button", "", "Load");
+		btn.type = "button";
+		btn.addEventListener("click", () => crust.browser.loadTab(shownTabId));
+		box.replaceChildren(el("strong", "", "This page is not loaded"), el("div", "", err.url), btn);
+		box.hidden = false;
+		return;
+	}
 	box.replaceChildren(
 		el("strong", "", "Can't load the page"),
 		el("div", "", `${err.desc} (${err.code})`),
@@ -1005,7 +1014,7 @@ function updateToolGroup(node) {
 function toolCard(id, name, args) {
 	let t = tools.get(id);
 	if (!t) {
-		const d = el("details", "tool running");
+		const d = el("details", window.viewerAgent?.isTool(name) ? "tool tshow running" : "tool running");
 		d._toolName = name;
 		const s = el("summary");
 		const nameEl = el("span", "tname", TOOL_LABEL[name] || name.replace(/^mcp__/, "").replace(/__/g, " › "));
@@ -1301,7 +1310,8 @@ function handleRecord(r) {
 			const summary =
 				r.toolName === "subagent" && r.result?.details?.results ? renderSubagents(t, r.result.details, true) : setToolOutput(t, r.result, r.isError);
 			if (r.toolName === "edit" || r.toolName === "write") refreshChangesSoon();
-			t.meta.textContent = summary;
+			t.meta.textContent = (window.viewerAgent?.isTool(r.toolName) && window.viewerAgent.line(textOf(r.result?.content), !!r.isError)) || summary; // the show_in_viewer card says what happened
+			t.meta.title = t.meta.textContent;
 			const ms = r.durationMs ?? (t.started ? Date.now() - t.started : undefined);
 			stopClock(t.clock, ms >= 100 ? Duration.formatDuration(ms, { precise: true }) : "");
 			if (ms != null) t.clock.title = `Took ${Duration.formatDuration(ms, { precise: true })}`;

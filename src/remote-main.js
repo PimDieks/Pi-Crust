@@ -37,6 +37,9 @@ function register(ctx) {
 	// file comes through this one function, so records, status, key state and cost of such a chat never reach the hub, a phone or a notification.
 	const openChats = () => ctx.openChats().filter((c) => !c.agent || c.agent === "pi");
 
+	// The ports of the Remote server (the configured one, and the one it is really bound to). The Viewer's agent tool refuses a localhost address
+	// on them: they are the app's own pages, not the person's project (viewer-agent-logic.js remotePorts).
+	ctx.remotePorts = () => [DEFAULTS.port];
 	// --- Selftest: Remote is never on; the panel just learns that it is unavailable. -------------
 	if (ctx.selftest) {
 		const off = () => ({ enabled: false, disabled: "selftest" });
@@ -97,6 +100,7 @@ function register(ctx) {
 	}
 
 	const cfg = readConfig();
+	ctx.remotePorts = () => [cfg.port, boundPort].filter((p) => Number.isInteger(p));
 	if (!cfg.vapid?.publicKey || !cfg.vapid?.privateJwk) {
 		cfg.vapid = generateVapidKeys();
 		writeConfig();

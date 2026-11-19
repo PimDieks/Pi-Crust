@@ -14,11 +14,11 @@ const pp = require("./project-protocol");
 
 const R = AL.R;
 
-// deps: { getRoot, viewerTabs, chatInfo(chatId) -> { cwd: string | null } | null, send, files, protocol, breakMode (selftest only), selftest, platform }
+// deps: { getRoot, remotePorts() -> [port] (the app's own Remote server), viewerTabs, chatInfo(chatId) -> { cwd: string | null } | null, send, files, protocol, breakMode (selftest only), selftest, platform }
 function create(deps) {
 	const brk = deps.selftest ? deps.breakMode || "" : "";
 	const protocol = deps.protocol || pp;
-	const logic = AL.create({ files: deps.files, protocol, platform: deps.platform, breakMode: brk });
+	const logic = AL.create({ files: deps.files, protocol, platform: deps.platform, remotePorts: deps.remotePorts, breakMode: brk });
 	const turns = new Map(); // chatId -> { opened } (new tabs opened in the current turn)
 	const platform = deps.platform || process.platform;
 	const sameDir = (a, b) => {
@@ -50,9 +50,9 @@ function create(deps) {
 		deps.send("browser:agentShown", { chatId, tabId: res.tabId, label, kind: r.file ? r.file.kind : "address", reused: !!res.reused, active: !!res.active });
 		const text = res.reused
 			? res.active
-				? `Already open in the Viewer, and it is the page the person is looking at: ${label}.`
-				: `Already open in the Viewer: ${label}. Its tab is marked as updated; the person's view did not change.`
-			: `Shown in a new background tab of the Viewer: ${label}. The person's view did not change; the Viewer tab has a badge until they look.`;
+				? `Already open: ${label}\nIt is the page the person is looking at.`
+				: `Already open: ${label}\nIts tab is marked as updated; the person's view did not change.`
+			: `Opened ${label} in the Viewer\nIt is in a new background tab; the person's view did not change, and the Viewer tab has a badge until they look.`;
 		return { ok: true, text, tabId: res.tabId, label, reused: !!res.reused };
 	}
 

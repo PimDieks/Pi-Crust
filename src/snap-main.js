@@ -118,7 +118,8 @@ function register(ctx) {
 		const url = wc.getURL();
 		const tabKind = ctx.browserTab?.()?.kind || "page";
 		const feature = pageOnly ? "shots" : "capture";
-		if (!VK.can(tabKind, feature) && !(ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "kind-capture")) return { ok: false, error: VK.reason(tabKind, feature) };
+		const broken = ctx.browserTab?.()?.broken || ""; // a tab that did not load (or whose file is gone) still holds its old page: nothing to capture
+		if (!VK.can(tabKind, feature, broken) && !(ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "kind-capture")) return { ok: false, error: VK.reason(tabKind, feature, broken) };
 		const tabId = ctx.browserTab?.()?.id;
 		if (onlyTab && onlyTab !== tabId) return { ok: false, error: "The Viewer switched to another tab" }; // an after shot is of the tab the before shot was of
 		if (!(/^https?:/i.test(url) || (/^pi-project:/i.test(url) && ctx.isProjectAddress(url))) && !(ctx.selftest && /^data:text\/html/i.test(url))) return { ok: false, error: "The browser has no page open" };

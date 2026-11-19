@@ -127,7 +127,7 @@
 			const active = t.id === activeId;
 			e.item.classList.toggle("active", active);
 			e.item.classList.toggle("loading", !!t.loading);
-			e.item.classList.toggle("failed", !!t.error);
+			e.item.classList.toggle("failed", !!t.error && !t.error.unloaded); // an address that was not loaded yet is not a failure
 			e.item.classList.toggle("updated", !!t.updated);
 			e.tabBtn.setAttribute("aria-selected", String(active));
 			e.tabBtn.tabIndex = active ? 0 : -1; // roving focus: one stop in the row
@@ -145,7 +145,6 @@
 			if (listEl.children[i] !== e.item) listEl.insertBefore(e.item, listEl.children[i] || null);
 		});
 		listEl.dataset.count = String(tabs.length);
-		row.classList.toggle("vt-single", tabs.length <= 1);
 		const full = tabs.length >= MAX;
 		addBtn.setAttribute("aria-disabled", String(full));
 		addBtn.title = full ? LIMIT_REASON : keyLabel("New page (⌘T)");
@@ -265,8 +264,11 @@
 			const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
 			if (!mod || e.shiftKey) return;
 			let run = null;
+			// Close: on a Mac Cmd+W closes the window (the app menu's Close, as on every build before the Viewer had tabs), so a page closes with
+			// Option+Cmd+W there; on Windows Ctrl+W is free (the app has no Close item) and stays. Chat tabs have no key; they close with the x.
+			const closeKey = isMac ? e.altKey && e.code === "KeyW" : !e.altKey && k === "w";
 			if (!e.altKey && k === "t") run = () => addTab();
-			else if (!e.altKey && k === "w") run = () => closeTab(activeId);
+			else if (closeKey) run = () => closeTab(activeId);
 			else if (e.altKey && k === "arrowleft") run = () => step(-1);
 			else if (e.altKey && k === "arrowright") run = () => step(1);
 			if (!run) return;

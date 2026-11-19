@@ -54,6 +54,7 @@ It pulls the latest commits (fast-forward only), runs `npm install` and rebuilds
 ## Optional
 
 - **Local plugins** (`src/local/`): every `.js` file in that folder is loaded when Pi Crust starts, and `*-main.js` files run in the main process. Files ending in `.test.js` are skipped. They run with the app's full rights and are not sandboxed. The folder is gitignored, so nothing in it is committed or shared. Only put your own files there.
+- **Viewer**: nothing to set up. It shows your dev server (default `http://localhost:3000`) and the web pages (HTML), images and PDFs of the open project, up to 8 pages at once, remembered per project in `settings.json` (`viewerTabs`). See "Viewer" in the README.
 - **Voice input**: `brew install whisper-cpp`, then put a whisper model in the app's data folder:
 
 ```bash
@@ -224,6 +225,7 @@ From a terminal it does the same as on macOS: it pulls, runs `npm install` when 
 
 ### Optional
 
+- **Viewer**: nothing to set up (see above).
 - **Voice input**: download the Windows release zip from [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases), unpack it and put the folder with `whisper-cli.exe` on your PATH. Then put a whisper model in the app's data folder:
 
 ```powershell

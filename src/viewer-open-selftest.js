@@ -77,7 +77,12 @@ selftestSteps.push(async () => {
 		if (text) d.setData("text/plain", text);
 		return d;
 	};
-	const drag = (type, target, d) => target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: d }));
+	// The pointer position matters (the hint follows it): by default the drag is over the middle of the Viewer's area; `at` is {x, y} or an element.
+	const centre = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+	const drag = (type, target, d, at) => {
+		const p = at ? (at.getBoundingClientRect ? centre(at) : at) : centre($("#browser-slot"));
+		return target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: d, clientX: p.x, clientY: p.y }));
+	};
 	const fileWith = (name, testPath) => {
 		const f = new File(["x"], name);
 		if (testPath !== undefined) f.testPath = testPath;
@@ -174,8 +179,7 @@ selftestSteps.push(async () => {
 			["notes.txt", R.kind],
 			["src/app.js", R.kind],
 			["docs", R.folder],
-			["docs/nothing.html", R.missing],
-			["hello world", R.unknown],
+			[".nothing", R.dot],
 			["pi-project://p-0000000000000000/index.html", R.outside],
 		];
 		if (S.link) refusals.push(["linkdir/secret.html", R.outside]);
@@ -436,6 +440,20 @@ selftestSteps.push(async () => {
 		drag("dragend", document.body, dt({ tree: "docs/pricing.html" }));
 		await sleep(100);
 		check("drop: dragend takes the hint away", !vo.hintShown() && !(await hiddenNow()).includes("drop"));
+		// P4 (b): a file dragged to the chat's message box while the Viewer is shown: no hint, the page view stays, the composer takes it as before.
+		const chatBox = $("#composer");
+		check("drop: the chat's message box is not inside the Viewer's area", chatBox.getClientRects().length > 0 && Math.abs(centre(chatBox).x - centre($("#browser-slot")).x) > 20, JSON.stringify([centre(chatBox), centre($("#browser-slot"))]));
+		drag("dragenter", chatBox, dt({ files: [fileWith("a.png")] }), chatBox);
+		drag("dragover", chatBox, dt({ files: [fileWith("a.png")] }), chatBox);
+		await sleep(150);
+		check("drop: a file dragged to the chat's message box shows no hint and hides nothing", !vo.hintShown() && hint().hidden && !(await hiddenNow()).includes("drop") && (await crust.selftest.bounds()).visible);
+		check("drop: the message box still takes the file as before (its own drop highlight)", chatBox.classList.contains("dropping"));
+		drag("dragleave", chatBox, dt({ files: [fileWith("a.png")] }), chatBox);
+		drag("dragenter", document.body, dt({ files: [fileWith("a.html")] }));
+		await sleep(100);
+		check("drop: the hint starts when the pointer comes to the Viewer, and goes when it leaves for the chat", vo.hintShown());
+		drag("dragover", chatBox, dt({ files: [fileWith("a.html")] }), chatBox);
+		check("drop: the hint is gone the moment the pointer is over the chat", !vo.hintShown() && !(await hiddenNow()).includes("drop"));
 		switchTab("changes");
 		drag("dragenter", document.body, dt({ files: [fileWith("a.html")] }));
 		check("drop: no hint while another tab is shown (the page view is not on screen)", !vo.hintShown() && !(await hiddenNow()).includes("drop"));

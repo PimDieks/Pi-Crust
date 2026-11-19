@@ -205,4 +205,27 @@ function create(opts = {}) {
 	};
 }
 
-module.exports = { create, MAX_FILES, DEBOUNCE_MS, RETRY_MS };
+// The page's own file as a path under the REAL project folder (a tab watches it, in its folder), or null. Judged like a request: a file that
+// is there must pass project-files isProjectPath (a link that leads out of the project does not); a file that is gone (it may come back)
+// is accepted only when the nearest folder that exists is really inside the project, so a link in the project never makes the watcher
+// look outside it. `segs`: the project path's segments.
+function pageCandidate(root, segs, opts = {}) {
+	const fs = opts.fs || nodeFs;
+	const path = opts.path || nodePath;
+	const files = opts.files || require("./project-files");
+	const real = (p) => (fs.realpathSync.native || fs.realpathSync)(p);
+	if (!Array.isArray(segs) || !segs.length || segs.some((x) => x === "." || x === ".." || x.startsWith(".") || /[\\:\0]/.test(x))) return null;
+	let base;
+	try { base = real(root); } catch { return null; }
+	const c = path.join(base, ...segs);
+	const there = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+	if (there(c)) return files.isProjectPath(root, c) ? c : null;
+	let dir = path.dirname(c);
+	while (!there(dir) && dir !== path.dirname(dir)) dir = path.dirname(dir);
+	let realDir;
+	try { realDir = real(dir); } catch { return null; }
+	const rel = path.relative(base, realDir);
+	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel)) ? c : null;
+}
+
+module.exports = { create, pageCandidate, MAX_FILES, DEBOUNCE_MS, RETRY_MS };

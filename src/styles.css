@@ -307,6 +307,7 @@ select option { background: var(--panel-2); color: var(--text); }
 .tool .tname { font-weight: 500; flex: none; white-space: nowrap; }
 .tool .targ { font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tool .tmeta { color: var(--muted); flex: none; white-space: nowrap; }
+.tool.tshow .tmeta { flex: 0 1 auto; min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
 .tool pre { margin: 0; padding: 8px var(--space-sm); border-top: 1px solid var(--border); font-family: var(--mono); font-size: var(--fs-sm); white-space: pre-wrap; max-height: 320px; overflow: auto; background: transparent; }
 .tool pre .add { color: var(--ok); }
 .tool pre .del { color: var(--err); }

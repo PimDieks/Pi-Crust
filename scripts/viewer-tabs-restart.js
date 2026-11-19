@@ -78,7 +78,10 @@ function tamper() {
 		42,
 		{ path: "x".repeat(2000) + ".html", title: "too long" },
 	];
-	entry.tabs = [bad[0], ...entry.tabs, ...bad.slice(1)];
+	// S2: a planted web address that is not local comes back as an unloaded tab; one with a user name and password is dropped.
+	const planted = { address: "https://planted.invalid/login", title: "planted" };
+	const credentials = { address: "http://user:secret@127.0.0.1:9/", title: "credentials" };
+	entry.tabs = [bad[0], ...entry.tabs, ...bad.slice(1), planted, credentials];
 	entry.active += 1; // the active entry moved one place down
 	fs.writeFileSync(file, JSON.stringify(settings, null, 2));
 	return { entries: entry.tabs.length, active: entry.active };
@@ -93,7 +96,7 @@ try {
 		let t;
 		try { t = tamper(); } catch (e) { console.log("tamper step failed: " + e.message); ok = false; }
 		if (t) {
-			console.log(`--- tampered: ${t.entries} stored entries (6 real, 15 not), active index ${t.active}, gone.html deleted`);
+			console.log(`--- tampered: ${t.entries} stored entries (6 real, 1 planted address that comes back unloaded, 16 not), active index ${t.active}, gone.html deleted`);
 			const two = launch("restore");
 			ok = ok && two.ok;
 		}

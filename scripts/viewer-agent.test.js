@@ -192,7 +192,7 @@ const piJudge = (mode, toolName, input) => logic.decide({ mode, toolName, input,
 const claudeJudge = (mode, toolName, input) => perms.judge({ mode, toolName, input, grants: logic.createGrants(), cwd: root }).d;
 const UNC = "\\\\server\\share\\a.html";
 
-test("permission: a file needs exactly what reading it needs, in every mode, for both agents", () => {
+test("permission: a file the Viewer can show needs exactly what reading it needs; one it would refuse is never allowed, in every mode, for both agents", () => {
 	const paths = ["docs/pricing.html", path.join(root, "img", "logo.svg"), "../outside/secret.html", path.join(outside, "secret.html"), ".env", UNC, "//host/share/x.png", "file://host/share/x.png", "notes.txt", "x".repeat(2000)];
 	for (const mode of MODES) {
 		for (const p of paths) {
@@ -200,24 +200,24 @@ test("permission: a file needs exactly what reading it needs, in every mode, for
 			const showPi = piJudge(mode, "show_in_viewer", { target: p });
 			const showClaude = claudeJudge(mode, FULL, { target: p });
 			const readClaude = claudeJudge(mode, "Read", { file_path: p });
-			assert.equal(showPi.action === "allow", read.action === "allow", `Pi ${mode} ${p.slice(0, 40)}`);
-			assert.equal(showClaude.action === "allow", readClaude.action === "allow", `Claude ${mode} ${p.slice(0, 40)}`);
+			const mainOk = !al.check(root, p).refuse; // what the main side accepts
+				assert.equal(showPi.action === "allow", mainOk && read.action === "allow", `Pi ${mode} ${p.slice(0, 40)}`);
+			assert.equal(showClaude.action === "allow", mainOk && readClaude.action === "allow", `Claude ${mode} ${p.slice(0, 40)}`);
 			assert.notEqual(showPi.action, "ask", "never a question of its own (Pi)");
 			assert.notEqual(showClaude.action, "ask", "never a question of its own (Claude)");
-			if (showPi.action === "block") assert.match(showPi.reason, /same permission as reading/);
+			if (showPi.action === "block") assert.ok(/same permission as reading/.test(showPi.reason) || Object.values(R).includes(showPi.reason), showPi.reason); // the permission reason, or the Viewer's own sentence
 		}
 	}
 });
 
-test("permission: a localhost address is allowed in every mode; a network path is refused outside Trusted", () => {
+test("permission: a localhost address is allowed in every mode; a network path is refused in every mode (the Viewer never shows one)", () => {
 	for (const mode of MODES) {
 		for (const a of ["http://localhost:3000", "https://127.0.0.1:5173/x", "http://[::1]:8080", "localhost:3000"]) {
 			assert.equal(piJudge(mode, "show_in_viewer", { target: a }).action, "allow", `Pi ${mode} ${a}`);
 			assert.equal(claudeJudge(mode, FULL, { target: a }).action, "allow", `Claude ${mode} ${a}`);
 		}
-		const want = mode === "trusted" ? "allow" : "block";
-		assert.equal(piJudge(mode, "show_in_viewer", { target: UNC }).action, want, `Pi UNC ${mode}`);
-		assert.equal(claudeJudge(mode, FULL, { target: UNC }).action, want, `Claude UNC ${mode}`);
+		assert.equal(piJudge(mode, "show_in_viewer", { target: UNC }).action, "block", `Pi UNC ${mode}`);
+		assert.equal(claudeJudge(mode, FULL, { target: UNC }).action, "block", `Claude UNC ${mode}`);
 		// A call with no readable target is blocked with a reason, never asked.
 		for (const bad of [{}, { target: "" }, { target: 5 }, { path: "docs/a.html" }]) assert.equal(piJudge(mode, "show_in_viewer", bad).action, "block", JSON.stringify(bad));
 	}
@@ -241,12 +241,12 @@ test("permission: Claude Agent end to end, the PreToolUse hook then canUseTool, 
 		const asked = [];
 		const cuo = perms.makeCanUseTool({ getMode: () => mode, ask: (p) => (asked.push(p), "Allow once"), cwd: root });
 		const hook = perms.makePreToolUseHook({ getMode: () => mode, grants: cuo.grants, cwd: root });
-		for (const [target, allowed] of [["docs/pricing.html", true], ["http://localhost:3000", true], [UNC, mode === "trusted"]]) {
+		for (const [target, allowed] of [["docs/pricing.html", true], ["http://localhost:3000", true], [UNC, false]]) {
 			const input = { target };
 			const h = await hook({ hook_event_name: "PreToolUse", tool_name: FULL, tool_input: input, tool_use_id: "t1" });
 			const decision = h.hookSpecificOutput.permissionDecision;
 			assert.equal(decision, allowed ? "ask" : "deny", `hook ${mode} ${target}`); // the hook never allows by itself: "ask" sends the call on to canUseTool
-			if (decision === "deny") assert.match(h.hookSpecificOutput.permissionDecisionReason, /same permission as reading/);
+			if (decision === "deny") assert.equal(h.hookSpecificOutput.permissionDecisionReason, R.outside); // the Viewer's own sentence
 			if (decision === "ask") {
 				const r = await cuo(FULL, input, { signal: new AbortController().signal, toolUseID: "t1" });
 				assert.equal(r.behavior, "allow", `canUseTool ${mode} ${target}`);
@@ -313,8 +313,8 @@ test("Claude Agent: one host-defined tool, in-process, and nothing else comes wi
 	assert.deepEqual(await def.handler({ target: "docs/pricing.html" }), { content: [{ type: "text", text: "Shown." }] });
 	const refused = await def.handler({ target: UNC });
 	assert.equal(refused.isError, true);
-	assert.match(refused.content[0].text, /same permission as reading/);
-	const failed = await viewerTool.build({ sdk, zod, show: async () => ({ ok: false, text: R.outside }), chatId: "c", getMode: () => "plan", getCwd: () => root }).instance.tools[0].handler({ target: "../x.html" });
+	assert.equal(refused.content[0].text, R.outside);
+	const failed = await viewerTool.build({ sdk, zod, show: async () => ({ ok: false, text: R.outside }), chatId: "c", getMode: () => "plan", getCwd: () => root }).instance.tools[0].handler({ target: "docs/other.html" });
 	assert.deepEqual(failed, { content: [{ type: "text", text: R.outside }], isError: true });
 	assert.deepEqual(shown, [["chat-1", "docs/pricing.html"]]);
 	// no SDK support, no zod, no app side: no tool at all
@@ -478,4 +478,82 @@ test("the tool card's click only reaches a tab that is open", async () => {
 	assert.deepEqual(await a.focus("docs/pricing.html"), { ok: true, tabId: "t0" });
 	assert.equal((await a.focus("index.html")).ok, false);
 	assert.equal((await a.focus("../outside/secret.html")).message, R.outside);
+});
+
+test("the tool card's visible line says what happened (P2)", async () => {
+	const ALine = require("../src/viewer-agent-line");
+	const tabs = [];
+	const vt = {
+		openBackground: async (address) => {
+			const same = tabs.includes(address);
+			if (!same) tabs.push(address);
+			return { ok: true, tabId: "t" + tabs.indexOf(address), reused: same, active: false };
+		},
+	};
+	const am = AM.create({ getRoot: () => root, viewerTabs: vt, chatInfo: () => ({ cwd: root }), send: () => {}, protocol: pp });
+	const a = await am.show("c1", "docs/pricing.html");
+	const b = await am.show("c1", "docs/pricing.html");
+	const c = await am.show("c1", "../outside/secret.html");
+	assert.equal(ALine.line(a.text, !a.ok), "Opened docs/pricing.html in the Viewer");
+	assert.equal(ALine.line(b.text, !b.ok), "Already open: docs/pricing.html");
+	assert.equal(ALine.line(c.text, !c.ok), `Not shown: ${R.outside}`);
+	// a failure from the agent's own gate or a thrown error is a failure too, with its first line as the reason
+	assert.equal(ALine.line("Showing a file in the Viewer needs the same permission as reading it.\nMore.", true), "Not shown: Showing a file in the Viewer needs the same permission as reading it.");
+	assert.equal(ALine.line("", true), "Not shown: the call failed.");
+	assert.equal(ALine.line("something else", false), ""); // not ours: the card keeps its own summary
+});
+
+// --- S4 ------------------------------------------------------------------------------------------------------------------------
+test("S4: the app's own Remote port is refused, by the main-side check, whatever the spelling", async () => {
+	const a = AL.create({ remotePorts: () => [7391, 8123] });
+	for (const t of ["http://localhost:7391/", "https://127.0.0.1:7391/x", "http://[::1]:8123/", "localhost:7391", "127.0.0.1:8123/a", "HTTP://LOCALHOST:7391"]) {
+		assert.deepEqual(a.check(root, t), { refuse: R.remote }, t);
+	}
+	// every other port, and the same port on no list, is as before
+	assert.deepEqual(a.check(root, "http://localhost:7392/"), { address: "http://localhost:7392/" });
+	assert.deepEqual(al.check(root, "http://localhost:7391/"), { address: "http://localhost:7391/" });
+	// through the app side too: nothing opens
+	const tabs = [];
+	const am = AM.create({ getRoot: () => root, viewerTabs: { openBackground: async (x) => (tabs.push(x), { ok: true, tabId: "t", reused: false, active: false }) }, chatInfo: () => ({ cwd: root }), send: () => {}, protocol: pp, remotePorts: () => [7391] });
+	const r = await am.show("c", "http://localhost:7391/");
+	assert.deepEqual(r, { ok: false, text: R.remote });
+	assert.deepEqual(tabs, []);
+});
+
+test("S4: only exactly a loopback host is local", () => {
+	for (const t of ["http://127.0.0.2/", "http://0.0.0.0/", "http://[::ffff:127.0.0.1]/", "http://[::]/", "http://localhost./", "http://localhost.evil.test/", "http://127.0.0.1.evil.test/", "http://user@localhost/", "http://localhost:pw@evil.test/", "http://192.168.1.2/", "http://10.0.0.1:3000/"]) {
+		assert.deepEqual(al.check(root, t), { refuse: R.host }, t);
+	}
+	for (const t of ["http://0x7f.1/", "http://2130706433/", "http://127.1/"]) assert.equal(al.check(root, t).address, "http://127.0.0.1/", t); // the URL parser's own reading: it IS 127.0.0.1
+});
+
+test("S4: the permission rule does not allow what the main side refuses, in every mode, for both agents", () => {
+	const refused = ["../x", "..\\x.html", "docs/../../outside/secret.html", ".env", ".git/config", "docs/.hidden/a.html", "./.hidden/secret.html", path.join(outside, "secret.html"), "http://example.com/", "http://localhost@evil.test/", "https://127.0.0.2/", "file:///C:/Windows/win.ini", "ftp://localhost/x", "notes.txt", "src/app.js", "//host/share/x.png", UNC, "javascript:alert(1)"];
+	for (const mode of MODES) {
+		for (const t of refused) {
+			assert.equal(piJudge(mode, "show_in_viewer", { target: t }).action, "block", `Pi ${mode} ${t}`);
+			assert.equal(claudeJudge(mode, FULL, { target: t }).action, "block", `Claude ${mode} ${t}`);
+			assert.ok(al.check(root, t).refuse, `main refuses ${t}`);
+		}
+	}
+});
+
+test("S4: whatever the rule allows, the main side accepts (the two never disagree)", () => {
+	const targets = ["docs/pricing.html", "./docs/../docs/pricing.html", "docs\\pricing.html", path.join(root, "img", "logo.svg"), "doc.pdf", "http://localhost:3000", "localhost:3000/x", "[::1]:8080", "http://127.0.0.1:5173/"];
+	for (const mode of MODES) {
+		for (const t of targets) {
+			assert.equal(piJudge(mode, "show_in_viewer", { target: t }).action, "allow", `Pi ${mode} ${t}`);
+			assert.equal(claudeJudge(mode, FULL, { target: t }).action, "allow", `Claude ${mode} ${t}`);
+			assert.equal(al.check(root, t).refuse, undefined, `main ${t}`);
+		}
+	}
+});
+
+test("S4: Remote publishes its ports for the Viewer's agent tool (in the self-test too: the default port)", () => {
+	const ctx = { selftest: true, ipcMain: { handle() {} } };
+	require("../src/remote-main").register(ctx);
+	assert.deepEqual(ctx.remotePorts(), [7391]);
+	const src = fs.readFileSync(path.join(__dirname, "..", "src", "remote-main.js"), "utf8");
+	assert.match(src, /ctx\.remotePorts = \(\) => \[cfg\.port, boundPort\]/, "the real server reports the configured and the bound port");
+	assert.match(fs.readFileSync(path.join(__dirname, "..", "src", "main.js"), "utf8"), /remotePorts: \(\) => \(ctx\.remotePorts \? ctx\.remotePorts\(\) : \[\]\)/, "main.js hands them to the agent tool");
 });

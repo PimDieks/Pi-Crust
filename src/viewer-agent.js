@@ -62,5 +62,5 @@
 		t.argEl.title = `Show ${target} in the Viewer`;
 	}
 
-	window.viewerAgent = { isTool, decorate, seen, unseen: () => unseen };
+	window.viewerAgent = { isTool, decorate, seen, unseen: () => unseen, line: (text, isError) => window.ViewerAgentLine.line(text, isError) };
 })();

@@ -181,7 +181,7 @@ function register(ctx) {
 		return scheme;
 	});
 	ctx.ipcMain.handle("browser:target", () => ({ selector: target }));
-	ctx.ipcMain.handle("browser:forceState", (_e, opts) => (isPage() ? setForced(opts) : { error: "Needs a web page" }));
+	ctx.ipcMain.handle("browser:forceState", (_e, opts) => (isPage() && !ctx.browserTab?.()?.broken ? setForced(opts) : { error: "Needs a web page" }));
 
 	// A switch of tab. The tab being left: its forced states are undone, the target is dropped (the UI hears it), and the debugger is
 	// detached, which also ends the emulated colour scheme there. The tab coming in starts clean and gets the Viewer's colour scheme.

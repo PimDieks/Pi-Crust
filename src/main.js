@@ -793,6 +793,7 @@ require("./viewer-open-main").register({
 // Pi asks through its extension (see the sink below), the Claude Agent through its host-defined tool (configured here).
 const viewerAgent = require("./viewer-agent-main").create({
 	getRoot: () => (SELFTEST && projectRootOverride) || REPO,
+	remotePorts: () => (ctx.remotePorts ? ctx.remotePorts() : []), // the app's own Remote server (remote-main.js)
 	viewerTabs,
 	chatInfo: (chatId) => {
 		const c = chats.get(chatId);

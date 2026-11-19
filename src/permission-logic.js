@@ -667,14 +667,39 @@ function decide(args) {
 
 // show_in_viewer: showing a project file needs exactly what READING that file needs in this mode: where a read runs without a question the
 // tool runs, where a read would ask or is blocked the tool is refused with a reason (it never opens a question of its own). A localhost
-// address only shows a page the person could click, so it is allowed in every mode. Any other text is judged as a path to read (a scheme, another host and unreadable text too); the main
-// process then decides what may really be shown (viewer-agent-logic.js) and never trusts this check alone.
+// address only shows a page the person could click, so it is allowed in every mode. The rule never allows what the main process would refuse
+// (viewer-agent-logic.js, which still decides and never trusts this check alone): another host, a scheme, a network path, a path outside the
+// project or with a dot segment, a kind of file the Viewer does not show. Those are refused here in every mode, Trusted too.
+// Why the Viewer would refuse this path: the NAME of the refusal ("outside", "dot", "kind") or "". The same rules as viewer-agent-logic.js check,
+// from what is known here (the chat's folder): it must lie inside the project (by its real path too), have no segment that starts with a dot,
+// and be a page, an image or a PDF. The sentence the agent reads is the Viewer's own (viewer-agent-logic.js R), the same one main would give.
+const VIEWER_KIND = require("./viewer-kind");
+function viewerRefusal(text, args) {
+	const cwd = args && args.cwd;
+	if (typeof cwd !== "string" || cwd === "") return ""; // no folder to judge against: the main process decides
+	const pathOpts = { ...((args && args.pathOptions) || {}) };
+	const w = checkPath(text, cwd, pathOpts);
+	if (w.unc || !w.inside) return "outside"; // a network path is outside the project too
+	const P = (pathOpts.platform || process.platform) === "win32" ? nodePath.win32 : nodePath.posix;
+	const rel = P.relative(P.resolve(cwd), P.resolve(cwd, text.trim().replace(/^@/, "")));
+	const segs = rel.split(/[\\/]/).filter(Boolean);
+	if (!segs.length || segs[0] === ".." || P.isAbsolute(rel)) return "outside";
+	if (segs.some((s) => s.startsWith("."))) return "dot";
+	if (VIEWER_KIND.fileKind(segs[segs.length - 1]) === "other") return "kind";
+	return "";
+}
+
 function decideShow(args) {
 	const { input } = args;
 	const target = input && typeof input === "object" ? input.target : undefined;
 	if (typeof target !== "string" || target.trim() === "") return block("show_in_viewer needs one argument, target: a file path of the project or a localhost address. Nothing was shown.");
 	const t = parseTarget(target);
-	if (t.kind === "address" && t.local) return allow();
+	const R = require("./viewer-agent-logic").R; // the Viewer's own sentences: the agent reads the same words whoever refuses
+	if (t.kind === "address") return t.local ? allow() : block(R.host);
+	if (t.kind === "scheme") return block(R.scheme);
+	if (t.kind !== "path") return block(R.invalid);
+	const wrong = viewerRefusal(t.text, args);
+	if (wrong) return block(R[wrong]);
 	const read = decide({ ...args, toolName: "read", input: { path: target.trim() } });
 	if (read.action === "allow") return allow();
 	const why = read.action === "block" ? read.reason : "Reading it would need the person's approval here.";

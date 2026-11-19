@@ -19,6 +19,7 @@ const R = {
 	worktree: "This chat works in a worktree. Only files of the open project can be shown here.",
 	rate: "Several new pages were already opened in this turn. Ask the person which one to look at.",
 	notrunning: "This chat is not running, so nothing was shown.",
+	remote: "That is this app's own Remote port, not a page of yours. It can't be shown here.",
 };
 
 function create(opts = {}) {
@@ -30,12 +31,24 @@ function create(opts = {}) {
 	//   agent-host   a web address on any host is accepted
 	//   agent-path   the path is not checked against the project (any real file path passes)
 	const brk = opts.breakMode || "";
+	// The ports of the app's own Remote server (a function: it can change while the app runs). A localhost address on one of them is not a page
+	// the person's project serves; showing it would put the app's own pairing and chat pages in the Viewer.
+	const remotePorts = typeof opts.remotePorts === "function" ? opts.remotePorts : () => [];
+	const portOf = (url) => {
+		const u = new URL(url);
+		return Number(u.port) || (u.protocol === "https:" ? 443 : 80);
+	};
 
 	function check(root, raw, ctx = {}) {
 		const t = T.parse(raw);
 		if (t.kind === "invalid") return { refuse: typeof raw === "string" && raw.trim() ? R.invalid : R.arg };
 		if (t.kind === "scheme") return { refuse: R.scheme }; // file:, pi-project:, javascript:, data:, ftp: ... a model never types an internal address
-		if (t.kind === "address") return t.local || brk === "agent-host" ? { address: t.url } : { refuse: R.host };
+		if (t.kind === "address") {
+			if (!(t.local || brk === "agent-host")) return { refuse: R.host };
+			let blocked = [];
+			try { blocked = remotePorts() || []; } catch { /* no list: nothing is known to refuse */ }
+			return blocked.includes(portOf(t.url)) ? { refuse: R.remote } : { address: t.url };
+		}
 		// A path.
 		if (!root) return { refuse: R.noproject };
 		if (ctx.worktree) return { refuse: R.worktree };

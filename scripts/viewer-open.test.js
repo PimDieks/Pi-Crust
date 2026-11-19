@@ -67,16 +67,26 @@ test("typed: every refusal has its reason", () => {
 		["notes.txt", R.kind],
 		["src/app.js", R.kind],
 		["docs", R.folder],
-		["docs/nothing.html", R.missing],
-		["hello world", R.unknown],
+		[".nothing", R.dot],
+		["file:C:\\Windows\\win.ini", R.scheme],
 		["pi-project://p-0000000000000000/a.html", R.outside],
 	];
 	for (const [t, why] of cases) assert.equal(logic.checkTyped(root, t).refuse, why, t);
-	assert.equal(logic.checkTyped(null, "docs/a.html").refuse, R.noproject);
 	if (junction) {
 		assert.equal(logic.checkTyped(root, "linkdir/secret.html").refuse, R.outside);
 		assert.equal(logic.checkTyped(root, path.join(root, "linkdir", "secret.html")).refuse, R.outside);
 	}
+});
+
+test("typed: text that is not a project file behaves as before (an https address), whatever its shape", () => {
+	for (const t of ["intranet", "intranet/wiki", "docs/nothing.html", "hello world", "wiki", "www.example.com/.well-known/x"]) assert.deepEqual(logic.checkTyped(root, t), { web: `https://${t}` }, t);
+	// with no project open the same: only a scheme is refused
+	for (const t of ["intranet", "docs/a.html", "example.com", "hello world"]) assert.deepEqual(logic.checkTyped(null, t), { web: `https://${t}` }, t);
+	assert.equal(logic.checkTyped(null, "file:///x").refuse, R.scheme);
+	// a project path that exists but is not shown keeps its reason; the refusals that are about the project stay
+	assert.equal(logic.checkTyped(root, "docs").refuse, R.folder);
+	assert.equal(logic.checkTyped(root, "notes.txt").refuse, R.kind);
+	assert.equal(logic.checkTyped(root, "../x").refuse, R.outside);
 });
 
 test("typed: the internal address of this project opens", () => {
@@ -101,6 +111,17 @@ test("dropped: a project file opens; every other thing is refused with its reaso
 	assert.equal(logic.checkDropped(null, path.join(root, "index.html")).refuse, R.noproject);
 	assert.equal(logic.checkDropped(root, path.join(root, "index.html\0")).refuse, R.invalid);
 	if (junction) assert.equal(logic.checkDropped(root, path.join(root, "linkdir", "secret.html")).refuse, R.outside, "a link pointing outside");
+});
+
+test("dropped: a network path is refused before the file system is touched (S1)", () => {
+	const touched = [];
+	const spy = new Proxy({}, { get: (_t, name) => (...a) => { touched.push([String(name), a[0]]); throw new Error("the file system must not be touched"); } });
+	const win = L.create({ fs: spy, platform: "win32" });
+	for (const p of ["\\\\server\\s\\a.html", "//server/s/a.html", "\\\\?\\UNC\\server\\s\\a.html", "\\\\.\\pipe\\x"]) {
+		assert.equal(win.checkDropped("C:\\project", p).refuse, R.outside, p);
+		assert.equal(win.checkTyped("C:\\project", p).refuse, R.outside, p);
+	}
+	assert.deepEqual(touched, []);
 });
 
 test("suggest: only shown kinds, never a dot folder or node_modules, at most 8, ranked", () => {

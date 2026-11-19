@@ -9,8 +9,9 @@
 //  Tree, Editor  "Open in Viewer" in the tree's right-click menu (only for a file of a kind the Viewer shows) and a small button in the
 //                Editor's status bar for the open file; both open the file in a tab (the one that already shows it, else a new one) and
 //                show the Viewer tab.
-//  Drop          a file dragged from the tree, Explorer or Finder onto the Viewer opens. While such a drag is over the app and the Viewer
-//                tab is shown, the page view is hidden and a hint covers it, or the view would swallow the drop. The real path of an OS
+//  Drop          a file dragged from the tree, Explorer or Finder onto the Viewer opens. While such a drag is over or just next to the Viewer
+//                and its tab is shown, the page view is hidden and a hint covers it, or the view would swallow the drop; over the rest of the
+//                app (the chat's message box) nothing changes. A drop straight onto the page (main sees its move to a file: address) is the same. The real path of an OS
 //                file comes from webUtils.getPathForFile (preload); main re-checks it. A refusal says why and nothing opens.
 "use strict";
 
@@ -337,19 +338,29 @@
 		hint.classList.remove("over");
 		crust.browser.hide(false, "drop");
 	}
-	// A drag over the app while the Viewer tab is shown. dragover repeats while the pointer is over the window; when it stops (the pointer left
-	// the window, or the drag ended elsewhere) the hint goes away.
-	document.addEventListener(
-		"dragenter",
-		(e) => {
-			if (ours(e) && activeTab === "browser") showHint();
-		},
-		true,
-	);
+	// The hint belongs to the Viewer's own area. The native page view covers that area and takes every drag that enters over it, so the hint (and
+	// the hidden view that lets the DOM see the drop) starts a little before the pointer gets there: when it is within EDGE pixels of the
+	// Viewer's area. A file dragged to the chat's message box, the tree or anywhere else gets no hint and no hidden page view: attaching a file
+	// to a chat works exactly as without the Viewer. A drag that is faster than that and enters directly over the page is not seen here; main
+	// turns the page's move to a dropped file: address into the same drop (viewer-tabs-main.js fileDropped).
+	const EDGE = 48;
+	const nearViewer = (e) => {
+		const r = hint.parentElement.getBoundingClientRect();
+		return r.width > 0 && r.height > 0 && e.clientX >= r.left - EDGE && e.clientX <= r.right + EDGE && e.clientY >= r.top - EDGE && e.clientY <= r.bottom + EDGE;
+	};
+	// A drag over or near the Viewer while its tab is shown. dragover repeats while the pointer is over the window; when it stops (the pointer
+	// left the window, or the drag ended elsewhere) the hint goes away, and so it does the moment the pointer moves away from the Viewer.
+	const follow = (e) => {
+		if (!ours(e) || activeTab !== "browser") return;
+		if (nearViewer(e)) showHint();
+		else hideHint();
+	};
+	document.addEventListener("dragenter", follow, true);
 	document.addEventListener(
 		"dragover",
 		(e) => {
-			if (!hintOn) return;
+			if (!hintOn) return follow(e);
+			if (!nearViewer(e)) return hideHint();
 			clearTimeout(heartbeat);
 			heartbeat = setTimeout(hideHint, 900);
 		},

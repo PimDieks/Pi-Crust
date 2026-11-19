@@ -80,7 +80,7 @@ function register(ctx) {
 	const noPage = () => {
 		const wc = pageWc();
 		const url = wc ? wc.getURL() : "";
-		if (ctx.browserTab && ctx.browserTab()?.kind !== "page") return true;
+		if (ctx.browserTab && (ctx.browserTab()?.kind !== "page" || ctx.browserTab()?.broken)) return true; // not a page, or a page that did not load
 		return !wc || !(/^https?:/i.test(url) || (/^pi-project:/i.test(url) && ctx.isProjectAddress(url)) || (ctx.selftest && /^data:text\/html/i.test(url)));
 	};
 

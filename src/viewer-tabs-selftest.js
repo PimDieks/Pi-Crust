@@ -133,6 +133,17 @@ selftestSteps.push(async () => {
 		r = await B.navigate("file:///C:/Users/alex/x.html");
 		check("the address bar still refuses a file address", !r.ok);
 
+		// --- S3: a web page cannot cause a project tab or a switch of tab ----------------------------------------------------------------------
+		await B.activateTab(w1);
+		l = await list();
+		const nPage = l.tabs.length;
+		for (const target of [S.page, S.image, "file:///C:/Users/alex/x.html"]) {
+			await T({ op: "js", tab: w1, code: `location.href = ${JSON.stringify(target)}` });
+			await sleep(500);
+		}
+		l = await list();
+		check("a web page that sets its location to a project or file address changes nothing: no tab, no switch, the page stays", l.tabs.length === nPage && l.activeId === w1 && byId(l, w1).session === "web" && byId(l, w1).address.startsWith(web.slice(0, -1)), JSON.stringify(l.tabs.map((t) => [t.id, t.address])));
+
 		// --- the limit ---------------------------------------------------------------------------------------------------------
 		while ((await list()).tabs.length < 8) await B.createTab(web);
 		r = await B.createTab(web);

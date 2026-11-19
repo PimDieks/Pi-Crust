@@ -81,6 +81,9 @@ function create(opts = {}) {
 	function checkDropped(root, abs) {
 		if (typeof root !== "string" || !root) return refuse(R.noproject);
 		if (typeof abs !== "string" || !abs || abs.includes("\0") || !path.isAbsolute(abs)) return refuse(R.invalid);
+		// A network path (\\server\share, //server/share, \\?\UNC\...) is judged by its spelling, before the file system is asked anything:
+		// a lookup would send the person's sign-in or the name to that host.
+		if (platform === "win32" && /^[\\/]{2}/.test(abs)) return refuse(R.outside);
 		let st;
 		try { st = fs.statSync(abs); } catch { return refuse(R.missing); }
 		if (st.isDirectory()) return refuse(R.folder);
@@ -111,7 +114,7 @@ function create(opts = {}) {
 			return segs.length ? checkSegs(root, segs) : refuse(R.missing);
 		}
 		if (scheme.length > 1) return refuse(R.scheme); // file:, javascript:, data:, ftp:, about: ...
-		if (!root) return isHostLike(text) ? { web: `https://${text}` } : refuse(R.noproject);
+		if (!root) return { web: `https://${text}` }; // no project: as before, any text with no scheme is a web address
 		if (isAbs(text)) {
 			// A real path typed in: fine when it is a project file, else outside the project.
 			if (/^[\\/]{2}/.test(text) && platform === "win32") return refuse(R.outside);
@@ -132,9 +135,11 @@ function create(opts = {}) {
 		if (!segs.length) return refuse(R.unknown);
 		const r = checkSegs(root, segs);
 		if (r.file) return r;
-		// No such project file: host-like text goes to the web as before; otherwise say why the path was not opened.
-		if (isHostLike(text) && (r.refuse === R.missing || r.refuse === R.invalid)) return { web: `https://${text}` }; // "localhost:3000" has a colon: never a file name
-		if (r.refuse === R.missing) return refuse(parts.length > 1 || /\.[a-z0-9]{1,5}$/i.test(text) ? R.missing : R.unknown);
+		// Not a project file: it behaves as it always did, an https address ("intranet", "docs/nothing.html"; "localhost:3000" has a colon, so
+		// it is never a file name). Only what is about the project stays refused: a folder, or a kind of file that exists but is not shown, a
+		// path outside the project, a dot path (unless the text is a web address with a dot in its path: "example.com/.well-known/x").
+		if (r.refuse === R.missing || r.refuse === R.invalid) return { web: `https://${text}` };
+		if (r.refuse === R.dot && isHostLike(text)) return { web: `https://${text}` };
 		return r;
 	}
 

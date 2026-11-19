@@ -272,6 +272,19 @@ selftestSteps.push(async () => {
 		check("page: an after shot is refused when another tab is active than the before shot's", !!onW1 && !c.ok, JSON.stringify(c));
 		await back();
 
+		// A tab whose page did not load still holds its old page in a hidden view: the tools that act on a page refuse, in the main process and in the UI.
+		const FAILED = "Nothing to work on. This page did not load.";
+		const failedTab = await B.createTab("http://127.0.0.1:1/"); // nothing listens there: connection refused
+		await until(async () => !!(byId(await list(), failedTab.tabId) || {}).error, 8000);
+		await activate(failedTab.tabId);
+		pr = await B.pick({});
+		check("failed page: a pick is refused with the reason", pr && pr.error === FAILED, JSON.stringify(pr));
+		c = await crust.snap.live({ kind: "design" });
+		check("failed page: Annotate / Capture build (live) are refused with the reason", !c.ok && c.error === FAILED, JSON.stringify(c));
+		check("failed page: Pick and Tweak are disabled in the Viewer with the reason", window.crustViewerKind.reason("pick") === FAILED && $("#pick-element").getAttribute("aria-disabled") === "true" && $("#pick-element").title === FAILED && $("#tweak-btn").getAttribute("aria-disabled") === "true", $("#pick-element").title);
+		await B.closeTab(failedTab.tabId);
+		await back();
+
 		// Back, forward, reload, DevTools and the system browser work on every kind.
 		for (const [id, name, ext] of [[img, "image", "big.png"], [pdf, "pdf", "doc.pdf"], [w1, "web page", null]]) {
 			await activate(id);

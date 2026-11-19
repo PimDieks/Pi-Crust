@@ -51,7 +51,7 @@ selftestSteps.push(async ({ wait }) => {
 	const badge = () => $("#viewer-badge");
 	const tabs = async () => (await B.tabs());
 	const cards = () => [...active.el.querySelectorAll(".tool")].filter((c) => c._toolName === "show_in_viewer" || c._toolName === "mcp__pi-crust__show_in_viewer");
-	const cardInfo = (c) => ({ name: c.querySelector(".tname")?.textContent, arg: c.querySelector(".targ")?.textContent, err: c.classList.contains("err"), ok: c.classList.contains("ok"), text: c.querySelector("pre")?.textContent || "" });
+	const cardInfo = (c) => ({ name: c.querySelector(".tname")?.textContent, arg: c.querySelector(".targ")?.textContent, line: c.querySelector(".tmeta")?.textContent, err: c.classList.contains("err"), ok: c.classList.contains("ok"), text: c.querySelector("pre")?.textContent || "" });
 	const askShown = () => !!$("#ask") && !$("#ask").hidden && $("#ask").getClientRects().length > 0;
 	const send = async (text) => {
 		$("#input").value = text;
@@ -133,6 +133,7 @@ selftestSteps.push(async ({ wait }) => {
 		check("pi file: the Viewer tab has a badge of 1", badge().textContent === "1" && badge().getClientRects().length > 0 && /1 new page/.test(badge().closest("button").getAttribute("aria-label") || ""), `${badge().textContent} / ${badge().closest("button").getAttribute("aria-label")}`);
 		check("pi file: the tool card is named Viewer and names the file", r[0].name === "Viewer" && r[0].arg === "docs/pricing.html" && r[0].ok, JSON.stringify(r[0]));
 		check("pi file: the tool's result names the file", /docs\/pricing\.html/.test(r[0].text) && /new background tab/.test(r[0].text), r[0].text);
+		check("pi file: the visible line says what happened", r[0].line === "Opened docs/pricing.html in the Viewer", r[0].line);
 		check("pi file: no question was asked", !askShown());
 		const link = cards()[cards().length - 1].querySelector(".targ");
 		check("pi file: the file name on the card is a link", link.classList.contains("tview") && link.getAttribute("role") === "button");
@@ -157,6 +158,7 @@ selftestSteps.push(async ({ wait }) => {
 		check("pi reuse: still two tabs", l.tabs.length === 2, l.tabs.length);
 		check("pi reuse: the tab is marked updated again, the active tab is unchanged", l.tabs.find((t) => t.id === shown.id).updated === true && l.activeId === first);
 		check("pi reuse: the result says so", /Already open/.test(r[0].text) && r[0].ok, r[0].text);
+		check("pi reuse: the visible line says so", r[0].line === "Already open: docs/pricing.html", r[0].line);
 		check("pi reuse: the badge is back", badge().textContent === "1", badge().textContent);
 		switchTab("browser");
 		await until(() => badge().textContent === "");
@@ -185,10 +187,11 @@ selftestSteps.push(async ({ wait }) => {
 			["http://localhost@evil.test/", R.host],
 			["file:///C:/Windows/win.ini", R.scheme],
 			["pi-project://p-0000000000000000/index.html", R.scheme],
-			[UNC, PERM],
+			[UNC, R.outside],
 		];
 		const nBefore = (await tabs()).tabs.length;
 		r = await turn(`show: ${bad.map((b) => b[0]).join(" | ")}`, bad.length, "pi refusals (Plan)");
+		check("pi refusals: the visible line starts with Not shown", r.every((x) => /^Not shown: ./.test(x.line || "")), JSON.stringify(r.map((x) => x.line)));
 		bad.forEach(([t, why], i) => check(`pi refusal ${JSON.stringify(t).slice(0, 40)}`, r[i] && r[i].err && (why instanceof RegExp ? why.test(r[i].text) : r[i].text === why), r[i] && `${r[i].err} ${r[i].text}`));
 		check("pi refusals: no tab opened", (await tabs()).tabs.length === nBefore);
 		check("pi refusals: no question was asked", !askShown());
@@ -196,11 +199,11 @@ selftestSteps.push(async ({ wait }) => {
 		for (const m of ["ask-commands", "ask-edits"]) {
 			check(`pi ${m}: switched`, await setModeTo(m));
 			r = await turn(`show: ${UNC}`, 1, `pi UNC in ${m}`);
-			check(`pi ${m}: a network path is refused with the permission reason, never asked`, r[0].err && PERM.test(r[0].text) && !askShown(), r[0].text);
+			check(`pi ${m}: a network path is refused with the Viewer's own words, never asked`, r[0].err && r[0].text === R.outside && !askShown(), r[0].text);
 		}
 		check("pi trusted: switched", await setModeTo("trusted"));
 		r = await turn(`show: ${UNC}`, 1, "pi UNC in Trusted");
-		check("pi trusted: the permission lets it through, the app still refuses it", r[0].err && r[0].text === R.outside, r[0].text);
+		check("pi trusted: the rule refuses what the app would refuse, with the same words", r[0].err && r[0].text === R.outside, r[0].text);
 		check("pi: Trusted does not widen the rules of the app", (await turn("show: .env | http://example.com/", 2, "pi Trusted refusals")).every((c, i) => c.err && c.text === [R.dot, R.host][i]));
 
 		// 6. The rate: four new pages in one turn, the fourth is refused; a repeat is free; the next turn starts again.
@@ -244,8 +247,8 @@ selftestSteps.push(async ({ wait }) => {
 		check("claude: two new background tabs, the active tab unchanged", l.tabs.length === 3 && l.activeId === cFirst, `${l.tabs.length} tabs`);
 		check("claude: the cards are named Viewer and name the targets", r.map((c) => c.name + ":" + c.arg).join("|") === ["img/logo.svg", "http://127.0.0.1:9/", "../outside/secret.html", UNC].map((x) => "Viewer:" + x).join("|"), r.map((c) => c.name + ":" + c.arg).join("|"));
 		check("claude: file and address shown", r[0].ok && /img\/logo\.svg/.test(r[0].text) && r[1].ok, `${r[0].text} / ${r[1].text}`);
-		check("claude: a path outside is refused by the app with the bar's words", r[2].err && r[2].text === R.outside, r[2].text);
-		check("claude: a network path is refused by the gate with the permission reason, no question", r[3].err && PERM.test(r[3].text) && !askShown(), r[3].text);
+		check("claude: a path outside is refused (by the gate) with the Viewer's own words", r[2].err && r[2].text === R.outside, r[2].text);
+		check("claude: a network path is refused by the gate with the Viewer's own words, no question", r[3].err && r[3].text === R.outside && !askShown(), r[3].text);
 		check("claude: the badge shows the two new pages", badge().textContent === "2", badge().textContent);
 		cards()[cards().length - 4].querySelector(".targ").click();
 		check("claude card click: the Viewer is in front on that tab", await until(async () => { const x = await tabs(); return activeTab === "browser" && !!x.tabs.find((t) => t.id === x.activeId && t.address.endsWith("logo.svg")); }, 4000));

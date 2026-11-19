@@ -23,8 +23,7 @@ const K = require("./viewer-kind");
 const S = require("./viewer-tabs-store");
 const VO = require("./viewer-open-logic");
 const RL = require("./viewer-reload");
-const nodeFs = require("node:fs");
-const nodePath = require("node:path");
+const { fileURLToPath } = require("node:url");
 
 const WEB_PARTITION = "persist:devbrowser";
 
@@ -41,6 +40,11 @@ function create(deps) {
 	const reload = RL.create({ breakMode: brk, debounceMs: brk === "reload-storm" ? 0 : undefined, onChange: (id) => changed(id) });
 	const views = new Map(); // tab id -> WebContentsView
 	let webSessionReady = false;
+	// A project switch (projectWillChange until projectChanged) rebuilds the list: a tab asked for before it began must not be added after it
+	// (it would belong to the old project), and none is added while it runs.
+	let switching = false;
+	let gen = 0;
+	const SWITCHING = { ok: false, reason: "switching", message: "The project is changing. Try again in a moment." };
 	let bg = deps.nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0";
 	let pickTab = null; // the tab a running pick is on
 	const leaveFns = [];
@@ -179,11 +183,13 @@ function create(deps) {
 			// The CmdOrCtrl modifier: command on macOS, Ctrl on Windows (sent on as ctrl: true, which the UI replays).
 			const mod = deps.isWin ? input.control && !input.meta : input.meta && !input.control;
 			const appKey =
-				(mod && (["k", "1", "2", "3", "4", "5", "j", "n", "o", "[", "]", "{", "}", "c", "t", "w"].includes(k) ? !input.alt : k === "b" || (k === "f" && input.shift && !input.alt))) ||
+				(mod && (["k", "1", "2", "3", "4", "5", "j", "n", "o", "[", "]", "{", "}", "c", "t"].includes(k) ? !input.alt : k === "b" || (k === "f" && input.shift && !input.alt))) ||
 					(mod && input.alt && !input.shift && (k === "arrowleft" || k === "arrowright")) || // previous / next page
 				(input.control && !input.meta && (input.code === "Backquote" || input.code === "Tab")) ||
 				(["1", "2", "3"].includes(k) && input.control && (deps.isWin ? input.alt && !input.meta : input.meta && !input.alt)); // view switch
-			if (appKey) {
+			// Close page: Ctrl+W on Windows; Option+Cmd+W on a Mac, where plain Cmd+W is the app menu's Close window and must not be taken from it.
+			const closeKey = mod && !input.shift && (deps.isWin ? !input.alt && k === "w" : input.alt && input.code === "KeyW");
+			if (appKey || closeKey) {
 				event.preventDefault();
 				deps.send("app:shortcut", { key: input.key, code: input.code, meta: input.meta, alt: input.alt, ctrl: input.control, shift: input.shift });
 			}
@@ -194,15 +200,31 @@ function create(deps) {
 		);
 		// A top-level move to the other session never loads here: it opens in a tab of that session (see moveTo). A project tab only
 		// ever loads addresses of the open project; a web tab keeps today's behaviour for everything that does not cross into a project.
-		const guardMove = (event, url) => {
+		const isProjectScheme = (url) => {
+			try { return new URL(String(url)).protocol === protocol.SCHEME + ":"; } catch { return false; }
+		};
+		// A web page may not cause a project tab or a switch of tab at all: its move to a project address is cancelled, nothing else happens.
+		// Project tabs come only from the person (bar, tree, Editor, drop), from a project page's own links and from the agent's tool.
+		const guardMove = (event, url, redirect) => {
+			if (/^file:/i.test(String(url))) {
+				// A file dropped straight onto the page moves it to a file: address, started by the browser itself (no initiating frame): that is a
+				// drop, checked like every other. A page's own move to a file: address (it has an initiating frame) is cancelled, nothing else.
+				event.preventDefault();
+				if (!event.initiator && !redirect) fileDropped(String(url));
+				return;
+			}
 			const a = accept(url);
 			const toProject = a.ok && L.isProjectSession(a.session);
-			if (web ? !toProject : toProject && a.session === tab.session) return;
+			if (web) {
+				if (isProjectScheme(url)) event.preventDefault(); // any project address, this project's or another's
+				return;
+			}
+			if (toProject && a.session === tab.session) return;
 			event.preventDefault();
-			if (a.ok) moveTo(a.url).catch(() => {});
+			if (a.ok && !toProject) moveTo(a.url).catch(() => {}); // a project page's own link to a web address opens in a web tab
 		};
 		wc.on("will-navigate", guardMove);
-		wc.on("will-redirect", guardMove);
+		wc.on("will-redirect", (event, url) => guardMove(event, url, true));
 		// Only the active tab's events reach the browser tools: a background tab's navigation must not reset the active tab's target.
 		const filtered = { on: (ev, fn) => wc.on(ev, (...a) => isActive(tab) && fn(...a)) };
 		require("./browser-tools-main").attach?.(filtered);
@@ -210,6 +232,17 @@ function create(deps) {
 		wc.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) tab.imageKey = null; });
 		wc.on("did-finish-load", () => { if (mine()) paintImage(tab).catch(() => {}); });
 		return view;
+	}
+
+	// The drop that reached the page itself (see guardMove): the real path is checked by viewer-open-logic.js checkDropped (a network path is
+	// refused before the file system is touched), then it opens as a dropped file does, or the refusal shows in the Viewer's reason line.
+	async function fileDropped(url) {
+		let abs = "";
+		try { abs = fileURLToPath(url); } catch { /* a host the platform cannot read as a path */ }
+		const r = abs ? logic.checkDropped(deps.getRoot(), abs) : { refuse: VO.R.invalid };
+		if (r.refuse) return void deps.send("browser:notice", { message: r.refuse });
+		const res = await openFile(protocol.toAddress(deps.getRoot(), r.file.path));
+		if (!res.ok && res.message) deps.send("browser:notice", { message: res.message });
 	}
 
 	// --- the image tab -----------------------------------------------------------------------------------------------------------
@@ -261,7 +294,7 @@ function create(deps) {
 	}
 
 	// `lazy`: a restored tab that is not shown yet: no view and no load until it is first shown (materialize).
-	function makeTab(session, address, { activate = true, lazy = false, title = "", missing = false } = {}) {
+	function makeTab(session, address, { activate = true, lazy = false, title = "", missing = false, unloaded = false } = {}) {
 		const r = L.add(list, { session, address, title, loading: false, canGoBack: false, canGoForward: false, error: null, kind: "page" }, { activate });
 		if (!r.ok) return r;
 		if (L.isProjectSession(session)) {
@@ -271,6 +304,7 @@ function create(deps) {
 		if (lazy) {
 			r.tab.lazy = true;
 			if (missing) markMissing(r.tab);
+			else if (unloaded) markUnloaded(r.tab);
 			return r;
 		}
 		buildView(r.tab);
@@ -288,15 +322,12 @@ function create(deps) {
 	const MAX_SEEN = 128; // distinct request paths looked at per page: the bound on resolve calls
 	// The page's own file as a path under the real project folder, without the file having to exist (a deleted file is still watched, in
 	// its folder, until it returns). null for anything that is not a plain project path.
+	// It goes through project-files isProjectPath (RL.pageCandidate), so a link inside the project never makes the watcher look outside it.
 	function pageCandidate(address) {
 		const root = deps.getRoot();
 		const p = protocol.fromAddress(root, address);
 		if (p == null) return null;
-		const segs = p.split("/").filter(Boolean);
-		if (!segs.length || segs.some((x) => x === "." || x === ".." || x.startsWith(".") || /[\\:\0]/.test(x))) return null;
-		let base;
-		try { base = (nodeFs.realpathSync.native || nodeFs.realpathSync)(root); } catch { return null; }
-		return nodePath.join(base, ...segs);
+		return RL.pageCandidate(root, p.split("/").filter(Boolean), { files });
 	}
 	function watchPage(tab, address) {
 		reload.reset(tab.id);
@@ -361,6 +392,29 @@ function create(deps) {
 		tab.missing = true;
 		tab.error = { code: 404, desc: MISSING, url: tab.address, missing: true };
 	}
+	// A remembered web address that is not local (viewer-tabs-store.js): no view, no load. The tab shows its address and a Load button (the UI
+	// reads error.unloaded); loadTab, from that click, is the only way it loads.
+	function markUnloaded(tab) {
+		tab.unloaded = true;
+		tab.error = { code: 0, desc: "Not loaded yet", url: tab.address, unloaded: true };
+	}
+	function loadTab(id) {
+		const tab = tabOf(id);
+		if (!tab || !tab.unloaded) return { ok: false, reason: "nothing waiting" };
+		const a = accept(tab.address);
+		if (!a.ok || a.session !== "web") return { ok: false, reason: "refused" };
+		tab.unloaded = false;
+		tab.error = null;
+		tab.lazy = false;
+		buildView(tab);
+		load(tab, a.url);
+		if (isActive(tab)) {
+			deps.setErrorHidden(false);
+			deps.relayout();
+		}
+		report(tab);
+		return { ok: true, tabId: tab.id };
+	}
 	// Is the file of a project tab gone now? (Same rules as every request.)
 	function fileGone(tab) {
 		if (!L.isProjectSession(tab.session)) return false;
@@ -371,7 +425,7 @@ function create(deps) {
 	}
 	// First time a restored tab is shown: build its view and load it, unless its file is gone (then it keeps the message).
 	function materialize(tab) {
-		if (!tab.lazy) return;
+		if (!tab.lazy || tab.unloaded) return;
 		tab.lazy = false;
 		buildView(tab);
 		if (fileGone(tab)) {
@@ -407,8 +461,10 @@ function create(deps) {
 		const t = tabOf(id);
 		if (!t) return { ok: false, reason: "unknown tab" };
 		if (list.activeId === id) return { ok: true, ...snapshot(id) };
+		const g = gen;
 		await cancelPick();
 		await leaveActive();
+		if (g !== gen || switching) return SWITCHING;
 		L.activate(list, id);
 		becameActive(t);
 		return { ok: true, ...snapshot(id) };
@@ -416,6 +472,7 @@ function create(deps) {
 
 	// A top-level move across sessions: reuse a tab on the same site in the other session, else a new tab. Makes it the active tab.
 	async function moveTo(address) {
+		if (switching) return SWITCHING;
 		const a = accept(address);
 		if (!a.ok) return a;
 		const reuse = L.reusable(list, a.url);
@@ -431,8 +488,11 @@ function create(deps) {
 		const a = accept(address == null || address === "" ? deps.devUrl : address);
 		if (!a.ok) return a;
 		if (list.tabs.length >= L.MAX_TABS) return { ok: false, reason: "limit" };
+		if (switching) return SWITCHING;
+		const g = gen;
 		await cancelPick();
 		await leaveActive();
+		if (g !== gen || switching) return SWITCHING; // the project changed while this waited: the tab would belong to the old one
 		const r = makeTab(a.session, a.url);
 		if (!r.ok) return { ok: false, reason: r.reason };
 		becameActive(r.tab);
@@ -506,6 +566,7 @@ function create(deps) {
 	// The tree, the Editor and a dropped file (viewer-open-main.js has checked the path): switch to the tab that already shows the file, else
 	// open a new tab. At the limit nothing opens and the reason is in `message`.
 	async function openFile(address) {
+		if (switching) return SWITCHING;
 		const a = accept(address);
 		if (!a.ok || !L.isProjectSession(a.session)) return { ok: false, reason: "refused", message: VO.R.invalid };
 		const same = showing(a.url);
@@ -522,6 +583,7 @@ function create(deps) {
 	// tab opens; at the limit with no tab on the site nothing is replaced and the reason shows in the Viewer's reason line (a notice to the
 	// UI, for callers that have no place to show it). The address bar keeps its own rule (navigate: the active tab).
 	async function openSite(address) {
+		if (switching) return SWITCHING;
 		const a = accept(address);
 		if (!a.ok || a.session !== "web") return { ok: false, reason: "refused", message: VO.R.unknown };
 		const same = brk === "site-new" ? null : L.sameSite(list, a.url);
@@ -549,6 +611,7 @@ function create(deps) {
 	//   break agent-focus (selftest): the page becomes the active tab. agent-reuse: an existing tab is not reused. agent-limit: at the limit
 	//   the active tab is replaced.
 	async function openBackground(address, { allowNew = true } = {}) {
+		if (switching) return SWITCHING;
 		const a = accept(address);
 		if (!a.ok) return { ok: false, reason: "refused", message: VO.R.invalid };
 		const same = brk === "agent-reuse" ? null : showing(a.url);
@@ -628,8 +691,9 @@ function create(deps) {
 	async function pick(repo, opts) {
 		const t = activeTab();
 		const view = activeView();
-		if (!t || !view) return { cancelled: true };
-		if (!K.can(t.kind, "pick")) return { error: K.reason(t.kind, "pick") };
+		if (!t || !view) return t && t.error ? { error: K.reason(t.kind, "pick", K.brokenOf(t.error)) } : { cancelled: true };
+		const broken = K.brokenOf(t.error); // it still holds the old page in its hidden view: nothing to work on
+		if (!K.can(t.kind, "pick", broken)) return { error: K.reason(t.kind, "pick", broken) };
 		pickTab = t;
 		let toggled = false;
 		try {
@@ -645,7 +709,7 @@ function create(deps) {
 	// The active tab, for the features: its address, kind and session.
 	const activeInfo = () => {
 		const t = activeTab();
-		return t ? { id: t.id, address: t.address, kind: t.kind, session: t.session, error: !!t.error } : null;
+		return t ? { id: t.id, address: t.address, kind: t.kind, session: t.session, error: !!t.error, broken: K.brokenOf(t.error) } : null;
 	};
 	// How to open an offscreen window on an address with the session that address belongs to (a web address: the web session; an address
 	// of the open project: that project's own session). null when the Viewer would not open it.
@@ -705,6 +769,8 @@ function create(deps) {
 	// The project is about to change (call BEFORE the root changes): the old project's tabs are saved and closed. A late request from
 	// one of those pages gets 404 (the address handler checks the project).
 	function projectWillChange() {
+		switching = true;
+		gen++;
 		persist();
 		if (!deps.getRoot() || !list.tabs.length) return;
 		cancelPick().catch(() => {});
@@ -719,12 +785,13 @@ function create(deps) {
 		let stored = null;
 		try { stored = deps.store && root ? S.fromStored(deps.store.read(root), { root, protocol, files }) : null; } catch { stored = null; }
 		held = true;
+		gen++;
 		try {
 			if (stored) {
 				destroyAll();
 				let activeId = null;
 				stored.tabs.forEach((t, i) => {
-					const r = makeTab(t.session, t.address, { lazy: true, title: t.title, missing: t.missing });
+					const r = makeTab(t.session, t.address, { lazy: true, title: t.title, missing: t.missing, unloaded: t.unloaded });
 					if (r.ok && i === stored.active) activeId = r.tab.id;
 				});
 				if (activeId) L.activate(list, activeId);
@@ -735,6 +802,7 @@ function create(deps) {
 			}
 		} finally {
 			held = false;
+			switching = false;
 		}
 		scheduleSave();
 	}
@@ -762,6 +830,7 @@ function create(deps) {
 		ipcMain.handle("browser:tabActivate", (_e, id) => setActive(String(id)));
 		ipcMain.handle("browser:tabClose", (_e, id) => closeTab(String(id)));
 		ipcMain.handle("browser:imageZoom", (_e, mode) => setImageZoom(mode));
+		ipcMain.handle("browser:tabLoad", (_e, id) => loadTab(String(id)));
 	}
 
 	return {
@@ -773,6 +842,7 @@ function create(deps) {
 		list: () => ({ tabs: list.tabs.map(publicTab), activeId: list.activeId }),
 		create: createTab,
 		activate: setActive,
+		loadTab,
 		close: closeTab,
 		navigate,
 		openFile,
