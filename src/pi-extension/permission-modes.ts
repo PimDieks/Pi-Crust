@@ -161,6 +161,9 @@ export default function (pi: ExtensionAPI) {
 		show(ctx);
 	});
 
+	// The status is only sent once at session start; a run start sends it again, so an app that missed or lost it shows the enforced mode again.
+	pi.on("agent_start", (_event: any, ctx: any) => show(ctx));
+
 	function setMode(next: string, ctx: any) {
 		mode = next;
 		cancelPending();

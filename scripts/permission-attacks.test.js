@@ -1014,3 +1014,16 @@ test("git --version and git version run without asking, alone; nothing else join
 		assert.deepEqual(pwned(r), [], c);
 	}
 });
+
+test("Pi: the mode is reported again when a run starts, so a status the app missed is repaired", async () => {
+	const { handlers: h, mk } = await load();
+	const statuses = [];
+	const ctx = mk(async () => undefined);
+	ctx.ui.setStatus = (_k, t) => statuses.push(t);
+	await h.session_start({}, ctx);
+	assert.equal(statuses.length, 1);
+	assert.equal(typeof h.agent_start, "function", "no agent_start handler");
+	await h.agent_start({}, ctx);
+	assert.equal(statuses.length, 2);
+	assert.equal(statuses[1], statuses[0]);
+});
