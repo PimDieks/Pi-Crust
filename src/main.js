@@ -1217,6 +1217,33 @@ function winShell() {
 	if (fs.existsSync(ps)) return [ps, ["-NoLogo"]];
 	return [process.env.ComSpec || "cmd.exe", []];
 }
+// Windows busy state: ONE hidden query for all terminals, at most one every 5 s, only while a terminal exists; term:busy-now asks for one
+// right away (the renderer awaits it before it runs a command from the app; 3 s limit, then it carries on as "not busy").
+let winBusyTimer = null, winBusyRunning = null;
+function winBusyNow() {
+	if (winBusyRunning) return winBusyRunning;
+	const list = [...terms.entries()].filter(([, p]) => p._setFg);
+	if (!list.length) return Promise.resolve();
+	winBusyRunning = new Promise((resolve) => {
+		require("./win-busy").checkAll(
+			list.map(([, p]) => ({ pid: p.pid, exe: p._shellName })),
+			(res) => {
+				winBusyRunning = null;
+				if (res) for (const [id, p] of list) if (terms.get(id) === p && res.has(p.pid)) p._setFg(res.get(p.pid));
+				resolve();
+			},
+		);
+	});
+	return winBusyRunning;
+}
+function winBusyStart() {
+	if (!winBusyTimer) winBusyTimer = setInterval(() => (terms.size ? winBusyNow() : winBusyStop()), 5000);
+}
+function winBusyStop() {
+	clearInterval(winBusyTimer);
+	winBusyTimer = null;
+}
+ipcMain.handle("term:busy-now", () => (IS_WIN ? winBusyNow() : undefined));
 ipcMain.handle("term:start", (_e, id, cols, rows) => {
 	if (!REPO) return { ok: false, error: "Open a repo first" };
 	if (terms.has(id)) return { ok: true, existing: true };
@@ -1228,13 +1255,13 @@ ipcMain.handle("term:start", (_e, id, cols, rows) => {
 	const [shellPath, shellArgs] = IS_WIN ? winShell() : [process.env.SHELL || "/bin/zsh", ["-l"]];
 	const p = ptyMod.spawn(shellPath, shellArgs, { name: "xterm-256color", cols: cols || 100, rows: rows || 30, cwd: REPO, env: { ...ENV, TERM: "xterm-256color", COLORTERM: "truecolor" } });
 	terms.set(id, p);
-	// Foreground process of the shell, polled once a second: tells the UI what runs and since when.
-	// Windows: node-pty's p.process is only the terminal name there, so ask Windows for the shell's child processes (src/win-busy.js: a hidden
-	// powershell.exe, about 0.3 s per check, never two at once, a 3 s limit; when it can't tell, the state stays as it was).
+	// Foreground process of the shell: tells the UI what runs and since when.
+	// Windows: node-pty's p.process is only the terminal name there, so one shared check (winBusyTick, src/win-busy.js) answers for all terminals.
 	const shellName = path.basename(shellPath);
 	const idle = new Set([shellName, `-${shellName}`, "login", ""]);
 	let fg = null; // { name, since }
-	const setFg = (name) => {
+	p._shellName = shellName;
+	p._setFg = (name) => {
 		const busy = !!name && !idle.has(name);
 		if (busy && !fg) fg = { name, since: Date.now() };
 		else if (!busy && fg) fg = null;
@@ -1242,21 +1269,13 @@ ipcMain.handle("term:start", (_e, id, cols, rows) => {
 		else return;
 		send("term:proc", { id, name: fg?.name || null, since: fg?.since || null });
 	};
-	let winChecking = false;
-	p._procPoll = setInterval(() => {
-		if (IS_WIN) {
-			if (winChecking) return;
-			winChecking = true;
-			require("./win-busy").check(p.pid, (name) => {
-				winChecking = false;
-				if (name !== undefined && terms.get(id) === p) setFg(name);
-			});
-			return;
-		}
-		try {
-			setFg(String(p.process || ""));
-		} catch {}
-	}, 1000);
+	if (IS_WIN) winBusyStart();
+	else
+		p._procPoll = setInterval(() => {
+			try {
+				p._setFg(String(p.process || ""));
+			} catch {}
+		}, 1000);
 	p.onData((d) => send("term:data", { id, data: d }));
 	p.onExit(({ exitCode }) => {
 		clearInterval(p._procPoll);

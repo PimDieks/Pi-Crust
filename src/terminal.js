@@ -193,6 +193,7 @@ function resetTerminals() {
 async function runInTerminal(command) {
 	if (!terminalDocked) switchTab("terminal");
 	await showTerminal();
+	if (isWin) await crust.term.busyNow().catch(() => {}); // Windows: no constant polling, so check right now (main limits it to 3 s)
 	let t = activeTerm();
 	if (termProcs.has(t.id)) t = await newTerminal();
 	termLastSent.set(t.id, { command, at: Date.now() });
@@ -263,7 +264,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 	const a = activeTerm();
 	// A command that starts a process: on Windows a PowerShell `sleep` is a cmdlet (no child process, so never busy), so use ping.exe there.
 	crust.term.input(a.id, isWin ? "ping -n 30 127.0.0.1\r" : "sleep 30\r");
-	await wait(isWin ? 3000 : 1500); // main polls once a second; on Windows a check takes about 0.3 s more
+	await wait(isWin ? 3000 : 1500); // main polls once a second; on Windows runInTerminal checks on demand (win-busy.js)
 	await runInTerminal("echo pi-crust-second-terminal-ok");
 	await wait(1500);
 	const b = activeTerm();

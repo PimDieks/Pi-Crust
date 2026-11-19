@@ -1,8 +1,8 @@
-// Busy detection for a Windows terminal. node-pty's `process` is only the terminal name there, so ask Windows instead: the shell is
-// busy while it has a live child process other than the console host (conhost.exe / OpenConsole.exe, which ConPTY keeps around).
-// One short-lived hidden powershell.exe per check, a hard time limit (the check then reports "unknown" and the caller keeps today's
-// behaviour: not busy), and never two checks at once for the same shell. A command that is a shell builtin or cmdlet (Start-Sleep, cd)
-// starts no process and is not seen as busy.
+// Busy detection for Windows terminals. node-pty's `process` is only the terminal name there, so ask Windows instead: a shell is busy
+// while it has a live descendant process that is not the console host (conhost.exe / OpenConsole.exe, which ConPTY keeps around).
+// ONE short-lived hidden powershell.exe lists all processes once and every terminal is answered from that list, with a hard time limit
+// (then "unknown" and the caller keeps the state it had). A shell that starts a copy of itself as a wrapper (Git Bash: bin\bash.exe starts
+// usr\bin\bash.exe) is looked through, not counted. A builtin or cmdlet (Start-Sleep, cd) starts no process and is not seen as busy.
 "use strict";
 
 const path = require("node:path");
@@ -11,14 +11,35 @@ const { spawn } = require("node:child_process");
 const IGNORED = new Set(["conhost.exe", "openconsole.exe", "wslhost.exe"]);
 const LIMIT_MS = 3000;
 
-// rows: [{ Name, ProcessId }] of the direct children of the shell. -> name of the first real child without ".exe", or null.
-function busyName(rows) {
-	for (const r of rows || []) {
-		const n = String((r && r.Name) || "");
-		if (!n || IGNORED.has(n.toLowerCase())) continue;
-		return n.replace(/\.exe$/i, "");
+// procs: [{ Name, ProcessId, ParentProcessId }] of all processes; shells: [{ pid, exe }] (exe: the shell's file name, e.g. "bash.exe").
+// -> Map pid -> name of the first real descendant without ".exe", or null when idle.
+function busyByShell(procs, shells) {
+	const kids = new Map();
+	for (const r of procs || []) {
+		const pp = Number(r && r.ParentProcessId);
+		if (!kids.has(pp)) kids.set(pp, []);
+		kids.get(pp).push(r);
 	}
-	return null;
+	const out = new Map();
+	for (const { pid, exe } of shells || []) {
+		const own = String(exe || "").toLowerCase();
+		let found = null;
+		const seen = new Set([Number(pid)]);
+		const walk = (p) => {
+			for (const r of kids.get(p) || []) {
+				const id = Number(r.ProcessId), n = String(r.Name || "");
+				if (found || !n || seen.has(id)) continue;
+				seen.add(id);
+				const low = n.toLowerCase();
+				if (IGNORED.has(low)) continue;
+				if (own && low === own) walk(id); // wrapper copy of the shell: look through it
+				else found = n.replace(/\.exe$/i, "");
+			}
+		};
+		walk(Number(pid));
+		out.set(pid, found);
+	}
+	return out;
 }
 
 function parse(out) {
@@ -28,12 +49,13 @@ function parse(out) {
 	return Array.isArray(j) ? j : [j];
 }
 
-// cb(name | null | undefined): a name = busy, null = idle, undefined = could not tell (error, timeout). Returns a cancel function.
-function check(pid, cb, { limitMs = LIMIT_MS } = {}) {
+// cb(Map pid -> name | null) or cb(undefined) when it could not tell (error, timeout). Returns a cancel function.
+function checkAll(shells, cb, { limitMs = LIMIT_MS } = {}) {
 	const ps = path.join(process.env.SystemRoot || "C:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-	const cmd = `Get-CimInstance Win32_Process -Filter 'ParentProcessId=${Number(pid) | 0}' | Select-Object Name,ProcessId | ConvertTo-Json -Compress`;
+	const cmd = "Get-CimInstance Win32_Process -Property Name,ProcessId,ParentProcessId | Select-Object Name,ProcessId,ParentProcessId | ConvertTo-Json -Compress";
 	let done = false;
 	let out = "";
+	let timer = null;
 	const finish = (v) => {
 		if (done) return;
 		done = true;
@@ -47,7 +69,7 @@ function check(pid, cb, { limitMs = LIMIT_MS } = {}) {
 		cb(undefined);
 		return () => {};
 	}
-	const timer = setTimeout(() => {
+	timer = setTimeout(() => {
 		try {
 			child.kill();
 		} catch {}
@@ -58,7 +80,7 @@ function check(pid, cb, { limitMs = LIMIT_MS } = {}) {
 	child.on("close", (code) => {
 		if (code !== 0) return finish(undefined);
 		try {
-			finish(busyName(parse(out)));
+			finish(busyByShell(parse(out), shells));
 		} catch {
 			finish(undefined);
 		}
@@ -71,4 +93,4 @@ function check(pid, cb, { limitMs = LIMIT_MS } = {}) {
 	};
 }
 
-module.exports = { busyName, parse, check };
+module.exports = { busyByShell, parse, checkAll };

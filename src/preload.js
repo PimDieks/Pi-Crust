@@ -116,6 +116,7 @@ contextBridge.exposeInMainWorld("crust", {
 		input: (id, data) => ipcRenderer.invoke("term:input", id, data),
 		resize: (id, cols, rows) => ipcRenderer.invoke("term:resize", id, cols, rows),
 		kill: (id) => ipcRenderer.invoke("term:kill", id),
+		busyNow: () => ipcRenderer.invoke("term:busy-now"),
 		onData: on("term:data"),
 		onExit: on("term:exit"),
 		onProc: on("term:proc"),
