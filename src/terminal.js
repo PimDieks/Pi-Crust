@@ -265,8 +265,18 @@ selftestSteps.push(async ({ snap, wait }) => {
 	await wait(1500);
 	await runInTerminal("echo pi-crust-second-terminal-ok");
 	await wait(1500);
-	const b = activeTerm();
-	const ok = terms.length === before + 1 && b.id !== a.id && termProcs.has(a.id);
+	let b = activeTerm();
+	// A running command is detected only where the shell's foreground process can be read (main.js term:start polls p.process; on Windows node-pty
+	// gives no foreground process, so nothing is ever "busy"). Where it is detected: a command run from the app goes to a NEW terminal and the first
+	// stays busy. On Windows: it goes to the same terminal, and the second terminal is opened by hand, so the tabs, select and close checks below
+	// still run there.
+	if (isWin) {
+		const reused = terms.length === before && b.id === a.id && !termProcs.has(a.id);
+		console.error(`SELFTEST terminal: windows has no busy detection, run reuses terminal terms=${terms.length} busy-first=${termProcs.has(a.id)} -> ${reused ? "OK" : "MISMATCH"}`);
+		b = await newTerminal();
+		await wait(1000);
+	}
+	const ok = terms.length === before + 1 && b.id !== a.id && (isWin || termProcs.has(a.id));
 	console.error(`SELFTEST terminal: terms=${terms.length} busy-first=${termProcs.has(a.id)} new=${b.id} -> ${ok ? "OK" : "MISMATCH"}`);
 	await snap("terminal-multi");
 	console.error(`SELFTEST terminal-bar: proc box ${$("#term-proc").hidden ? "hidden" : "shown"} for idle terminal -> ${$("#term-proc").hidden ? "OK" : "MISMATCH"}`);

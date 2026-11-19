@@ -1275,7 +1275,10 @@ app.on("before-quit", () => {
 	for (const p of terms.values()) {
 		clearInterval(p._procPoll);
 		try {
-			p.kill();
+			// Windows: node-pty's kill() forks a helper (conpty_console_list_agent) that cannot attach to the console during quit; the quit then
+			// ends in a native crash (exit code 127, "AttachConsole failed") after the run was done. End the shell's tree directly instead.
+			if (IS_WIN) require("./kill-tree").killTree({ pid: p.pid, exitCode: null, signalCode: null }, true, { sync: true });
+			else p.kill();
 		} catch {}
 	}
 });
