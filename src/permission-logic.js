@@ -740,8 +740,18 @@ function findOldCopy(agentDir) {
 	return null;
 }
 
+// The old copy for the selector: { name, dir (home shown as ~, for the text), file (full path, for "Show the file") } or null.
+function describeOldCopy(agentDir, home) {
+	const name = findOldCopy(agentDir);
+	if (!name) return null;
+	const dir = nodePath.join(agentDir, "extensions");
+	const h = home ? nodePath.resolve(home) : "";
+	const shown = h && (dir === h || dir.startsWith(h + nodePath.sep)) ? "~" + dir.slice(h.length) : dir;
+	return { name, dir: shown, file: nodePath.join(dir, name) };
+}
+
 module.exports = {
 	MODE_IDS, MODE_LABELS, DEFAULT_MODE, STATUS_KEY, ENTRY_TYPE, COMMAND_NAMES, OPTIONS, READ_ONLY_NAMES, MAX_SHOWN, MAX_ASKABLE, PROTECTED_WHY, PROGRAM_WHY,
 	isMode, statusText, parseMode, restoreMode, parseLastMode, lastModeToStore, canonName,
-	createGrants, clearGrants, classify, checkPath, bashShellKind, hasHidden, deviceName, DEVICE_WHY, HIDDEN_WHY, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, pinKeys,
+	createGrants, clearGrants, classify, checkPath, bashShellKind, hasHidden, deviceName, DEVICE_WHY, HIDDEN_WHY, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, describeOldCopy, pinKeys,
 };

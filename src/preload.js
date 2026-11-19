@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld("crust", {
 		stop: (chatId) => ipcRenderer.invoke("pi:stop", chatId),
 		heldTake: (chatId, i, text) => ipcRenderer.invoke("pi:heldTake", chatId, i, text),
 		held: (chatId) => ipcRenderer.invoke("pi:held", chatId),
+		oldCopy: () => ipcRenderer.invoke("pi:oldCopy"),
+		revealOldCopy: () => ipcRenderer.invoke("pi:revealOldCopy"),
+		selftestOldCopy: () => ipcRenderer.invoke("pi:selftestOldCopy"),
 		onHeld: on("pi:held"),
 		closeChat: (chatId) => ipcRenderer.invoke("pi:closeChat", chatId),
 		onRecord: on("pi:record"),
@@ -192,6 +195,7 @@ contextBridge.exposeInMainWorld("crust", {
 		list: (filter) => ipcRenderer.invoke("snap:list", filter),
 		tag: (id, tags) => ipcRenderer.invoke("snap:tag", id, tags),
 		delete: (id) => ipcRenderer.invoke("snap:delete", id),
+		same: (a, b) => ipcRenderer.invoke("snap:same", a, b),
 		selftestLoad: (html) => ipcRenderer.invoke("snap:selftestLoad", html),
 	},
 	voice: {

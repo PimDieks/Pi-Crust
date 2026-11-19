@@ -226,6 +226,23 @@ test("S8: findOldCopy sees a permission-modes file or any extension that registe
 	fs.writeFileSync(path.join(a, "extensions", "permission-modes.ts"), "x");
 	assert.equal(L.findOldCopy(a), "permission-modes.ts");
 });
+test("S8: describeOldCopy names the file and the folder (home shown as ~) and the full path to reveal", () => {
+	const home = fs.mkdtempSync(path.join(tmp, "home-"));
+	const agent = path.join(home, ".pi", "agent");
+	assert.equal(L.describeOldCopy(agent, home), null, "no old copy");
+	fs.mkdirSync(path.join(agent, "extensions"), { recursive: true });
+	fs.writeFileSync(path.join(agent, "extensions", "permission-modes.ts"), "x");
+	const d = L.describeOldCopy(agent, home);
+	assert.equal(d.name, "permission-modes.ts");
+	assert.equal(d.file, path.join(agent, "extensions", "permission-modes.ts"));
+	assert.ok(d.dir.startsWith("~") && !d.dir.includes(home), d.dir);
+	assert.equal(L.describeOldCopy(path.join(tmp, "elsewhere"), home), null);
+	// an agent folder outside home is shown whole
+	const away = fs.mkdtempSync(path.join(tmp, "away-"));
+	fs.mkdirSync(path.join(away, "extensions"));
+	fs.writeFileSync(path.join(away, "extensions", "permission-modes.js"), "x");
+	assert.equal(L.describeOldCopy(away, home).dir, path.join(away, "extensions"));
+});
 test("S8: the app switches modes with /crust-mode, which no other extension can make ambiguous", () => {
 	for (const f of ["palette.js", "remote-main.js"]) {
 		const text = fs.readFileSync(path.join(SRC, f), "utf8");
@@ -322,7 +339,7 @@ test("S5: without the extension's status the selector is disabled with a reason,
 	assert.ok(t.resetModeSelect, "resetModeSelect exists");
 	t.resetModeSelect();
 	assert.equal(sel.disabled, true);
-	assert.match(sel.title, /not (active|enforced)|did not load/i);
+	assert.match(sel.title, /has not reported a mode.*restart the chat/i);
 	assert.equal(sel.dataset.mode || "", "");
 	await t.setMode("plan");
 	assert.equal(calls.length, 0, "no /crust-mode (it would reach the model as a normal prompt)");

@@ -237,6 +237,18 @@ function register(ctx) {
 	}
 	ipcMain.handle("snap:live", (_e, o) => captureLive(o || {}).catch((e) => ({ ok: false, error: String((e && e.message) || e) })));
 	ipcMain.handle("snap:url", (_e, url, o) => captureUrl(url, o || {}));
+	// Do two stored design captures look the same (the check "nearly": under 0.1% of a 160 px wide copy differs)? Viewports: light and dark of one size.
+	ipcMain.handle("snap:same", (_e, idA, idB) => {
+		const a = safeId(idA);
+		const b = safeId(idB);
+		if (!a || !b || !ctx.repo || kindOfId(a) !== "design" || kindOfId(b) !== "design") return false;
+		try {
+			const d = dir("design");
+			return isSame(nativeImage.createFromPath(path.join(d, `${a}.png`)), nativeImage.createFromPath(path.join(d, `${b}.png`)));
+		} catch {
+			return false;
+		}
+	});
 	ipcMain.handle("snap:get", (_e, id, thumb) => {
 		id = safeId(id);
 		const kind = id && ctx.repo ? kindOfId(id) : null;

@@ -8,7 +8,7 @@ const MODE_LABELS = { plan: "Plan (read-only)", "ask-edits": "Ask before edits",
 
 // The selector shows a mode ONLY after the extension reported it (its "Mode: <label>" status). Until then, or when the
 // label is unknown, nothing enforces a mode, so the selector is disabled and says so: it never guesses "Trusted".
-const MODE_NOT_ACTIVE = "Permission modes are not active in this chat (the extension did not load), so nothing is enforced";
+const MODE_NOT_ACTIVE = "Pi Crust's permission extension has not reported a mode in this chat, so none is shown as enforced. It may not have loaded: restart the chat, and if this stays, look for an \"Extension error\" message when the chat starts.";
 let modeWaiting = null; // { timer } while a switch waits for the extension's status
 function syncModeFromStatus(text) {
 	const label = typeof text === "string" ? text.replace(/^Mode:\s*/, "") : "";
@@ -27,6 +27,7 @@ function setModeSelect(mode) {
 	sel.className = `mode-${mode}`;
 	sel.disabled = false;
 	sel.title = "Permission mode";
+	window.agentUi?.syncModePlaceholder(); // hides "Show the file" and the old-copy label once a mode is known
 }
 // No mode is active: disabled, with the reason.
 function resetModeSelect() {

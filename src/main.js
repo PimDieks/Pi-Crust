@@ -124,17 +124,40 @@ const agentInfo = (a) => ({ id: a.id, label: a.label, capabilities: structuredCl
 // One Pi RPC process per chat, keyed by chatId. Every event sent to the UI carries the chatId.
 // `wt` (from resolveWt) is null for the repo itself, { cwd, branch } for a chat in its own worktree (see worktree-main.js), or
 // { cwd, missing: true }: the worktree is gone. Then nothing is spawned (never a silent fallback to the main checkout).
-// Name of an older permission-modes extension in the user's Pi extensions folder, the first time only (then null).
-function permissionOldCopy() {
+// An older permission-modes extension in the user's Pi extensions folder: { name, dir, file, first } or null. `first` is true only the
+// first time this name is seen (the one-time toast); the selector names the old copy every time, from `name` and `dir`. The folder is only read.
+const piAgentDir = () => ENV.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+function permissionOldCopy(announce = true) {
 	try {
-		const found = require("./permission-logic").findOldCopy(ENV.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"));
-		if (!found || readSettings().permissionOldCopyTold === found) return null;
-		if (!SELFTEST) writeSettings({ permissionOldCopyTold: found });
-		return found;
+		const found = require("./permission-logic").describeOldCopy(piAgentDir(), os.homedir());
+		if (!found) return null;
+		const first = announce && readSettings().permissionOldCopyTold !== found.name;
+		if (first && !SELFTEST) writeSettings({ permissionOldCopyTold: found.name });
+		return { ...found, first };
 	} catch {
 		return null;
 	}
 }
+// "Show the file" next to the selector: reveals the old copy in Finder or Explorer. The path is looked up here, never taken from the page;
+// nothing is changed, renamed or deleted. A selftest only reports the path (nothing opens on screen).
+ipcMain.handle("pi:oldCopy", () => {
+	const found = permissionOldCopy(false);
+	return found ? { name: found.name, dir: found.dir } : null;
+});
+ipcMain.handle("pi:revealOldCopy", () => {
+	const found = permissionOldCopy(false);
+	if (!found) return { ok: false };
+	if (!SELFTEST) shell.showItemInFolder(found.file);
+	return { ok: true, file: found.file };
+});
+// Selftest only: put an old copy into the (temporary) agent folder.
+ipcMain.handle("pi:selftestOldCopy", () => {
+	if (!SELFTEST) return false;
+	const dir = path.join(piAgentDir(), "extensions");
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(path.join(dir, "permission-modes.ts"), "// selftest stand-in");
+	return true;
+});
 // startOpts: more start options for an agent that is not Pi (the Claude Agent's fork of another chat: see forkChat below).
 function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefined, startOpts = null) {
 	const agent = agents.get(agentId); // undefined = the default agent (Pi)
@@ -180,7 +203,7 @@ function startAgent(chatId, sessionFile, hint = {}, wt = null, agentId = undefin
 	// An old user copy of permission-modes in ~/.pi/agent/extensions would also load: two prompt layers. The app talks to
 	// OUR extension through /crust-mode (no clash with a second /mode), and the user is told once. The folder is only read.
 	const oldCopy = isDefaultAgent ? permissionOldCopy() : null;
-	if (oldCopy) hint = { ...hint, oldPermissionCopy: oldCopy };
+	if (oldCopy && oldCopy.first) hint = { ...hint, oldPermissionCopy: oldCopy.name }; // the one-time toast; the selector asks for the details itself (pi:oldCopy)
 	// What the Pi driver reports (agents/pi/process.js); each call carries the handle, and a replaced one is dropped there.
 	const sink = {
 		isCurrent: (p) => chats.get(chatId)?.handle === p, // false once replaced, closed or the repo changed
