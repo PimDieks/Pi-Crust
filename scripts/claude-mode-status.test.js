@@ -94,7 +94,7 @@ test("/crust-mode reaches the adapter: the gate, the SDK, the status and the ans
 	t.adapter.stop(h);
 });
 
-test("Trusted never leaves the SDK in anything but 'default' and passes no skip flag, started in Trusted or switched to it; the choice is remembered", async () => {
+test("Trusted never leaves the SDK in anything but 'default' and passes no skip flag, switched to it; Trusted is not remembered for a new chat", async () => {
 	const t = await rig();
 	const h = t.adapter.start({ cwd: t.cwd }, t.sink);
 	await t.until(() => t.modes().length === 1);
@@ -105,7 +105,9 @@ test("Trusted never leaves the SDK in anything but 'default' and passes no skip 
 	t.adapter.stop(h);
 	const h2 = t.adapter.start({ cwd: t.cwd }, t.sink);
 	await t.until(() => t.modes().length === 3);
-	assert.strictEqual(t.modes()[2], "Mode: Trusted");
+	assert.strictEqual(t.modes()[2], "Mode: Ask before commands", "a new chat after Trusted starts in Ask before commands");
+	assert.strictEqual(h2.mode, "ask-commands");
+	assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(t.configDir, "crust-permission-mode.json"), "utf8")), { mode: "ask-commands" }, "the stored last choice is never trusted");
 	assert.strictEqual(t.sdk.calls[1].options.permissionMode, "default");
 	assert.ok(!("allowDangerouslySkipPermissions" in t.sdk.calls[1].options), "no opt-in flag");
 	t.adapter.send(h2, { id: 2, type: "prompt", message: "/crust-mode ask-edits" });
@@ -114,6 +116,33 @@ test("Trusted never leaves the SDK in anything but 'default' and passes no skip 
 	await t.until(() => t.answered(3));
 	assert.deepStrictEqual(t.sdk.calls[1].modes, ["default", "default"]);
 	t.adapter.stop(h2);
+});
+
+test("Plan and Ask before edits are remembered for the next chat; an older file that says trusted starts in Ask before commands; Trusted for one chat leaves the other chats alone", async () => {
+	const t = await rig();
+	const file = path.join(t.configDir, "crust-permission-mode.json");
+	for (const [i, m] of ["plan", "ask-edits"].entries()) {
+		const h = t.adapter.start({ cwd: t.cwd }, t.sink);
+		await t.until(() => t.modes().length === 2 * i + 1 || t.modes().length === 2 * i + 2);
+		t.adapter.send(h, { id: 10 + i, type: "prompt", message: `/crust-mode ${m}` });
+		await t.until(() => t.answered(10 + i));
+		assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, "utf8")), { mode: m });
+		t.adapter.stop(h);
+		const next = t.adapter.start({ cwd: t.cwd }, t.sink);
+		assert.strictEqual(next.mode, m, `${m} is remembered`);
+		t.adapter.stop(next);
+	}
+	fs.writeFileSync(file, JSON.stringify({ mode: "trusted" }));
+	const old = t.adapter.start({ cwd: t.cwd }, t.sink);
+	assert.strictEqual(old.mode, "ask-commands", "a file from before this rule that says trusted");
+	const a = t.adapter.start({ cwd: t.cwd }, t.sink);
+	await t.until(() => a.gateInstalled && old.gateInstalled);
+	t.adapter.send(a, { id: 20, type: "prompt", message: "/crust-mode trusted" });
+	await t.until(() => t.answered(20));
+	assert.strictEqual(a.mode, "trusted");
+	assert.strictEqual(old.mode, "ask-commands", "the other chat stays");
+	t.adapter.stop(a);
+	t.adapter.stop(old);
 });
 
 test("an unknown mode is refused and the mode stays; an unreadable remembered mode gives the default", async () => {

@@ -15,6 +15,7 @@
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const { killTree } = require("../../kill-tree");
+const { parseKeepList } = require("../../secret-env");
 
 const IS_WIN = process.platform === "win32";
 
@@ -55,13 +56,23 @@ function toolCheckIn(settings) {
 	return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 40;
 }
 
+// The setting commandEnvKeep (names a command may keep, default none) reaches the permission extension in PI_CRUST_ENV_KEEP as a JSON array of
+// names. Only set when the list is not empty, and never taken from the inherited environment: the person's setting is the only source.
+function childEnv(env, settings) {
+	const out = { ...env, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn(settings)) };
+	delete out.PI_CRUST_ENV_KEEP;
+	const keep = parseKeepList(settings && settings.commandEnvKeep);
+	if (keep.length) out.PI_CRUST_ENV_KEEP = JSON.stringify(keep);
+	return out;
+}
+
 // opts: { pi: { command, args }, cwd, env, settings, sessionRef? }. Returns the child process (the handle).
 function start(opts, sink) {
 	const args = ["--mode", "rpc", ...EXTENSIONS.flatMap((f) => ["-e", path.join(EXTENSION_DIR, f)])];
 	if (opts.sessionRef) args.push("--session", opts.sessionRef);
 	const [cmd, cmdArgs] = [opts.pi.command, [...opts.pi.args, ...args]];
 	// Windows: no process groups, and detached would open a console window.
-	const proc = spawn(cmd, cmdArgs, { cwd: opts.cwd, env: { ...opts.env, PI_CRUST_TOOL_CHECKIN: String(toolCheckIn(opts.settings)) }, stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });
+	const proc = spawn(cmd, cmdArgs, { cwd: opts.cwd, env: childEnv(opts.env, opts.settings), stdio: ["pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true });
 	const current = () => sink.isCurrent(proc);
 	let ready = false;
 	const started = Date.now();
@@ -149,4 +160,4 @@ function send(proc, record) {
 	return true;
 }
 
-module.exports = { start, stop, send, canSend, state, onceExit, killRemains, toolCheckIn, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };
+module.exports = { start, stop, send, canSend, state, onceExit, killRemains, toolCheckIn, childEnv, PROBE_ID, PROBE_INTERVAL_MS, READY_TIMEOUT_MS };

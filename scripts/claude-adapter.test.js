@@ -326,6 +326,16 @@ test("start: more secret-looking names (signing keys, webhooks, cookies, auth) a
 	for (const n of keep) assert.ok(o.names.includes(n), `${n} was dropped`);
 });
 
+test("start: names in the commandEnvKeep setting are kept (case-insensitive on Windows only); every other secret-looking name is still dropped", async () => {
+	const t = await rig({});
+	const env = { PATH: "p", GH_TOKEN: "dummy-1", NPM_TOKEN: "dummy-2", OPENAI_API_KEY: "dummy-3" };
+	t.adapter.start({ cwd: t.cwd, env, mode: "plan", settings: { commandEnvKeep: ["GH_TOKEN", "unlisted_name"] } }, t.sink);
+	await t.until(() => t.events.ready.length === 1);
+	const o = t.sdk.calls[0].options.env;
+	assert.ok(o.names.includes("GH_TOKEN"), "the listed name is kept");
+	assert.ok(!o.names.includes("NPM_TOKEN") && !o.names.includes("OPENAI_API_KEY"), "the others are dropped");
+});
+
 test("start: dropped secret-looking variables leave no trace in records, stderr or errors", async () => {
 	const t = await rig({});
 	const env = { PATH: "p", OPENAI_API_KEY: "LEAKVALUE1", EXTRA_SECRET_THING_TOKEN: "LEAKVALUE2" };

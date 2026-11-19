@@ -27,25 +27,29 @@ function parseMode(arg) {
 	const a = String(arg ?? "").trim().toLowerCase();
 	return isMode(a) ? a : null;
 }
+// Trusted is never carried over: not to a new chat (the "last chosen" file) and not to a chat that comes back from a saved session (a tab
+// restored after an app restart). A person switches a chat to Trusted for that chat only; everything else starts in Ask before commands.
+const carried = (m) => (isMode(m) && m !== "trusted" ? m : DEFAULT_MODE);
+// What goes into the "last chosen" file for a mode the person just chose: Trusted is stored as Ask before commands.
+const lastModeToStore = (mode) => carried(mode);
 // The mode saved in a session: last custom entry of ours. No entry -> null (caller uses the last chosen / default).
-// An entry that cannot be read -> Ask before commands, never Trusted.
+// An entry that cannot be read, or that says Trusted -> Ask before commands, never Trusted.
 function restoreMode(entries) {
 	try {
 		if (!Array.isArray(entries)) return DEFAULT_MODE;
 		for (let i = entries.length - 1; i >= 0; i--) {
 			const e = entries[i];
-			if (e && e.type === "custom" && e.customType === ENTRY_TYPE) return e.data && isMode(e.data.mode) ? e.data.mode : DEFAULT_MODE;
+			if (e && e.type === "custom" && e.customType === ENTRY_TYPE) return e.data ? carried(e.data.mode) : DEFAULT_MODE;
 		}
 		return null;
 	} catch {
 		return DEFAULT_MODE;
 	}
 }
-// The "last chosen" file content: {"mode": "<id>"}. Anything else -> default.
+// The "last chosen" file content: {"mode": "<id>"}. Anything else, and Trusted (an older file may still say it) -> Ask before commands.
 function parseLastMode(text) {
 	try {
-		const m = JSON.parse(String(text)).mode;
-		return isMode(m) ? m : DEFAULT_MODE;
+		return carried(JSON.parse(String(text)).mode);
 	} catch {
 		return DEFAULT_MODE;
 	}
@@ -738,6 +742,6 @@ function findOldCopy(agentDir) {
 
 module.exports = {
 	MODE_IDS, MODE_LABELS, DEFAULT_MODE, STATUS_KEY, ENTRY_TYPE, COMMAND_NAMES, OPTIONS, READ_ONLY_NAMES, MAX_SHOWN, MAX_ASKABLE, PROTECTED_WHY, PROGRAM_WHY,
-	isMode, statusText, parseMode, restoreMode, parseLastMode, canonName,
+	isMode, statusText, parseMode, restoreMode, parseLastMode, lastModeToStore, canonName,
 	createGrants, clearGrants, classify, checkPath, bashShellKind, hasHidden, deviceName, DEVICE_WHY, HIDDEN_WHY, editPathOf, editPathsOf, isReadOnlyCommand, decide, applyAnswer, vis, findOldCopy, pinKeys,
 };

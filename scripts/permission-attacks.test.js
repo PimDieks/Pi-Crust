@@ -21,6 +21,12 @@ const agentDir = path.join(tmp, "agent");
 fs.mkdirSync(path.join(proj, "src"), { recursive: true });
 fs.mkdirSync(outside);
 process.env.PI_CODING_AGENT_DIR = agentDir;
+// The extension adds a prefix that hides secret-looking variables to every command (secret-env.js). A machine that has such a variable would
+// change the commands asserted below, so these tests drop them first: no test here depends on the real environment.
+try {
+	const { isSecretName } = require(path.join(SRC, "secret-env.js"));
+	for (const k of Object.keys(process.env)) if (isSecretName(k)) delete process.env[k];
+} catch {}
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const d = (mode, toolName, input, grants, pathOptions) => L.decide({ mode, toolName, input, cwd: proj, grants, pathOptions });

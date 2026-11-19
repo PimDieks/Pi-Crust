@@ -1,0 +1,107 @@
+// Secret-looking environment variables, as pure functions shared by both agents (Claude Agent chats and Pi chats). No file, no process
+// and no environment is read here: the caller passes the names in. Only NAMES are ever looked at; values are never read, copied or shown.
+//   isSecretName(name)             the one name rule
+//   parseKeepList(value)           the setting "commandEnvKeep": names a command may keep (default none)
+//   secretNames(env, { keep })     the secret-looking names present in an environment object, minus the keep list
+//   shellFamily(...)               which shell syntax a command tool runs: "posix" (bash), "powershell" or "other"
+//   hideCommand(command, family, names)  the command that actually runs: a prefix that removes those variables for that command only
+// Claude Agent chats drop the names from the engine's own environment (agents/claude/index.js). Pi needs its provider keys in its own
+// environment, so Pi's permission extension keeps them there and hides them from every command it runs (pi-extension/permission-modes.ts).
+"use strict";
+
+const nodePath = require("node:path");
+
+// Other services' secrets in the inherited environment, by NAME (values are never read). The engine needs none of them, and every command a
+// Claude Agent chat runs would inherit them (a real trial printed two unrelated API keys). Matches a name that ends in, or has as a whole
+// underscore-separated part, TOKEN, SECRET, PASSWORD, PASSWD, CREDENTIALS, PRIVATE_KEY, ACCESS_KEY or API_KEY; APIKEY anywhere; a trailing PAT
+// (personal access token) or PWD part; and connection strings, which embed a password (DATABASE_URL, REDIS_URL, MONGODB_URI, *_CONNECTION_STRING,
+// *_DSN). That covers GH_TOKEN, NPM_TOKEN, AWS_SESSION_TOKEN, AWS_SECRET_ACCESS_KEY, PGPASSWORD, MYSQL_PWD and GOOGLE_APPLICATION_CREDENTIALS.
+// A second rule adds: a trailing KEY part (SIGNING_KEY, SECRET_KEY, OPENAI_KEY), PASSPHRASE or COOKIE as a whole part, a trailing _SK (STRIPE_SK),
+// WEBHOOK_URL (it embeds a secret), and AUTH or AUTHORIZATION as a whole part (AUTH_KEY, NPM_CONFIG__AUTH, AUTHORIZATION).
+// Not matched, so kept: PATH, PWD (the plain working-directory variable), proxy and CA variables, AWS_PROFILE, GIT_AUTHOR_NAME, KEYBOARD_LAYOUT.
+// SSH_AUTH_SOCK is kept on purpose: it holds a socket path, not a secret, and ssh and git need it to reach the person's own agent.
+const SECRET_ENV_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)$|_(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)_|APIKEY|(?:^|_)(?:PAT|MYSQL_PWD)$|(?:^|_)(?:DATABASE_URL|REDIS_URL|MONGODB_URI|MONGODB_URL|MONGO_URL|AMQP_URL|WEBHOOK_URL|CONNECTION_STRING|DSN)$/i;
+const SECRET_ENV_NAME_MORE = /(?:^|_)(?:KEY$|(?:PASSPHRASE|COOKIE)(?:_|$))|_SK$|(?:^|_)AUTH(?:ORIZATION)?(?=_|$)(?!_SOCK$)/i;
+
+const isSecretName = (name) => typeof name === "string" && (SECRET_ENV_NAME.test(name) || SECRET_ENV_NAME_MORE.test(name));
+
+// The keep list: an array of names, or one string with names separated by commas or line breaks (a name has no "=" and no NUL; spaces
+// inside a name are kept, outer spaces are not). Anything else gives an empty list. At most 200 names of at most 200 characters.
+function parseKeepList(value) {
+	let items = [];
+	if (Array.isArray(value)) items = value;
+	else if (typeof value === "string") items = value.split(/[,\r\n]+/);
+	const out = [];
+	for (const v of items) {
+		if (typeof v !== "string") continue;
+		const n = v.trim();
+		if (n && n.length <= 200 && !/[=\0]/.test(n) && !out.includes(n)) out.push(n);
+		if (out.length >= 200) break;
+	}
+	return out;
+}
+
+// Windows names are case-insensitive, so "gh_token" in the list keeps GH_TOKEN there; elsewhere the case must match.
+const defaultFold = () => process.platform === "win32";
+
+// The names in `env` that look secret and are not on the keep list.
+function secretNames(env, { keep = [], caseInsensitive = defaultFold() } = {}) {
+	if (!env || typeof env !== "object") return [];
+	const fold = (s) => (caseInsensitive ? s.toLowerCase() : s);
+	const kept = new Set(parseKeepList(keep).map(fold));
+	return Object.keys(env).filter((k) => isSecretName(k) && !kept.has(fold(k)));
+}
+
+// Which syntax a command tool speaks. The "powershell" tool is PowerShell. The "bash" tool runs Pi's shell: settings shellPath (global and
+// project, "" / null / undefined count as unset) or, with none, Git Bash (Windows) or bash. A shellPath must name bash or PowerShell; any other
+// shell (fish, cmd, nushell ...), a value that is not a string, two settings that disagree, or unreadable settings (shellPaths null) is "other".
+function shellFamily({ toolName, shellPaths = [], platform = process.platform } = {}) {
+	if (toolName === "powershell") return "powershell";
+	if (toolName !== "bash" || !Array.isArray(shellPaths)) return "other";
+	const base = platform === "win32" ? nodePath.win32.basename : nodePath.posix.basename;
+	const set = shellPaths.filter((p) => p !== undefined && p !== null && p !== "");
+	if (!set.length) return "posix";
+	const fams = new Set();
+	for (const sp of set) {
+		if (typeof sp !== "string") return "other";
+		const b = base(sp.trim()).toLowerCase();
+		fams.add(/^bash(\.exe)?$/.test(b) ? "posix" : /^(powershell|pwsh)(\.exe)?$/.test(b) ? "powershell" : "other");
+	}
+	return fams.size === 1 ? [...fams][0] : "other";
+}
+
+const POSIX_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SQ_ESCAPE = "'" + "\\" + "''"; // ' becomes '\'' (close the quote, an escaped quote, open it again)
+const sq = (s) => "'" + String(s).replace(/'/g, SQ_ESCAPE) + "'"; // a POSIX single-quoted word: the one quoting that needs no other escape
+
+// PowerShell: a plain name is a single-quoted string; any other name is built from its UTF-16 code units, so no quote character (PowerShell
+// reads the curly quotes as quotes too), "(", "%" or non-ASCII character can ever matter, and the prefix stays pure ASCII.
+const psName = (n) => (/^[A-Za-z0-9_]+$/.test(n) ? `'${n}'` : `(-join [char[]](${Array.from({ length: n.length }, (_, i) => n.charCodeAt(i)).join(",")}))`);
+
+// The command that actually runs. The caller has already decided on the ORIGINAL command; this only adds what removes the variables.
+//   posix       "unset -v A B; <command>" (a name that is not a shell identifier, such as "ProgramFiles(x86)" or one with a non-ASCII letter, cannot
+//               be unset and bash still hands it on: then the whole command runs through `exec env -u NAME ... bash -c '<command>'`)
+//   powershell  "'A','B' | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }; <command>"
+// Idempotent: a command that already starts with exactly this prefix (or this wrapper) is returned as it is. No names: the command is returned
+// unchanged. Returns { ok: true, command, hidden } or { ok: false, reason } for a shell this cannot write for (fail closed).
+function hideCommand(command, family, names) {
+	const list = [...new Set(names || [])];
+	if (typeof command !== "string") return { ok: false, reason: "The command is not text." };
+	if (!list.length) return { ok: true, command, hidden: 0 };
+	if (family === "powershell") {
+		const prefix = `${list.map(psName).join(",")} | ForEach-Object { [Environment]::SetEnvironmentVariable($_, $null, 'Process') }; `;
+		return { ok: true, command: command.startsWith(prefix) ? command : prefix + command, hidden: list.length };
+	}
+	if (family === "posix") {
+		if (list.every((n) => POSIX_NAME.test(n))) {
+			const prefix = `unset -v ${list.join(" ")}; `;
+			return { ok: true, command: command.startsWith(prefix) ? command : prefix + command, hidden: list.length };
+		}
+		const head = `exec env ${list.map((n) => "-u " + sq(n)).join(" ")} "\${BASH:-bash}" -c '`;
+		if (command.startsWith(head) && command.endsWith("'")) return { ok: true, command, hidden: list.length };
+		return { ok: true, command: head + command.replace(/'/g, SQ_ESCAPE) + "'", hidden: list.length };
+	}
+	return { ok: false, reason: "Pi Crust hides secret-looking environment variables from commands, but it cannot do that in this shell (only bash and PowerShell). Nothing was run. Use Git Bash or PowerShell as the shell, or list the variables in the commandEnvKeep setting." };
+}
+
+module.exports = { SECRET_ENV_NAME, SECRET_ENV_NAME_MORE, isSecretName, parseKeepList, secretNames, shellFamily, hideCommand };

@@ -174,6 +174,20 @@ selftestSteps.push(async ({ snap, wait }) => {
 		check(await setModeTo("trusted"), "no switch to Trusted");
 		await turn(made, 3, "And in Trusted.", [], "trusted");
 
+		// 3a. Trusted is for that chat only: a chat opened after it starts in Ask before commands (the stored last choice is never Trusted).
+		{
+			await newChat(null, "After Trusted", { agent: "claude" });
+			const fresh = active;
+			check(fresh && fresh !== made, "no second chat was made");
+			check(await until(() => fresh.state.ready && !fresh.needsSetup && $("#perm-mode").dataset.mode === "ask-commands", 15000), `a new chat after Trusted starts in "${$("#perm-mode").dataset.mode}", want ask-commands`);
+			const gone = closeChat(fresh);
+			if (await until(() => vis($("#modal-backdrop")), 1500)) [...document.querySelectorAll("#modal .modal-actions button")].find((b) => b.textContent === "Close chat")?.click();
+			await gone;
+			check(await until(() => !chats.has(fresh.id), 5000), "the second chat did not close");
+			activate(made);
+			check(await until(() => $("#perm-mode").dataset.mode === "trusted", 8000), `the first chat is back in "${$("#perm-mode").dataset.mode}", want trusted (Trusted stayed with that chat)`);
+		}
+
 		// 3b. The question box is shared with Pi chats: a plain Pi question and a Pi permission question (same records) leave nothing either, and a
 		//     second question after the first shows and leaves the same way. (Closed with dismiss(): nothing is sent to a process.)
 		baseTop = $("#input").getBoundingClientRect().top;

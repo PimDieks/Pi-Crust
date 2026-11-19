@@ -12,10 +12,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as logic from "../permission-logic.js";
 // @ts-ignore plain CommonJS module
 import * as permGit from "../permission-git.js";
+// @ts-ignore plain CommonJS module
+import * as secretEnv from "../secret-env.js";
 
 type Block = { block: true; reason: string };
 
-// "Last chosen" mode, so a new chat starts where the user left off. A new install has no file: Ask before commands.
+// "Last chosen" mode, so a new chat starts where the user left off. A new install has no file: Ask before commands. Trusted is not carried over.
 function lastModeFile(): string {
 	return path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "crust-permission-mode.json");
 }
@@ -30,7 +32,7 @@ function writeLastMode(mode: string) {
 	try {
 		const f = lastModeFile();
 		fs.mkdirSync(path.dirname(f), { recursive: true });
-		fs.writeFileSync(f, JSON.stringify({ mode }));
+		fs.writeFileSync(f, JSON.stringify({ mode: logic.lastModeToStore(mode) })); // Trusted is stored as Ask before commands
 	} catch {
 		// not saving is harmless: the next new chat starts in the default
 	}
@@ -59,6 +61,11 @@ function pin(input: any, keys: string[] | "all") {
 // otherwise Git Bash on Windows (or whatever bash.exe is on PATH: that may be WSL) or bash elsewhere. Only a Git Bash or a real
 // bash counts as "bash"; a WSL bash.exe, any other shell, or settings that can't be read: "unknown" (strictest rules).
 function bashToolShell(cwd: string): string {
+	const shellPaths = readShellPaths(cwd);
+	return shellPaths === null ? "unknown" : logic.bashShellKind({ shellPaths });
+}
+// The shellPath values of Pi's global and project settings (unset ones are undefined), or null when a settings file can't be read.
+function readShellPaths(cwd: string): unknown[] | null {
 	const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 	const shellPaths: unknown[] = [];
 	for (const f of [path.join(agentDir, "settings.json"), path.join(cwd || ".", ".pi", "settings.json")]) {
@@ -67,15 +74,23 @@ function bashToolShell(cwd: string): string {
 			text = fs.readFileSync(f, "utf8");
 		} catch (e: any) {
 			if (e && e.code === "ENOENT") continue;
-			return "unknown";
+			return null;
 		}
 		try {
 			shellPaths.push(JSON.parse(text).shellPath);
 		} catch {
-			return "unknown";
+			return null;
 		}
 	}
-	return logic.bashShellKind({ shellPaths });
+	return shellPaths;
+}
+// Names (never values) of the variables a command may keep: the app's commandEnvKeep setting, handed over in this variable.
+function keepList(): string[] {
+	try {
+		return secretEnv.parseKeepList(JSON.parse(process.env.PI_CRUST_ENV_KEEP || "[]"));
+	} catch {
+		return [];
+	}
 }
 
 export default function (pi: ExtensionAPI) {
@@ -198,7 +213,7 @@ export default function (pi: ExtensionAPI) {
 
 	async function review(event: any, ctx: any): Promise<Block | undefined> {
 		const d = judge(event, ctx);
-		if (d.action === "allow") return sealed(event, d);
+		if (d.action === "allow") return sealed(event, d, ctx);
 		if (d.action === "block") return { block: true, reason: d.reason };
 		if (!ctx.hasUI) return { block: true, reason: "This needs the user's approval, but there is no way to ask here. Nothing was run." };
 		const gen = generation;
@@ -221,17 +236,34 @@ export default function (pi: ExtensionAPI) {
 			if (typeof event.toolCallId === "string") stale.add(event.toolCallId);
 			else protect = null; // no id to wait for: read again on the next call
 		}
-		return sealed(event, { action: "allow" });
+		return sealed(event, { action: "allow" }, ctx);
 	}
 
 	// Pi runs the call with the SAME input object, and extensions loaded after this one (user and project extensions
 	// come after the app's -e list) still see it. Outside Trusted, the fields the decision read are made read-only, so
 	// what was approved is what runs (a later change throws, which blocks the call). Other fields stay writable, so a
-	// well-behaved extension can still add a timeout. In Trusted nothing is pinned or rewritten. (H4)
-	function sealed(event: any, d: any): Block | undefined {
+	// well-behaved extension can still add a timeout. In Trusted nothing is pinned and no git rewrite is made, but the secret-hiding prefix below is still added. (H4)
+	function sealed(event: any, d: any, ctx: any): Block | undefined {
+		if (mode !== "trusted" && d && typeof d.rewrite === "string") event.input.command = d.rewrite; // read-only git, hardened (git-harden.js)
+		const hidden = hideSecrets(event, ctx);
+		if (hidden) return hidden;
 		if (mode === "trusted") return undefined;
-		if (d && typeof d.rewrite === "string") event.input.command = d.rewrite; // read-only git, hardened (git-harden.js)
 		pin(event.input, logic.pinKeys(event.toolName));
+		return undefined;
+	}
+
+	// Pi hands its whole environment to every command it runs, and Pi itself needs its provider keys in it. So the decision above was made
+	// on the ORIGINAL command (the prompt and the chat show that one), and the command that actually runs gets a prefix that removes every
+	// secret-looking variable present in Pi's environment, by name, for that command only (secret-env.js). Every mode, Trusted included.
+	// A shell the prefix can't be written for blocks the call (fail closed) when there is anything to hide.
+	function hideSecrets(event: any, ctx: any): Block | undefined {
+		if (logic.classify(event.toolName) !== "shell" || !event.input || typeof event.input.command !== "string") return undefined;
+		const names = secretEnv.secretNames(process.env, { keep: keepList() });
+		if (!names.length) return undefined;
+		const family = secretEnv.shellFamily({ toolName: event.toolName, shellPaths: readShellPaths(ctx.cwd) });
+		const r = secretEnv.hideCommand(event.input.command, family, names);
+		if (!r.ok) return { block: true, reason: r.reason };
+		if (r.command !== event.input.command) event.input.command = r.command;
 		return undefined;
 	}
 
@@ -241,7 +273,7 @@ export default function (pi: ExtensionAPI) {
 			// Calls that need no question skip the queue.
 			const first = judge(event, ctx);
 			if (first.action === "block") return { block: true, reason: first.reason };
-			if (first.action === "allow") return sealed(event, first);
+			if (first.action === "allow") return sealed(event, first, ctx);
 			const run = queue.then(() => review(event, ctx));
 			queue = run.catch(() => undefined);
 			return await run;

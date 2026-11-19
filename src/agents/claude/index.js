@@ -13,6 +13,7 @@ const { pathToFileURL } = require("node:url");
 const A = require("../adapter");
 const { killTree } = require("../../kill-tree");
 const logic = require("../../permission-logic");
+const secretEnv = require("../../secret-env");
 const { sdkModeFor, makeCanUseTool, makeHooks } = require("./permissions");
 const { createTranslator } = require("./translate");
 const requests = require("./requests");
@@ -43,17 +44,8 @@ const PRIVACY_SWITCHES = [
 	"CLAUDE_CODE_DISABLE_BUNDLED_SKILLS",
 ];
 const ENGINE_ENV_DROP = /^(NODE_OPTIONS|BASH_ENV|API_TIMEOUT_MS|USE_BUILTIN_RIPGREP|MAX_.*|MCP_.*|OTEL_.*|ENABLE_.*|DISABLE_.*|BETA_TRACING_.*)$/i;
-// Other services' secrets in the inherited environment, by NAME (values are never read). The engine needs none of them, and every command a
-// Claude Agent chat runs would inherit them (a real trial printed two unrelated API keys). Matches a name that ends in, or has as a whole
-// underscore-separated part, TOKEN, SECRET, PASSWORD, PASSWD, CREDENTIALS, PRIVATE_KEY, ACCESS_KEY or API_KEY; APIKEY anywhere; a trailing PAT
-// (personal access token) or PWD part; and connection strings, which embed a password (DATABASE_URL, REDIS_URL, MONGODB_URI, *_CONNECTION_STRING,
-// *_DSN). That covers GH_TOKEN, NPM_TOKEN, AWS_SESSION_TOKEN, AWS_SECRET_ACCESS_KEY, PGPASSWORD, MYSQL_PWD and GOOGLE_APPLICATION_CREDENTIALS.
-// A second rule adds: a trailing KEY part (SIGNING_KEY, SECRET_KEY, OPENAI_KEY), PASSPHRASE or COOKIE as a whole part, a trailing _SK (STRIPE_SK),
-// WEBHOOK_URL (it embeds a secret), and AUTH or AUTHORIZATION as a whole part (AUTH_KEY, NPM_CONFIG__AUTH, AUTHORIZATION).
-// Not matched, so kept: PATH, PWD (the plain working-directory variable), proxy and CA variables, AWS_PROFILE, GIT_AUTHOR_NAME, KEYBOARD_LAYOUT.
-// SSH_AUTH_SOCK is kept on purpose: it holds a socket path, not a secret, and ssh and git need it to reach the person's own agent.
-const SECRET_ENV_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)$|_(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|PRIVATE_KEY|ACCESS_KEY|API_KEY)_|APIKEY|(?:^|_)(?:PAT|MYSQL_PWD)$|(?:^|_)(?:DATABASE_URL|REDIS_URL|MONGODB_URI|MONGODB_URL|MONGO_URL|AMQP_URL|WEBHOOK_URL|CONNECTION_STRING|DSN)$/i;
-const SECRET_ENV_NAME_MORE = /(?:^|_)(?:KEY$|(?:PASSPHRASE|COOKIE)(?:_|$))|_SK$|(?:^|_)AUTH(?:ORIZATION)?(?=_|$)(?!_SOCK$)/i;
+// Other services' secrets in the inherited environment are dropped by NAME (the rule lives in ../../secret-env.js, shared with Pi chats; the
+// setting commandEnvKeep lists names to keep). The engine needs none of them, and every command a chat runs would inherit them.
 const PARENT_GONE_TEXT = (info) => (info && info.parent ? "The chat this one was forked from is gone, so there is nothing to continue. Start a new chat." : "The chat this one continues is gone, so there is nothing to continue. Start a new chat.");
 const NO_CONFIG_DIR = "Claude Agent has no app config folder, so it was not started (it would otherwise use another Claude sign-in).";
 const NO_ENGINE = "The Claude Agent engine is not installed yet.";
@@ -189,7 +181,7 @@ function createClaudeAdapter(deps = {}) {
 
 	// Fails closed: without the app's own config folder the engine would use an inherited CLAUDE_CONFIG_DIR or the user's own Claude folder.
 	let secretsDropped = 0; // how many secret-looking inherited variables the last buildEnv removed: a count only, never names or values
-	function buildEnv(base, key) {
+	function buildEnv(base, key, keep) {
 		if (!cfg.configDir) throw new Error(NO_CONFIG_DIR);
 		const env = { ...(base || process.env) };
 		// Every ANTHROPIC_* and CLAUDE_CODE_* variable (base URL, tokens, flags) and CLAUDE_CONFIG_DIR is dropped; only the ones set below
@@ -200,11 +192,9 @@ function createClaudeAdapter(deps = {}) {
 		for (const k of Object.keys(env)) if (ENGINE_ENV_DROP.test(k)) delete env[k];
 		// Other services' keys and tokens, by name. Only the count is kept (for the trial log).
 		secretsDropped = 0;
-		for (const k of Object.keys(env)) {
-			if (SECRET_ENV_NAME.test(k) || SECRET_ENV_NAME_MORE.test(k)) {
-				delete env[k];
-				secretsDropped++;
-			}
+		for (const k of secretEnv.secretNames(env, { keep })) {
+			delete env[k];
+			secretsDropped++;
 		}
 		env.ANTHROPIC_API_KEY = key;
 		env.CLAUDE_CONFIG_DIR = cfg.configDir;
@@ -228,7 +218,7 @@ function createClaudeAdapter(deps = {}) {
 		const appendText = opts.claudeMd === false ? null : readClaudeMd(opts.cwd);
 		const o = {
 			cwd: opts.cwd,
-			env: buildEnv(opts.env, key),
+			env: buildEnv(opts.env, key, settings.commandEnvKeep),
 			settingSources: [],
 			includePartialMessages: true,
 			systemPrompt: { type: "preset", preset: "claude_code", ...(appendText ? { append: appendText } : {}) },
@@ -303,7 +293,7 @@ function createClaudeAdapter(deps = {}) {
 		try {
 			if (!cfg.configDir) return;
 			cfg.fs.mkdirSync(cfg.configDir, { recursive: true });
-			cfg.fs.writeFileSync(path.join(cfg.configDir, MODE_FILE), JSON.stringify({ mode }) + "\n", { mode: 0o600 });
+			cfg.fs.writeFileSync(path.join(cfg.configDir, MODE_FILE), JSON.stringify({ mode: logic.lastModeToStore(mode) }) + "\n", { mode: 0o600 });
 		} catch {}
 	}
 	// The status record the mode selector reads (the same one Pi's permission extension sends): only sent once the gate is installed.
