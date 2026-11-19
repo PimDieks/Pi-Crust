@@ -27,6 +27,7 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl }) {
 			const root = path.join(tmp, "project");
 			fs.mkdirSync(root, { recursive: true });
 			fs.writeFileSync(path.join(root, "a.html"), "<!doctype html><title>project page</title><p>hello</p>");
+			fs.writeFileSync(path.join(root, "long.html"), "<!doctype html><title>A very long page title that goes past twenty-four characters</title><p>long</p>");
 			fs.writeFileSync(path.join(root, "pic.png"), PNG);
 			fs.writeFileSync(path.join(root, "doc.pdf"), PDF);
 			setRoot(root);
@@ -43,6 +44,7 @@ function register({ ipcMain, viewerTabs, session, setRoot, ctxView, devUrl }) {
 				port,
 				devUrl,
 				page: pp.toAddress(root, "a.html"),
+				long: pp.toAddress(root, "long.html"),
 				image: pp.toAddress(root, "pic.png"),
 				pdf: pp.toAddress(root, "doc.pdf"),
 				otherProject: pp.toAddress(path.join(tmp, "elsewhere"), "a.html"),

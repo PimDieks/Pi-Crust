@@ -166,6 +166,9 @@ selftestSteps.push(async () => {
 		check("closing the last tab replaces it by one on the dev address", r.ok && r.replaced === true && l.tabs.length === 1 && l.tabs[0].id !== lastId && l.tabs[0].session === "web" && l.tabs[0].address.startsWith(S.devUrl.replace(/\/$/, "")), JSON.stringify(l));
 		pr = await T("probe");
 		check("and ctx.browserView is that new tab's view", pr.ctxViewIsActive && pr.tabs.length === 1);
+
+		// --- the row of page tabs (src/viewer-tab-row.js; checks in viewer-tabs-selftest-row.js) ----------------------------------------
+		await window.viewerTabsRowChecks({ S, check, sleep, list, byId, ids });
 	} catch (e) {
 		check("no exception", false, e && e.stack ? e.stack : e);
 	} finally {

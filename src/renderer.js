@@ -192,7 +192,19 @@ function syncBrowserBounds() {
 	const r = $("#browser-slot").getBoundingClientRect();
 	crust.browser.setBounds({ x: r.left, y: r.top, width: r.width, height: r.height });
 }
-new ResizeObserver(syncBrowserBounds).observe($("#browser-slot"));
+// The slot's own size is not enough: anything above it (the address bar, the row of pages, the state bar, a strip over the tabs) that changes height
+// moves the slot without resizing it, and the native view would stay where the slot was (it was 4 px off, hiding the top of the page).
+// So watch the slot, its ancestors and everything that comes before any of them.
+{
+	const ro = new ResizeObserver(syncBrowserBounds);
+	for (let n = $("#browser-slot"); n && n !== document.documentElement; n = n.parentElement) {
+		ro.observe(n);
+		for (let p = n.previousElementSibling; p; p = p.previousElementSibling) ro.observe(p);
+	}
+}
+// The panel fades up (translateY(4px) to 0) every time it is shown; getBoundingClientRect includes that transform, so the first measure is 4 px low
+// and no resize follows. Measure again when the animation ends.
+$('.tab-panel[data-panel="browser"]').addEventListener("animationend", (e) => e.target === e.currentTarget && syncBrowserBounds());
 window.addEventListener("resize", syncBrowserBounds);
 
 // ===========================================================================
@@ -278,14 +290,21 @@ function openFigmaPanel() {
 }
 // The URL the embedded browser really has (the address bar can hold unsubmitted text); design captures use this one.
 let liveBrowserUrl = "";
+let shownTabId = null;
 crust.browser.onState((s) => {
 	liveBrowserUrl = s.url || "";
-	if (document.activeElement !== $("#url")) $("#url").value = s.url || "";
+	// The one address bar shows the active tab's address; a switch of tab replaces unsubmitted text too.
+	if (document.activeElement !== $("#url") || (s.activeId && s.activeId !== shownTabId)) $("#url").value = s.url || "";
+	shownTabId = s.activeId || shownTabId;
 	$('[data-action="back"]').disabled = !s.canGoBack;
 	$('[data-action="forward"]').disabled = !s.canGoForward;
-	if (s.loading || s.error === null) $("#browser-error").hidden = true; // the active tab has no load error (the event carries it per tab)
+	// The error belongs to the tab: the box shows the active tab's error and nothing else (a failed page reports "loading" at the moment it fails,
+	// so loading must not hide it).
+	if (s.error) showBrowserError(s.error);
+	else $("#browser-error").hidden = true;
 });
-crust.browser.onError((err) => {
+crust.browser.onError((err) => showBrowserError(err));
+function showBrowserError(err) {
 	const box = $("#browser-error");
 	box.replaceChildren(
 		el("strong", "", "Can't load the page"),
@@ -298,7 +317,7 @@ crust.browser.onError((err) => {
 		box.append(hint);
 	}
 	box.hidden = false;
-});
+}
 
 // ===========================================================================
 // File tree

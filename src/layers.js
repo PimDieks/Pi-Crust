@@ -602,6 +602,39 @@ selftestSteps.push(async ({ snap, wait }) => {
 		hiddenWatch.disconnect();
 		console.error(`SELFTEST layers info: elements that carry [hidden] while another rule gives them a display (the global rule hides them; before it, they showed): ${[...shadowed].join(" | ") || "none"}`);
 	}
+	// 8. The Viewer's row of pages (src/viewer-tab-row.js) sits in the page flow above the native page view, outside its bounds, on no layer. With 8
+	//    pages: every tab, the close button of the active one and + are on top of what is at their centre; the view starts below the row; and the
+	//    reason for the disabled + (its tooltip: drawn inside the row, since a popup below it would be under the native view) shows on focus,
+	//    topmost, inside the row. Needs no web server: the pages are dev-address tabs (their load errors do not matter here).
+	{
+		await crust.selftest.focusEmulation(true);
+		switchTab("browser");
+		await wait(500);
+		const B = crust.browser;
+		while ((await B.tabs()).tabs.length > 1) await B.closeTab((await B.tabs()).tabs[0].id);
+		while ((await B.tabs()).tabs.length < 8) await B.createTab();
+		await wait(600);
+		const row = $("#viewer-tabs");
+		const rowControls = { controls: () => [...$("#vt-list").querySelectorAll('[role="tab"]'), $("#vt-list .vt-item.active .vt-close"), $("#vt-add")] };
+		for (const theme of ["light", "dark"]) {
+			setTheme(theme);
+			await wait(500);
+			report("viewer page row: tabs, close and +", theme, reach(rowControls), "");
+			$("#vt-add").focus();
+			await wait(300);
+			const lim = $("#vt-limit").getBoundingClientRect();
+			const rr = row.getBoundingClientRect();
+			const top = document.elementFromPoint(lim.left + lim.width / 2, lim.top + lim.height / 2);
+			const shown = getComputedStyle($("#vt-limit")).opacity === "1" && lim.width > 100 && lim.top >= rr.top - 0.5 && lim.bottom <= rr.bottom + 0.5 && top === $("#vt-limit");
+			const tipOk = $("#vt-add").title === "8 pages is the most. Close one first." && $("#vt-limit").textContent === $("#vt-add").title && $("#vt-add").getAttribute("aria-describedby") === "vt-limit";
+			report("viewer page row: the reason for the disabled + on focus", theme, reach({ controls: () => [$("#vt-add")] }), shown && tipOk ? "" : ` reason shown=${shown} (opacity ${getComputedStyle($("#vt-limit")).opacity}, w ${Math.round(lim.width)}) tooltip ok=${tipOk}`);
+			const bv = await crust.selftest.bounds();
+			report("viewer page row: the page view starts below the row", theme, [{ ok: true }], bv.view.y >= rr.bottom * bv.z - 1 ? "" : ` view y ${bv.view.y} row bottom ${rr.bottom * bv.z}`);
+			if (theme === "dark") await snap("layers-viewer-row-8");
+			$("#url").focus();
+		}
+		while ((await B.tabs()).tabs.length > 1) await B.closeTab((await B.tabs()).tabs[0].id);
+	}
 	setTheme(was);
 	switchTab(tab);
 	console.error(`SELFTEST layers: ${bad ? `${bad} problem(s)` : "all overlays reachable"} -> ${bad ? "MISMATCH" : "OK"}`);

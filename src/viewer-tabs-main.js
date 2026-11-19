@@ -146,7 +146,8 @@ function create(deps) {
 			// The CmdOrCtrl modifier: command on macOS, Ctrl on Windows (sent on as ctrl: true, which the UI replays).
 			const mod = deps.isWin ? input.control && !input.meta : input.meta && !input.control;
 			const appKey =
-				(mod && (["k", "1", "2", "3", "4", "5", "j", "n", "o", "[", "]", "{", "}", "c"].includes(k) ? !input.alt : k === "b" || (k === "f" && input.shift && !input.alt))) ||
+				(mod && (["k", "1", "2", "3", "4", "5", "j", "n", "o", "[", "]", "{", "}", "c", "t", "w"].includes(k) ? !input.alt : k === "b" || (k === "f" && input.shift && !input.alt))) ||
+					(mod && input.alt && !input.shift && (k === "arrowleft" || k === "arrowright")) || // previous / next page
 				(input.control && !input.meta && (input.code === "Backquote" || input.code === "Tab")) ||
 				(["1", "2", "3"].includes(k) && input.control && (deps.isWin ? input.alt && !input.meta : input.meta && !input.alt)); // view switch
 			if (appKey) {

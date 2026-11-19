@@ -340,6 +340,8 @@ On Windows, ⌘ and ⌃ mean Ctrl and ⌥ means Alt. Ctrl+W does not close the w
 | ⌘L | Add editor / diff selection to the chat |
 | ⌘S / ⌥⌘S | Save / save all |
 | ⌘R | Reload the Viewer tab |
+| ⌘T / ⌘W | New page / close the page, in the Viewer tab only (the row of pages under the address bar; 8 pages at most) |
+| ⌥⌘← / ⌥⌘→ | Previous / next page in the Viewer tab |
 
 **File tree**: click (or Enter) opens a file in the Editor, double-click mentions it in the chat, ⌘-click opens it in VS Code. Drag the pane borders to resize; the layout is remembered.
 
