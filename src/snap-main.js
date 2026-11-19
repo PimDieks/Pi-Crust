@@ -146,6 +146,7 @@ function register(ctx) {
 		if (skipEmpty && ctx.browserFailed?.()) return { ok: false, error: "The page did not load" }; // failed while we waited
 		// Right after a tab was shown or hidden the first capture can fail ("display surface not available", a viz error), most often on a
 		// project page or an image: try again, and then without stayHidden (the native view stays hidden either way).
+		await offscreen.idle(); // another capture is drawing the view right now: wait, then capture normally
 		let img;
 		for (let attempt = 0; ; attempt++) {
 			try {
