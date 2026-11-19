@@ -152,6 +152,10 @@
 		const u2 = await crust.snap.url(dataUrl(page("#c43", "After")), { width: 640, height: 400, colorScheme: "dark" });
 		console.error(`SELFTEST snap:url: ${u.ok ? `${u.entry.w}x${u.entry.h}` : u.error} -> ${u.ok && u.entry.w === 640 && u2.ok ? "OK" : "MISMATCH"}`);
 		// The dev browser view while its tab is hidden (the Viewer tab is not the active one).
+		// Chromium draws a native view only once it has been shown: a Viewer view that was never on screen has no frame to capture (empty
+		// image, see snap-main.js captureLive). So show the Viewer first, as a person would have, then hide it and capture.
+		switchTab("browser");
+		await wait(800);
 		await crust.snap.selftestLoad(page("#36c", "Live"));
 		switchTab("changes");
 		await wait(600);

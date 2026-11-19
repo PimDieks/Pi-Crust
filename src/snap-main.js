@@ -151,7 +151,8 @@ function register(ctx) {
 				await new Promise((r) => setTimeout(r, 300));
 			}
 		}
-		if (img.isEmpty()) return { ok: false, error: "Empty capture" };
+		// A native view Chromium has never drawn (its tab was never shown) gives an empty image even with stayHidden.
+		if (img.isEmpty()) return { ok: false, error: view.getVisible() ? "Empty capture" : "The page has not been drawn yet: open the Viewer tab once" };
 		if (skipEmpty && isBlank(img)) return { ok: false, blank: true, error: "The page is blank" };
 		if (unlessSameAs) {
 			const id = safeId(unlessSameAs);
