@@ -81,7 +81,7 @@ function register(ctx) {
 		const wc = pageWc();
 		const url = wc ? wc.getURL() : "";
 		if (ctx.browserTab && ctx.browserTab()?.kind !== "page") return true;
-		return !wc || !(/^(https?|pi-project):/i.test(url) || (ctx.selftest && /^data:text\/html/i.test(url)));
+		return !wc || !(/^https?:/i.test(url) || (/^pi-project:/i.test(url) && ctx.isProjectAddress(url)) || (ctx.selftest && /^data:text\/html/i.test(url)));
 	};
 
 	ipcMain.handle("design:tokens", async () => {

@@ -21,6 +21,7 @@ const pp = require("./project-protocol");
 const pf = require("./project-files");
 const K = require("./viewer-kind");
 const S = require("./viewer-tabs-store");
+const VO = require("./viewer-open-logic");
 
 const WEB_PARTITION = "persist:devbrowser";
 
@@ -31,6 +32,7 @@ function create(deps) {
 	const files = deps.files || pf;
 	const protocol = deps.protocol || pp;
 	const list = L.create();
+	const logic = VO.create({ files, protocol, breakMode: deps.selftest ? deps.breakMode : "" });
 	const views = new Map(); // tab id -> WebContentsView
 	let webSessionReady = false;
 	let bg = deps.nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0";
@@ -377,12 +379,53 @@ function create(deps) {
 		if (!t) return { ok: false, reason: "no tab" };
 		let u = String(address || "").trim();
 		if (!u) return { ok: false, reason: "empty" };
+		// What the bar does with typed text (viewer-open-logic.js checkTyped): a web address as before (no scheme: https://); text with no
+		// scheme that names an existing project file of a kind the Viewer shows opens that file; everything else is refused with a short
+		// reason in `message` (file: and other schemes, a path outside the project, a dot folder, ...).
+		const typed = logic.checkTyped(deps.getRoot(), u);
+		if (typed.refuse) return { ok: false, reason: "refused", message: typed.refuse };
+		if (typed.file) return openTyped(t, protocol.toAddress(deps.getRoot(), typed.file.path));
+		u = typed.web;
 		if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = `https://${u}`;
 		const a = accept(u); // no file:// or other schemes in the Viewer
-		if (!a.ok) return a;
+		if (!a.ok) return { ...a, message: VO.R.unknown };
 		if (a.session !== t.session) return moveTo(a.url);
 		load(t, a.url);
 		return { ok: true, tabId: t.id };
+	}
+	const sameAddress = (x, y) => {
+		try { return new URL(x).href === new URL(y).href; } catch { return x === y; }
+	};
+	// The tab that already shows this very file (not just a page of the same project).
+	const showing = (address) => list.tabs.find((t) => sameAddress(t.address, address)) || null;
+	// A project file typed in the bar: the tab that shows it is switched to; else a project tab loads it in place, as a typed address would;
+	// else (the active tab is a web page, another session) a new tab.
+	async function openTyped(t, address) {
+		const a = accept(address);
+		if (!a.ok) return { ok: false, reason: "refused", message: VO.R.invalid };
+		const same = showing(a.url);
+		if (same && same.id !== t.id) {
+			await setActive(same.id);
+			return { ok: true, tabId: same.id, reused: true };
+		}
+		if (L.isProjectSession(t.session)) {
+			load(t, a.url);
+			return { ok: true, tabId: t.id };
+		}
+		return openFile(a.url);
+	}
+	// The tree, the Editor and a dropped file (viewer-open-main.js has checked the path): switch to the tab that already shows the file, else
+	// open a new tab. At the limit nothing opens and the reason is in `message`.
+	async function openFile(address) {
+		const a = accept(address);
+		if (!a.ok || !L.isProjectSession(a.session)) return { ok: false, reason: "refused", message: VO.R.invalid };
+		const same = showing(a.url);
+		if (same) {
+			await setActive(same.id);
+			return { ok: true, tabId: same.id, reused: true };
+		}
+		const r = await createTab(a.url);
+		return r.ok ? r : { ok: false, reason: r.reason, message: r.reason === "limit" ? VO.R.limit : VO.R.invalid };
 	}
 
 	function action(name) {
@@ -569,6 +612,7 @@ function create(deps) {
 		activate: setActive,
 		close: closeTab,
 		navigate,
+		openFile,
 		action,
 		pick,
 		cancelPick,

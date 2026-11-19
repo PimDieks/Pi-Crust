@@ -1429,3 +1429,20 @@ button.is-disabled:hover { background: none; color: inherit; }
 .setup-card .sc-step { grid-template-columns: 22px minmax(0, 1fr); }
 .setup-card .sc-step .sc-actions { grid-column: 2; justify-content: flex-start; margin-top: var(--space-2xs); } /* the chat pane is narrow: the buttons go under the text */
 .setup-card .sc-step .sc-actions:empty { display: none; }
+
+/* Open a project file in the Viewer (src/viewer-open.js). The suggestions under the address bar and the tree's menu are popovers on the
+   popover layer (the page view is hidden while either is open); the drop hint covers the Viewer's slot on the panel layer while a file is dragged. */
+#url[aria-invalid="true"], #url[aria-invalid="true"]:focus { border-color: var(--err); }
+.url-suggest, .tree-menu { position: fixed; right: auto; bottom: auto; max-height: 320px; }
+.url-suggest .pal-item { min-height: 24px; }
+.url-suggest .pal-item .kind { width: 34px; }
+.url-suggest .pal-item .desc { max-width: 60%; }
+.tree-menu { min-width: calc(var(--control-h) * 6); }
+.tree-menu .pal-item { width: 100%; border: 0; background: none; text-align: left; font: inherit; font-size: var(--fs-md); color: var(--text); }
+.tree-menu .pal-item:hover, .tree-menu .pal-item:focus-visible { background: var(--selected); outline: none; }
+#drop-hint { position: absolute; inset: 0; z-index: var(--layer-panel); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-xs); padding: var(--space-xl); box-sizing: border-box; text-align: center; color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border: 2px dashed var(--accent); border-radius: var(--radius-md); }
+#drop-hint.over { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+#drop-hint span { color: var(--muted); font-size: var(--fs-sm); }
+.ed-viewer-btn { height: 18px; padding: 0 var(--space-xs); border: 1px solid var(--border); border-radius: var(--radius-full); background: none; color: var(--text); font-size: var(--fs-xs); cursor: pointer; }
+.ed-viewer-btn:hover { background: var(--hover); }
+.ed-viewer-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -23,7 +23,16 @@
 		if (NEEDS_PAGE_OR_IMAGE.has(feature)) return `Needs a web page or an image. This tab shows ${what(k)}.`;
 		return `Needs a web page. This tab shows ${what(k)}.`;
 	}
-	const api = { can, reason, norm, PAGE_ONLY, NEEDS_PAGE_OR_IMAGE };
+	// The kind of a project file by its name: "page", "image", "pdf" or "other" (not shown). Mirrors project-files.js kindOf (a test pins it).
+	const IMAGE_EXT = new Set(["svg", "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp"]);
+	function fileKind(name) {
+		const m = /\.([^./\\]+)$/.exec(String(name || ""));
+		const e = m ? m[1].toLowerCase() : "";
+		return e === "html" ? "page" : IMAGE_EXT.has(e) ? "image" : e === "pdf" ? "pdf" : "other";
+	}
+	// A project path the Viewer may be asked to show: a shown kind, and no segment that starts with a dot or is node_modules.
+	const viewable = (p) => fileKind(p) !== "other" && !String(p).split(/[\\/]/).some((s) => s.startsWith(".") || s.toLowerCase() === "node_modules");
+	const api = { can, reason, norm, fileKind, viewable, PAGE_ONLY, NEEDS_PAGE_OR_IMAGE };
 	if (typeof module === "object" && module.exports) module.exports = api;
 	else window.ViewerKind = api;
 })();

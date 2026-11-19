@@ -65,6 +65,7 @@ selftestSteps.push(async ({ snap, wait }) => {
 		}
 	});
 	hiddenWatch.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"] });
+	const LAYERS_SUGGESTIONS = ["docs/pricing.html", "docs/about-us.html", "img/logo.svg", "brochure.pdf", "index.html"].map((path) => ({ path, kind: path.endsWith(".pdf") ? "pdf" : path.endsWith(".svg") ? "image" : "page" }));
 	const LAYERS = ["base", "panel", "popover", "modal", "toast", "confirm"]; // lowest to highest, same order as styles.css
 	const BLOCKING = new Set(["modal", "confirm"]); // these dim and cover what is below on purpose
 	const cssLayer = (name) => getComputedStyle(document.documentElement).getPropertyValue(`--layer-${name}`).trim();
@@ -173,6 +174,45 @@ selftestSteps.push(async ({ snap, wait }) => {
 			open: () => openContextPanel(),
 			controls: () => [...$("#ctx-panel").querySelectorAll("button, input")],
 			close: () => closeContextPanel(),
+		},
+		// Opening a project file in the Viewer (src/viewer-open.js). Each one sits over the native page view, so each hides it while it is open
+		// (checked in section 9 below); they only pair with the corner toasts (their own focus and pointer rules close them when anything else opens).
+		{
+			name: "address-suggest",
+			layer: "popover",
+			with: ["toast", "update-card"],
+			root: () => $("#url-suggest"),
+			open: () => {
+				switchTab("browser");
+				$("#url").focus();
+				window.viewerOpen.testShow(LAYERS_SUGGESTIONS);
+			},
+			controls: () => [...$("#url-suggest").querySelectorAll(".pal-item")],
+			close: () => {
+				window.viewerOpen.closeSuggestions();
+				$("#url").blur();
+			},
+		},
+		{
+			name: "tree-menu",
+			layer: "popover",
+			with: ["toast", "update-card"],
+			root: () => $(".tree-menu"),
+			open: () => window.viewerOpen.testTree.open(),
+			controls: () => [...$(".tree-menu").querySelectorAll("[role=menuitem]")],
+			close: () => window.viewerOpen.testTree.close(),
+		},
+		{
+			name: "drop-hint",
+			layer: "panel",
+			with: ["toast", "update-card"],
+			root: () => $("#drop-hint"),
+			open: () => {
+				switchTab("browser");
+				window.viewerOpen.showHint();
+			},
+			controls: () => [$("#drop-hint")],
+			close: () => window.viewerOpen.hideHint(),
 		},
 		{ name: "new-chat-menu", layer: "popover", ...menuOf("wt-menu:not(.view-menu):not(.remote-menu)", () => $("#new-chat-menu")) },
 		(() => {
@@ -634,6 +674,27 @@ selftestSteps.push(async ({ snap, wait }) => {
 			$("#url").focus();
 		}
 		while ((await B.tabs()).tabs.length > 1) await B.closeTab((await B.tabs()).tabs[0].id);
+	}
+	// 9. Opening a project file in the Viewer (src/viewer-open.js): the address suggestions, the tree's menu and the drop hint all sit over the native
+	//    page view, so each hides it while it is open (reason in main's hidden set) and gives it back when it closes.
+	{
+		const problems = [];
+		switchTab("browser");
+		await wait(400);
+		for (const name of ["address-suggest", "tree-menu", "drop-hint"]) {
+			const o = byName(name);
+			const reason = { "address-suggest": "address-suggest", "tree-menu": "tree-menu", "drop-hint": "drop" }[name];
+			await o.open();
+			await wait(300);
+			const during = await crust.selftest.bounds();
+			if (!during.hidden.includes(reason) || during.visible) problems.push(`${name}: the page view is not hidden while it is open (hidden=${during.hidden}, visible=${during.visible})`);
+			await shut(o);
+			await wait(200);
+			const after = await crust.selftest.bounds();
+			if (after.hidden.includes(reason)) problems.push(`${name}: the page view stays hidden after it closes`);
+		}
+		if (problems.length) bad++;
+		console.error(`SELFTEST layers viewer open: the three overlays hide the page view and give it back: ${problems.length ? "MISMATCH " + problems.join("; ") : "OK"}`);
 	}
 	setTheme(was);
 	switchTab(tab);

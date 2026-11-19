@@ -94,6 +94,7 @@
 					<div id="browser-body">
 						<div id="browser-slot">
 							<div id="browser-error" hidden></div>
+							<div id="drop-hint" role="status" hidden><strong>Drop a file to open it here</strong><span>A web page (HTML), an image or a PDF from this project</span></div>
 						</div>
 						<aside id="tweak-panel" role="complementary" aria-label="Tweak element" hidden></aside>
 					</div>
@@ -155,7 +156,7 @@
 					<div id="editor-conflict" role="alert" hidden></div>
 					<div id="editor-host"></div>
 					<div id="editor-empty" class="empty">Click a file in the tree to open it.</div>
-					<div id="editor-status"><span id="editor-path" class="muted"></span><span class="spacer"></span><span id="editor-pos" class="muted"></span><span id="editor-lang" class="muted"></span></div>
+					<div id="editor-status"><span id="editor-path" class="muted"></span><button type="button" id="editor-open-viewer" class="ed-viewer-btn" title="Show this file in the Viewer tab" hidden>Open in Viewer</button><span class="spacer"></span><span id="editor-pos" class="muted"></span><span id="editor-lang" class="muted"></span></div>
 				</div>
 				</div>
 				<div class="hsplitter" id="bottom-splitter" hidden></div>
@@ -280,6 +281,7 @@
 		<script src="claude-setup-selftest.js"></script>
 		<script src="viewer-files-selftest.js"></script>
 		<script src="viewer-tabs-selftest.js"></script>
+		<script src="viewer-open-selftest.js"></script>
 		<script src="viewer-tabs-selftest-row.js"></script>
 		<script src="viewer-tabs-selftest-active.js"></script>
 		<script src="viewer-tabs-selftest-store.js"></script>
@@ -307,6 +309,7 @@
 		<script src="annotate.js"></script>
 		<script src="browser-tools.js"></script>
 		<script src="viewer-tab-row.js"></script>
+		<script src="viewer-open.js"></script>
 		<script src="mendix.js"></script>
 		<script src="turn-shots.js"></script>
 		<script src="timeline.js"></script>

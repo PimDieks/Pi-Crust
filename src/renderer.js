@@ -232,7 +232,7 @@ for (const b of document.querySelectorAll(".browser-bar [data-action]")) {
 $("#url-form").addEventListener("submit", (e) => {
 	e.preventDefault();
 	$("#browser-error").hidden = true;
-	crust.browser.navigate($("#url").value);
+	window.viewerOpen.go($("#url").value); // a project path opens its file; a refusal says why (src/viewer-open.js)
 });
 // Element picker: runs in the page; each picked element becomes a pill above the composer.
 // The full <browser-element> context is only added to the prompt when it is sent.
@@ -295,7 +295,7 @@ let shownTabId = null;
 crust.browser.onState((s) => {
 	liveBrowserUrl = s.url || "";
 	// The one address bar shows the active tab's address; a switch of tab replaces unsubmitted text too.
-	if (document.activeElement !== $("#url") || (s.activeId && s.activeId !== shownTabId)) $("#url").value = s.url || "";
+	if (document.activeElement !== $("#url") || (s.activeId && s.activeId !== shownTabId)) $("#url").value = window.viewerOpen ? viewerOpen.display(s.url || "") : s.url || ""; // a project file shows as its project path
 	shownTabId = s.activeId || shownTabId;
 	$('[data-action="back"]').disabled = !s.canGoBack;
 	$('[data-action="forward"]').disabled = !s.canGoForward;
@@ -353,6 +353,7 @@ async function renderDir(container, rel, depth) {
 	for (const ent of entries) {
 		const row = el("div", "node");
 		row.tabIndex = 0;
+		if (!ent.dir) row.draggable = true; // a file can be dragged onto the Viewer (src/viewer-open.js)
 		row.setAttribute("role", "treeitem");
 		row.dataset.path = ent.path;
 		row.style.paddingLeft = `${8 + depth * 14}px`;

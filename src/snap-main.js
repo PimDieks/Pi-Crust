@@ -121,7 +121,7 @@ function register(ctx) {
 		if (!VK.can(tabKind, feature) && !(ctx.selftest && process.env.PI_CRUST_SELFTEST_VIEWER_BREAK === "kind-capture")) return { ok: false, error: VK.reason(tabKind, feature) };
 		const tabId = ctx.browserTab?.()?.id;
 		if (onlyTab && onlyTab !== tabId) return { ok: false, error: "The Viewer switched to another tab" }; // an after shot is of the tab the before shot was of
-		if (!/^(https?|pi-project):/i.test(url) && !(ctx.selftest && /^data:text\/html/i.test(url))) return { ok: false, error: "The browser has no page open" };
+		if (!(/^https?:/i.test(url) || (/^pi-project:/i.test(url) && ctx.isProjectAddress(url))) && !(ctx.selftest && /^data:text\/html/i.test(url))) return { ok: false, error: "The browser has no page open" };
 		if (skipEmpty && ctx.browserFailed?.()) return { ok: false, error: "The page did not load" };
 		if (settleMs) await new Promise((r) => setTimeout(r, settleMs));
 		if (waitLoadMs && wc.isLoading()) {
@@ -213,7 +213,7 @@ function register(ctx) {
 			ses = wc.session;
 			ses.on("will-download", onDownload);
 			wc.on("will-navigate", (e, to) => {
-				if (!/^(https?|about|pi-project):/i.test(to) && !(ctx.selftest && /^data:text\/html/i.test(to))) e.preventDefault();
+				if (!(/^(https?|about):/i.test(to) || (/^pi-project:/i.test(to) && ctx.isProjectAddress(to))) && !(ctx.selftest && /^data:text\/html/i.test(to))) e.preventDefault();
 			});
 			await wc.loadURL("about:blank"); // CDP emulation commands hang on a window that never loaded anything
 			wc.debugger.attach("1.3");

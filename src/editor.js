@@ -356,6 +356,7 @@ function edRender() {
 		bar.append(el("span", "", keyLabel("This file was deleted on disk. Save (⌘S) to recreate it.")), el("span", "spacer"), close);
 	}
 	$("#editor-path").textContent = f ? f.path : "";
+	window.viewerOpen?.syncEditorButton(f ? f.path : null); // "Open in Viewer" for a page, image or PDF
 	$("#editor-lang").textContent = f?.model ? f.model.getLanguageId() : "";
 	edStatus();
 }

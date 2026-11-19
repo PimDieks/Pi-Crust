@@ -773,6 +773,18 @@ const viewerTabs = require("./viewer-tabs-main").create({
 	store: viewerStore,
 });
 viewerTabs.register(ipcMain);
+// Opening a project file in the Viewer: address-bar suggestions, and the one door for the tree menu, the Editor button and a dropped file.
+require("./viewer-open-main").register({
+	ipcMain,
+	viewerTabs,
+	getRoot: () => (SELFTEST && projectRootOverride) || REPO,
+	hardenGitArgs,
+	get env() {
+		return ENV;
+	},
+	selftest: SELFTEST,
+	breakMode: SELFTEST ? process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" : "", // the deliberate breaks of the step viewer-open (open-tree, open-drop)
+});
 
 ipcMain.handle("browser:bounds", (_e, b) => {
 	browserBounds = b;
@@ -834,7 +846,7 @@ ipcMain.on("ui:focus", () => {
 });
 // PI_CRUST_SELFTEST_ONLY=timeline,annotate: run only those tour steps (by feature script name; "core" = the built-in tour).
 const SELFTEST_ONLY = SELFTEST ? (process.env.PI_CRUST_SELFTEST_ONLY || "").split(",").map((s) => s.trim().toLowerCase().replace(/\.js$/, "")).filter(Boolean) : [];
-ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY, selftestNoPrompt: SELFTEST && process.env.PI_CRUST_SELFTEST_NOPROMPT === "1", selftestNoPi: SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1", selftestClaudeFake: !!(claudeSetup && claudeSetup.fake), selftestClaudeBreak: SELFTEST && process.env.PI_CRUST_SELFTEST_CLAUDE_BREAK === "1" }));
+ipcMain.handle("app:info", () => ({ repo: REPO, devUrl: DEV_URL, selftest: SELFTEST, selftestOnly: SELFTEST_ONLY, selftestNoPrompt: SELFTEST && process.env.PI_CRUST_SELFTEST_NOPROMPT === "1", selftestNoPi: SELFTEST && process.env.PI_CRUST_SELFTEST_NO_PI === "1", selftestClaudeFake: !!(claudeSetup && claudeSetup.fake), selftestClaudeBreak: SELFTEST && process.env.PI_CRUST_SELFTEST_CLAUDE_BREAK === "1", selftestViewerBreak: SELFTEST ? process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" : "" }));
 
 // ---------------------------------------------------------------------------
 // Repos: recent list, discovery, switching.
@@ -1294,6 +1306,11 @@ function createWindow() {
 	const openLink = (url) => {
 		try {
 			const proto = new URL(url).protocol;
+			// A project address (pi-project://) only when it is a file of the open project (project-protocol.js belongsToProject).
+			if (proto === "pi-project:") {
+				if (projectProtocol.belongsToProject((SELFTEST && projectRootOverride) || REPO, url)) viewerTabs.openFile(url).catch(() => {});
+				return;
+			}
 			if (proto !== "http:" && proto !== "https:") return;
 		} catch {
 			return;
@@ -1515,6 +1532,8 @@ const ctx = {
 	// a tool uses to clean up on the tab it leaves (Viewer tabs, task 6).
 	browserTab: () => viewerTabs.activeInfo(),
 	captureTarget: (address) => viewerTabs.captureTarget(address),
+	// A pi-project address belongs to the OPEN project (snap-main.js: captureLive and its offscreen window accept no other).
+	isProjectAddress: (address) => projectProtocol.belongsToProject((SELFTEST && projectRootOverride) || REPO, address),
 	browserViewOf: (id) => viewerTabs.viewOf(id),
 	onTabLeave: (fn) => viewerTabs.onLeave(fn),
 	onTabEnter: (fn) => viewerTabs.onEnter(fn),
@@ -1591,6 +1610,7 @@ app.whenReady().then(() => {
 	// pi-project:// on its own session only (never persist:devbrowser): the handler, the request guard, no permissions, no downloads, no popups.
 	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
 	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, getWin: () => win, devUrl: DEV_URL, userData: () => app.getPath("userData") });
+	if (SELFTEST) require("./viewer-open-selftest-main").register({ ipcMain, viewerTabs, setRoot: (r) => (projectRootOverride = r), getWin: () => win, ctxView: () => ctx.browserView, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
 	if (SELFTEST) require("./viewer-files-selftest-main").register({ ipcMain, BrowserWindow, session: electronSession, setRoot: (r) => (projectRootOverride = r) });
 	buildMenu();
 	createWindow();
