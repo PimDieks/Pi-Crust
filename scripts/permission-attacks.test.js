@@ -245,15 +245,15 @@ test("S8: describeOldCopy names the file and the folder (home shown as ~) and th
 });
 test("S8: the old-copy folder is shown as its real path: ~ only inside home, whole outside, separators per platform", () => {
 	const S = L.shownExtensionsDir;
-	assert.equal(S("C:\\Users\\Pim\\.pi\\agent", "C:\\Users\\Pim", "win32").dir, "~\\.pi\\agent\\extensions");
-	assert.equal(S("C:\\Users\\Pim\\.pi\\agent", "C:\\Users\\Pim", "win32").full, "C:\\Users\\Pim\\.pi\\agent\\extensions");
-	assert.equal(S("/Users/pim/.pi/agent", "/Users/pim", "darwin").dir, "~/.pi/agent/extensions");
-	assert.equal(S("/Users/pim/.pi/agent", "/Users/pim", "darwin").full, "/Users/pim/.pi/agent/extensions");
-	assert.equal(S("D:\\agent", "C:\\Users\\Pim", "win32").dir, "D:\\agent\\extensions");
-	assert.equal(S("/opt/pi", "/home/pim", "linux").dir, "/opt/pi/extensions");
-	assert.equal(S("/home/pimmer/agent", "/home/pim", "linux").dir, "/home/pimmer/agent/extensions", "a sibling sharing a name prefix is not inside home");
-	assert.equal(S("C:\\Users\\Pim\\work\\agent", "C:\\Users\\Pim", "win32").dir, "~\\work\\agent\\extensions");
-	assert.equal(S("c:\\users\\pim\\.pi\\agent", "C:\\Users\\Pim", "win32").dir, "~\\.pi\\agent\\extensions");
+	assert.equal(S("C:\\Users\\alex\\.pi\\agent", "C:\\Users\\alex", "win32").dir, "~\\.pi\\agent\\extensions");
+	assert.equal(S("C:\\Users\\alex\\.pi\\agent", "C:\\Users\\alex", "win32").full, "C:\\Users\\alex\\.pi\\agent\\extensions");
+	assert.equal(S("/Users/alex/.pi/agent", "/Users/alex", "darwin").dir, "~/.pi/agent/extensions");
+	assert.equal(S("/Users/alex/.pi/agent", "/Users/alex", "darwin").full, "/Users/alex/.pi/agent/extensions");
+	assert.equal(S("D:\\agent", "C:\\Users\\alex", "win32").dir, "D:\\agent\\extensions");
+	assert.equal(S("/opt/pi", "/home/alex", "linux").dir, "/opt/pi/extensions");
+	assert.equal(S("/home/alexis/agent", "/home/alex", "linux").dir, "/home/alexis/agent/extensions", "a sibling sharing a name prefix is not inside home");
+	assert.equal(S("C:\\Users\\alex\\work\\agent", "C:\\Users\\alex", "win32").dir, "~\\work\\agent\\extensions");
+	assert.equal(S("c:\\users\\alex\\.pi\\agent", "C:\\Users\\alex", "win32").dir, "~\\.pi\\agent\\extensions");
 	assert.equal(S("/x/agent", "/", "linux").dir, "/x/agent/extensions", "a home of / never shortens");
 	// on this machine: the text names the folder and the file Show the file reveals is in exactly that folder
 	const home = fs.mkdtempSync(path.join(tmp, "home2-"));
