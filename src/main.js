@@ -35,7 +35,6 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const IGNORED = new Set([".git", "node_modules", "dist", ".turbo", ".next", "coverage", ".DS_Store", "__generated__"]);
 
 let win;
-let browserView;
 let browserBounds = { x: 0, y: 0, width: 0, height: 0 };
 let lastRealBounds = { x: 0, y: 0, width: 0, height: 0 }; // last non-empty bounds
 let browserHidden = new Set(); // reasons: "tab", "modal"
@@ -685,91 +684,49 @@ let zoomLevel = 0;
 function setZoom(level) {
 	zoomLevel = Math.max(-3, Math.min(5, level));
 	win?.webContents.setZoomLevel(zoomLevel);
-	browserView?.webContents.setZoomLevel(zoomLevel);
+	viewerTabs.setZoom(zoomLevel);
 	applyBrowserBounds();
 	writeSettings({ zoomLevel });
 }
 const zoomFactor = () => (win ? win.webContents.getZoomFactor() : 1);
 
-// The native view keeps its real bounds while hidden (setVisible(false)) instead of collapsing to 0x0, so
-// capturePage(..., {stayHidden:true}) still has a real size to render at (before/after screenshots).
+// The native views keep their real bounds while hidden (setVisible(false)) instead of collapsing to 0x0, so
+// capturePage(..., {stayHidden:true}) still has a real size to render at (before/after screenshots). Every tab gets the same bounds;
+// only the active one is shown (viewer-tabs-main.js).
 function applyBrowserBounds() {
-	if (!browserView) return;
+	if (!win) return;
 	const z = zoomFactor();
 	// While hidden, a zero-size slot (its tab is not shown) must not shrink the view: keep the last real size.
 	const css = browserHidden.size && !(browserBounds.width > 0 && browserBounds.height > 0) ? lastRealBounds : browserBounds;
-	browserView.setBounds({
-		x: Math.round(css.x * z),
-		y: Math.round(css.y * z),
-		width: Math.max(0, Math.round(css.width * z)),
-		height: Math.max(0, Math.round(css.height * z)),
-	});
-	const visible = browserHidden.size === 0;
-	// A view that gets hidden while it has keyboard focus would swallow keystrokes meant for the app: hand focus back.
-	const hiding = !visible && browserView.getVisible();
-	const hadFocus = hiding && browserView.webContents.isFocused();
-	browserView.setVisible(visible);
-	if (hadFocus) win?.webContents.focus();
+	viewerTabs.layout(
+		{ x: Math.round(css.x * z), y: Math.round(css.y * z), width: Math.max(0, Math.round(css.width * z)), height: Math.max(0, Math.round(css.height * z)) },
+		browserHidden.size === 0,
+	);
 }
 
-function createBrowserView() {
-	browserView = new WebContentsView({
-		webPreferences: { partition: "persist:devbrowser", contextIsolation: true, sandbox: true },
-	});
-	// Until a page paints (and for pages without their own background) show the app
-	// background, not white. The renderer sends the exact colour on theme changes.
-	browserView.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#eef0f0");
-	win.contentView.addChildView(browserView);
-	const wc = browserView.webContents;
-	// Dev browser: no permission is granted by default; only clipboard writes and fullscreen for local pages.
-	const allowed = new Set(["clipboard-sanitized-write", "fullscreen"]);
-	const devSession = wc.session;
-	devSession.setPermissionRequestHandler((_wc, permission, callback, details) => callback(allowed.has(permission) && isLocal(details?.requestingUrl || _wc.getURL())));
-	devSession.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && isLocal(origin));
-	const report = () =>
-		send("browser:state", { url: wc.getURL(), title: wc.getTitle(), canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward(), loading: wc.isLoading() });
-	wc.on("did-start-loading", report);
-	wc.on("did-stop-loading", report);
-	wc.on("did-navigate", () => {
-		wc.setZoomLevel(zoomLevel); // Chromium keeps zoom per site; keep the app-wide level
-		report();
-	});
-	wc.on("did-navigate-in-page", report);
-	wc.on("page-title-updated", report);
-	// A failed page shows Chromium's own (white) error page on top of the UI. Hide the view
-	// instead so the themed message in #browser-error shows; show it again on the next load.
-	wc.on("did-fail-load", (_e, code, desc, url, isMain) => {
-		if (!isMain || code === -3) return;
-		browserHidden.add("error");
+// The Viewer's tabs (spec: Viewer tabs and project files). The first tab loads the dev address, as the one view always did.
+const viewerTabs = require("./viewer-tabs-main").create({
+	WebContentsView,
+	nativeTheme,
+	shell,
+	getWin: () => win,
+	send: (ch, p) => send(ch, p),
+	isLocal,
+	isWin: IS_WIN,
+	devUrl: DEV_URL,
+	getRoot: () => (SELFTEST && projectRootOverride) || REPO,
+	getZoomLevel: () => zoomLevel,
+	relayout: () => applyBrowserBounds(),
+	// The active tab's load failed: hide the view so the themed message in #browser-error shows (same as before, per tab now).
+	setErrorHidden: (on) => {
+		if (on === browserHidden.has("error")) return;
+		if (on) browserHidden.add("error");
+		else browserHidden.delete("error");
 		applyBrowserBounds();
-		send("browser:error", { code, desc, url });
-	});
-	wc.on("did-start-navigation", (details) => {
-		if (!details.isMainFrame || details.isSameDocument || !browserHidden.delete("error")) return;
-		applyBrowserBounds();
-	});
-	// App shortcuts keep working while the embedded page has focus.
-	wc.on("before-input-event", (event, input) => {
-		if (input.type !== "keyDown") return;
-		const k = input.key.toLowerCase();
-		// The CmdOrCtrl modifier: ⌘ on macOS, Ctrl on Windows (sent on as ctrl: true, which the UI replays).
-		const mod = IS_WIN ? input.control && !input.meta : input.meta && !input.control;
-		const appKey =
-			(mod && (["k", "1", "2", "3", "4", "5", "j", "n", "o", "[", "]", "{", "}", "c"].includes(k) ? !input.alt : k === "b" || (k === "f" && input.shift && !input.alt))) ||
-			(input.control && !input.meta && (input.code === "Backquote" || input.code === "Tab")) ||
-			(["1", "2", "3"].includes(k) && input.control && (IS_WIN ? input.alt && !input.meta : input.meta && !input.alt)); // view switch
-		if (appKey) {
-			event.preventDefault();
-			send("app:shortcut", { key: input.key, code: input.code, meta: input.meta, alt: input.alt, ctrl: input.control, shift: input.shift });
-		}
-	});
-	// Popups (e.g. a login window) open as real windows sharing the same session.
-	wc.setWindowOpenHandler(({ url }) =>
-		/^https?:/i.test(url) ? { action: "allow", overrideBrowserWindowOptions: { width: 900, height: 750, parent: win } } : { action: "deny" },
-	);
-	require("./browser-tools-main").attach?.(wc);
-	wc.loadURL(DEV_URL).catch(() => {});
-}
+	},
+	breakMode: SELFTEST ? process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" : "",
+});
+viewerTabs.register(ipcMain);
 
 ipcMain.handle("browser:bounds", (_e, b) => {
 	browserBounds = b;
@@ -786,34 +743,16 @@ ipcMain.handle("browser:hide", (_e, hidden, reason = "modal") => {
 ipcMain.handle("browser:theme", (_e, setting, bg) => {
 	nativeTheme.themeSource = ["light", "dark"].includes(setting) ? setting : "system";
 	if (typeof bg === "string" && /^(#[0-9a-f]{3,8}|rgba?\([\d.,\s]+\))$/i.test(bg)) {
-		browserView?.setBackgroundColor(bg);
+		viewerTabs.setBackground(bg);
 		win?.setBackgroundColor(bg);
 	}
 });
-ipcMain.handle("browser:navigate", (_e, url) => {
-	let u = String(url || "").trim();
-	if (!u || !browserView) return;
-	if (!/^[a-z]+:\/\//i.test(u)) u = `https://${u}`;
-	if (!/^https?:\/\//i.test(u)) return; // no file:// or other schemes in the dev browser
-	browserView.webContents.loadURL(u).catch(() => {});
-});
-ipcMain.handle("browser:action", (_e, action) => {
-	if (!browserView) return;
-	const wc = browserView.webContents;
-	if (action === "back" && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
-	if (action === "forward" && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
-	if (action === "reload") wc.reload();
-	if (action === "devtools") wc.toggleDevTools();
-	if (action === "external") {
-		const url = wc.getURL();
-		if (/^https?:\/\//i.test(url)) shell.openExternal(url);
-	}
-});
+ipcMain.handle("browser:navigate", (_e, url) => viewerTabs.navigate(url));
+ipcMain.handle("browser:action", (_e, action) => viewerTabs.action(action));
 
 ipcMain.handle("browser:pick", async (_e, opts) => {
-	if (!browserView) return { cancelled: true };
 	try {
-		const r = await require("./picker").togglePick(browserView, REPO, opts || {});
+		const r = await viewerTabs.pick(REPO, opts);
 		require("./browser-tools-main").notePick?.(r)?.catch(() => {}); // last picked element = target for forced states
 		return r;
 	} catch (e) {
@@ -1311,7 +1250,7 @@ function createWindow() {
 		} catch {
 			return;
 		}
-		if (isLocal(url)) browserView?.webContents.loadURL(url).catch(() => {});
+		if (isLocal(url)) viewerTabs.navigate(url).catch(() => {});
 		else shell.openExternal(url);
 	};
 	win.webContents.setWindowOpenHandler(({ url }) => {
@@ -1324,7 +1263,7 @@ function createWindow() {
 			openLink(url);
 		}
 	});
-	createBrowserView();
+	viewerTabs.init();
 	win.webContents.once("did-finish-load", () => {
 		if (SELFTEST) runSelftest();
 	});
@@ -1387,7 +1326,7 @@ if (SELFTEST) {
 	ipcMain.handle("selftest:capture", (_e, name, crop) => capture(name, crop));
 	ipcMain.handle("selftest:zoom", (_e, level) => setZoom(level));
 	ipcMain.handle("selftest:resize", (_e, w, h) => (win.setSize(Math.max(1, Math.round(w)), Math.max(1, Math.round(h))), win.getSize()));
-	ipcMain.handle("selftest:bounds", () => ({ view: browserView.getBounds(), z: zoomFactor(), visible: browserView.getVisible(), hidden: [...browserHidden] }));
+	ipcMain.handle("selftest:bounds", () => ({ view: viewerTabs.activeView().getBounds(), z: zoomFactor(), visible: viewerTabs.activeView().getVisible(), hidden: [...browserHidden] }));
 	// The offscreen selftest window is never focused: let the page behave as if it were (so :focus-visible rings show).
 	ipcMain.handle("selftest:focusEmulation", async (_e, on) => {
 		const d = win.webContents.debugger;
@@ -1404,7 +1343,7 @@ function buildMenu() {
 		{
 			label: "View",
 			submenu: [
-				{ label: "Reload Page in Viewer Tab", accelerator: "CmdOrCtrl+R", click: () => browserView?.webContents.reload() },
+				{ label: "Reload Page in Viewer Tab", accelerator: "CmdOrCtrl+R", click: () => viewerTabs.reloadActive() },
 				{ label: "Toggle Crust DevTools", accelerator: "Alt+CmdOrCtrl+I", click: () => win?.webContents.toggleDevTools() },
 				{ type: "separator" },
 				{ label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => setZoom(0) },
@@ -1522,7 +1461,7 @@ const ctx = {
 		return win;
 	},
 	get browserView() {
-		return browserView;
+		return viewerTabs.activeView(); // the active tab's view
 	},
 	// The dev browser's last load failed (Chromium's error page, hidden behind #browser-error): nothing to screenshot.
 	browserFailed: () => browserHidden.has("error"),
@@ -1596,6 +1535,7 @@ app.whenReady().then(() => {
 	app.setName("Pi Crust");
 	// pi-project:// on its own session only (never persist:devbrowser): the handler, the request guard, no permissions, no downloads, no popups.
 	projectProtocol.register({ session: electronSession, app, getRoot: () => (SELFTEST && projectRootOverride) || REPO, selftest: SELFTEST, breakMode: process.env.PI_CRUST_SELFTEST_VIEWER_BREAK || "" });
+	if (SELFTEST) require("./viewer-tabs-selftest-main").register({ ipcMain, viewerTabs, session: electronSession, setRoot: (r) => (projectRootOverride = r), ctxView: () => ctx.browserView, devUrl: DEV_URL });
 	if (SELFTEST) require("./viewer-files-selftest-main").register({ ipcMain, BrowserWindow, session: electronSession, setRoot: (r) => (projectRootOverride = r) });
 	buildMenu();
 	createWindow();

@@ -283,7 +283,7 @@ crust.browser.onState((s) => {
 	if (document.activeElement !== $("#url")) $("#url").value = s.url || "";
 	$('[data-action="back"]').disabled = !s.canGoBack;
 	$('[data-action="forward"]').disabled = !s.canGoForward;
-	if (s.loading) $("#browser-error").hidden = true;
+	if (s.loading || s.error === null) $("#browser-error").hidden = true; // the active tab has no load error (the event carries it per tab)
 });
 crust.browser.onError((err) => {
 	const box = $("#browser-error");

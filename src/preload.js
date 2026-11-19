@@ -121,6 +121,10 @@ contextBridge.exposeInMainWorld("crust", {
 		setBounds: (b) => ipcRenderer.invoke("browser:bounds", b),
 		hide: (hidden, reason) => ipcRenderer.invoke("browser:hide", hidden, reason),
 		navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
+		tabs: () => ipcRenderer.invoke("browser:tabs"),
+		createTab: (address) => ipcRenderer.invoke("browser:tabCreate", address),
+		activateTab: (id) => ipcRenderer.invoke("browser:tabActivate", id),
+		closeTab: (id) => ipcRenderer.invoke("browser:tabClose", id),
 		setTheme: (setting, bg) => ipcRenderer.invoke("browser:theme", setting, bg),
 		pick: (opts) => ipcRenderer.invoke("browser:pick", opts),
 		insertCss: (css) => ipcRenderer.invoke("browser:insertCss", css),
@@ -243,6 +247,7 @@ contextBridge.exposeInMainWorld("crust", {
 		resize: (w, h) => ipcRenderer.invoke("selftest:resize", w, h),
 		bounds: () => ipcRenderer.invoke("selftest:bounds"),
 		focusEmulation: (on) => ipcRenderer.invoke("selftest:focusEmulation", on),
+		viewerTabs: (op) => ipcRenderer.invoke("viewertabs:selftest", op), // selftest only: the main side answers only in a selftest run
 		viewerFiles: () => ipcRenderer.invoke("viewerfiles:selftest"), // selftest only: the main side answers only in a selftest run
 	},
 });
